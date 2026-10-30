@@ -1,11 +1,11 @@
 use std::sync::Mutex;
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 struct MdnsState(Mutex<Option<ServiceDaemon>>);
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct MdnsService {
     instance: String,
     hostname: String,
@@ -21,8 +21,8 @@ fn nearcast_mdns_start(app: AppHandle, state: State<'_, MdnsState>) -> Result<()
     std::thread::spawn(move || {
         for event in receiver.iter() {
             let ServiceEvent::ServiceResolved(info) = event else { continue };
-            let txt = info.txt_properties.iter().map(|property| (property.key().to_string(), property.val_str().to_string())).collect();
-            let service = MdnsService {instance: info.fullname, hostname: info.hostname, port: info.port, txt};
+            let txt = info.get_properties().iter().map(|property| (property.key().to_string(), property.val_str().to_string())).collect();
+            let service = MdnsService {instance: info.get_fullname().to_string(), hostname: info.get_hostname().to_string(), port: info.get_port(), txt};
             let _ = app.emit("nearcast://mdns-service", service);
         }
     });
@@ -37,7 +37,8 @@ fn nearcast_mdns_stop(state: State<'_, MdnsState>) -> Result<(), String> {
 
 #[cfg(windows)]
 mod pointer {
-    use windows::Win32::UI::Input::Pointer::{InitializeTouchInjection, InjectTouchInput, POINTER_TOUCH_INFO, PT_TOUCH, TOUCH_FEEDBACK_NONE, POINTER_FLAG_INCONTACT, POINTER_FLAG_INRANGE, POINTER_FLAG_DOWN, POINTER_FLAG_UPDATE, POINTER_FLAG_UP, POINTER_FLAG_CANCELED};
+    use windows::Win32::UI::Input::Pointer::{InitializeTouchInjection, InjectTouchInput, POINTER_TOUCH_INFO, TOUCH_FEEDBACK_NONE, POINTER_FLAG_INCONTACT, POINTER_FLAG_INRANGE, POINTER_FLAG_DOWN, POINTER_FLAG_UPDATE, POINTER_FLAG_UP, POINTER_FLAG_CANCELED};
+    use windows::Win32::UI::WindowsAndMessaging::PT_TOUCH;
     use windows::Win32::Foundation::POINT;
     use std::sync::Mutex;
     static ACTIVE: Mutex<Vec<u32>> = Mutex::new(Vec::new());
