@@ -1,4 +1,4 @@
-import {TouchbackFrameKind, TouchbackPhase, decodeTouchbackFrame} from './codec.mjs';
+import {TouchbackFrameKind, TouchbackPhase, decodeTouchbackFrame, decodeTouchbackBindPayload} from './codec.mjs';
 
 const sameBinding = (a, b) => a && b && a.runtimeInstanceId === b.runtimeInstanceId && a.sessionId === b.sessionId && a.sessionGeneration === b.sessionGeneration &&
   a.slotId === b.slotId && a.bindingGeneration === b.bindingGeneration && a.lifecycleGeneration === b.lifecycleGeneration && a.bindingToken === b.bindingToken;
@@ -30,6 +30,12 @@ export class TouchbackSession {
       this.resetPending = false; this.nextSequence = 0; return {status: 'accepted'};
     }
     return {status: 'accepted'};
+  }
+
+  acceptBindFrame(frame) {
+    const binding = decodeTouchbackBindPayload(frame.controlPayload);
+    if (!binding) return {status: 'invalid_state'};
+    return this.accept({kind: TouchbackFrameKind.BIND, binding: {...binding, epoch: frame.epoch}});
   }
 
   acceptBytes(bytes) {

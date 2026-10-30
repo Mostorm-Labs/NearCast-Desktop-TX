@@ -88,3 +88,18 @@ export function decodeTouchbackFrame(input, limits) {
 }
 
 export {crc32};
+
+export function decodeTouchbackBindPayload(input) {
+  const bytes = input instanceof Uint8Array ? input : input instanceof ArrayBuffer ? new Uint8Array(input) : new Uint8Array(input?.buffer ?? [], input?.byteOffset ?? 0, input?.byteLength ?? 0);
+  if (bytes.byteLength < 6 + 8 + 4 + 8 + 8 || bytes.byteLength > 1024) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength); let offset = 0;
+  const readString = () => { if (offset + 2 > bytes.byteLength) return null; const length = view.getUint16(offset, true); offset += 2; if (!length || length > 128 || offset + length > bytes.byteLength) return null; const value = new TextDecoder().decode(bytes.subarray(offset, offset + length)); offset += length; return value; };
+  const runtimeInstanceId = readString(); const sessionId = readString(); const bindingToken = readString();
+  if (!runtimeInstanceId || !sessionId || !bindingToken || offset + 8 + 4 + 8 + 8 !== bytes.byteLength) return null;
+  const sessionGeneration = Number(view.getBigUint64(offset, true)); offset += 8;
+  const slotId = view.getUint32(offset, true); offset += 4;
+  const bindingGeneration = Number(view.getBigUint64(offset, true)); offset += 8;
+  const lifecycleGeneration = Number(view.getBigUint64(offset, true));
+  if (![sessionGeneration, bindingGeneration, lifecycleGeneration].every(Number.isSafeInteger) || !sessionGeneration || !bindingGeneration || !lifecycleGeneration) return null;
+  return {runtimeInstanceId, sessionId, bindingToken, sessionGeneration, slotId, bindingGeneration, lifecycleGeneration};
+}
