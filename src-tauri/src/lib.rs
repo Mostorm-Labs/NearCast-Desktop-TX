@@ -7,25 +7,52 @@ struct MdnsState(Mutex<Option<ServiceDaemon>>);
 
 #[derive(Debug, Clone, Serialize)]
 struct MdnsService {
+    service_type: String,
     instance: String,
     hostname: String,
     port: u16,
+    addresses: Vec<String>,
     txt: std::collections::BTreeMap<String, String>,
+}
+
+fn spawn_mdns_browser(app: &AppHandle, receiver: mdns_sd::Receiver<ServiceEvent>, service_type: &'static str) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        for event in receiver.iter() {
+            match event {
+                ServiceEvent::ServiceResolved(info) => {
+                    let txt = info.get_properties().iter().map(|property| (property.key().to_string(), property.val_str().to_string())).collect();
+                    let addresses = info.get_addresses().iter().map(ToString::to_string).collect();
+                    let service = MdnsService {
+                        service_type: service_type.to_string(),
+                        instance: info.get_fullname().to_string(),
+                        hostname: info.get_hostname().to_string(),
+                        port: info.get_port(),
+                        addresses,
+                        txt,
+                    };
+                    let _ = app.emit("nearcast://mdns-service", service);
+                }
+                ServiceEvent::ServiceRemoved(_, fullname) => {
+                    let _ = app.emit("nearcast://mdns-service-removed", serde_json::json!({
+                        "service_type": service_type,
+                        "instance": fullname,
+                    }));
+                }
+                _ => {}
+            }
+        }
+    });
 }
 
 #[tauri::command]
 fn nearcast_mdns_start(app: AppHandle, state: State<'_, MdnsState>) -> Result<(), String> {
     let daemon = ServiceDaemon::new().map_err(|error| error.to_string())?;
-    let receiver = daemon.browse("_nearcast._tcp.local.").map_err(|error| error.to_string())?;
+    for service_type in ["_nearcast._tcp.local.", "_airplay._tcp.local.", "_raop._tcp.local."] {
+        let receiver = daemon.browse(service_type).map_err(|error| error.to_string())?;
+        spawn_mdns_browser(&app, receiver, service_type);
+    }
     *state.0.lock().map_err(|_| "mDNS state poisoned".to_string())? = Some(daemon);
-    std::thread::spawn(move || {
-        for event in receiver.iter() {
-            let ServiceEvent::ServiceResolved(info) = event else { continue };
-            let txt = info.get_properties().iter().map(|property| (property.key().to_string(), property.val_str().to_string())).collect();
-            let service = MdnsService {instance: info.get_fullname().to_string(), hostname: info.get_hostname().to_string(), port: info.get_port(), txt};
-            let _ = app.emit("nearcast://mdns-service", service);
-        }
-    });
     Ok(())
 }
 
