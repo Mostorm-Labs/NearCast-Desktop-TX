@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "NearCast Desktop TX",
+  "version": "0.1.0",
+  "identifier": "com.mostorm.nearcast.desktop.tx",
+  "build": {"frontendDist": "../dist"},
+  "app": {"windows": [{"title": "NearCast Desktop TX", "width": 960, "height": 640}], "security": {"csp": null}},
+  "bundle": {"active": false}
+}
