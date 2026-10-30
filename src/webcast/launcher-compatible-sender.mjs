@@ -27,9 +27,23 @@ export class LauncherCompatibleWebCastSender {
       }
       const result = this.session.acceptBytes(message.data);
       if (result.status === 'applied') { this.stats.binaryAccepted += 1; this.onTouchback(result.frame); }
-      else this.stats.binaryRejected += 1;
+      else {
+        this.stats.binaryRejected += 1;
+        if (result.status === 'reset_required') this.requestReset();
+      }
       return result;
     } catch (error) { this.stats.binaryRejected += 1; return {status: 'invalid_state', error}; }
+  }
+  requestReset() {
+    if (!this.control || this.control.readyState !== 'open' || !Number.isInteger(this.session.epoch) || this.session.epoch >= 0xffffffff || this.session.resetPending && this.session.epoch === this.lastResetEpoch) return false;
+    const epoch = this.session.epoch + 1;
+    const result = this.session.accept({kind: TouchbackFrameKind.RESET, epoch});
+    if (result.status !== 'reset') return false;
+    const bytes = encodeTouchbackFrame({kind: TouchbackFrameKind.RESET, epoch, sequence: 0}, this.session.limits);
+    if (!bytes) return false;
+    this.lastResetEpoch = epoch;
+    this.control.send(bytes);
+    return true;
   }
   handleControlFrame(frame) {
     if (!this.session.binding && frame.kind !== TouchbackFrameKind.BIND) return {status: 'stale'};

@@ -89,6 +89,22 @@ export function decodeTouchbackFrame(input, limits) {
 
 export {crc32};
 
+export function encodeTouchbackBindPayload(payload) {
+  const values = [payload?.runtimeInstanceId, payload?.sessionId, payload?.bindingToken];
+  if (values.some(value => typeof value !== 'string' || value.length === 0 || value.length > 128)) return null;
+  const encoded = values.map(value => new TextEncoder().encode(value));
+  if ([payload?.sessionGeneration, payload?.bindingGeneration, payload?.lifecycleGeneration].some(value => !Number.isSafeInteger(value) || value <= 0) || !Number.isSafeInteger(payload?.slotId) || payload.slotId < 0 || payload.slotId > 0xffffffff) return null;
+  const size = 6 + encoded.reduce((total, value) => total + value.length, 0) + 8 + 4 + 8 + 8;
+  if (size > 1024) return null;
+  const out = new Uint8Array(size); const view = new DataView(out.buffer); let offset = 0;
+  for (const value of encoded) { view.setUint16(offset, value.length, true); offset += 2; out.set(value, offset); offset += value.length; }
+  view.setBigUint64(offset, BigInt(payload.sessionGeneration), true); offset += 8;
+  view.setUint32(offset, payload.slotId, true); offset += 4;
+  view.setBigUint64(offset, BigInt(payload.bindingGeneration), true); offset += 8;
+  view.setBigUint64(offset, BigInt(payload.lifecycleGeneration), true);
+  return out.buffer;
+}
+
 export function decodeTouchbackBindPayload(input) {
   const bytes = input instanceof Uint8Array ? input : input instanceof ArrayBuffer ? new Uint8Array(input) : new Uint8Array(input?.buffer ?? [], input?.byteOffset ?? 0, input?.byteLength ?? 0);
   if (bytes.byteLength < 6 + 8 + 4 + 8 + 8 || bytes.byteLength > 1024) return null;

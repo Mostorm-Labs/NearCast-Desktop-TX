@@ -7,6 +7,8 @@ import {
   TouchbackPhase,
   decodeTouchbackFrame,
   encodeTouchbackFrame,
+  decodeTouchbackBindPayload,
+  encodeTouchbackBindPayload,
 } from '../src/touchback/codec.mjs';
 
 test('encodes the canonical little-endian 28/16 touchback layout', () => {
@@ -38,4 +40,9 @@ test('rejects corrupted, truncated, unknown, and over-limit frames before alloca
   const truncated = new Uint8Array(encodeTouchbackFrame({kind: TouchbackFrameKind.BATCH, records: [{contactId: 1, phase: TouchbackPhase.DOWN, x: 1, y: 2}]}, {maxBytes: 1024, maxRecords: 2})).subarray(0, clean.length - 1);
   assert.throws(() => decodeTouchbackFrame(truncated, {maxBytes: 1024, maxRecords: 2}), /length/i);
   assert.equal(encodeTouchbackFrame({kind: TouchbackFrameKind.BATCH, records: [{contactId: 1, phase: TouchbackPhase.DOWN}]}, {maxBytes: HEADER_BYTES, maxRecords: 1}), null);
+});
+
+test('round trips the canonical bind owner payload', () => {
+  const payload = {runtimeInstanceId: 'runtime-a', sessionId: 'session-a', bindingToken: 'opaque-token', sessionGeneration: 4, slotId: 2, bindingGeneration: 8, lifecycleGeneration: 11};
+  assert.deepEqual(decodeTouchbackBindPayload(encodeTouchbackBindPayload(payload)), payload);
 });
