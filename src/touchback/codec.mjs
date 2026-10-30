@@ -29,7 +29,7 @@ function fail(message) {
 
 export function encodeTouchbackFrame(frame, limits) {
   const maxBytes = limits?.maxBytes ?? 1024 * 1024;
-  const maxRecords = limits?.maxRecords ?? 64;
+  const maxRecords = limits?.maxRecords ?? 1024;
   const kind = frame?.kind;
   const records = Array.isArray(frame?.records) ? frame.records : [];
   const payload = frame?.controlPayload instanceof Uint8Array ? frame.controlPayload : new Uint8Array(frame?.controlPayload ?? []);
@@ -63,7 +63,7 @@ export function encodeTouchbackFrame(frame, limits) {
 export function decodeTouchbackFrame(input, limits) {
   const bytes = input instanceof Uint8Array ? input : input instanceof ArrayBuffer ? new Uint8Array(input) : new Uint8Array(input?.buffer ?? [], input?.byteOffset ?? 0, input?.byteLength ?? 0);
   const maxBytes = limits?.maxBytes ?? 1024 * 1024;
-  const maxRecords = limits?.maxRecords ?? 64;
+  const maxRecords = limits?.maxRecords ?? 1024;
   if (bytes.byteLength < HEADER_BYTES || bytes.byteLength > maxBytes) fail('length limit');
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (view.getUint16(0, true) !== MAGIC) fail('magic');

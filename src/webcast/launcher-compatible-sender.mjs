@@ -2,7 +2,7 @@ import {decodeTouchbackFrame, encodeTouchbackFrame, TouchbackFrameKind} from '..
 import {TouchbackSession} from '../touchback/session.mjs';
 
 export class LauncherCompatibleWebCastSender {
-  constructor({onTouchback, onControlFrame, resolveBinding, limits = {maxBytes: 1024 * 1024, maxRecords: 64}} = {}) {
+  constructor({onTouchback, onControlFrame, resolveBinding, limits = {maxBytes: 1024 * 1024, maxRecords: 1024}} = {}) {
     this.onTouchback = onTouchback ?? (() => {});
     this.onControlFrame = onControlFrame ?? (() => {});
     this.resolveBinding = resolveBinding ?? (() => null);
