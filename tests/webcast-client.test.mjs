@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {LauncherWebCastClient} from '../src/webcast/launcher-webcast-client.mjs';
 
+globalThis.RTCRtpSender = {getCapabilities: kind => ({codecs: [{mimeType: kind === 'video' ? 'video/H264' : 'audio/opus'}]})};
+
 const wait = () => new Promise(resolve => setTimeout(resolve, 0));
 
 class FakeSocket {
@@ -36,11 +38,57 @@ class FakePeerConnection {
 }
 
 function streamFixture() {
-  const track = {kind: 'video', stopped: false, stop() { this.stopped = true; }};
+  const track = {kind: 'video', contentHint: '', appliedConstraints: [], async applyConstraints(value) { this.appliedConstraints.push(value); }, stopped: false, stop() { this.stopped = true; }};
   return {track, stream: {getTracks: () => [track], getVideoTracks: () => [track]}};
 }
 
+test('applies selected capture resolution and fixed video bitrate to the sender', async () => {
+  FakeSocket.instances.length = 0; FakePeerConnection.instances.length = 0;
+  const fixture = streamFixture();
+  const parameters = {encodings: [{}]};
+  const sender = {track: fixture.track, getParameters: () => parameters, async setParameters(value) { Object.assign(parameters, value); }, async replaceTrack() {}};
+  const captures = [];
+  class QualityPeer extends FakePeerConnection {
+    addTrack(track, stream) { this.tracks.push({track, stream}); return sender; }
+    getTransceivers() { return [{sender, setCodecPreferences() {}}]; }
+  }
+  const client = new LauncherWebCastClient({WebSocketImpl: FakeSocket, RTCPeerConnectionImpl: QualityPeer,
+    mediaDevices: {getDisplayMedia: async constraints => { captures.push(constraints); return fixture.stream; }},
+    videoQuality: {resolution: '1920x1080', bitrateMode: 'fixed', bitrateKbps: 8000}});
+  const connecting = client.connect('1234'); const socket = FakeSocket.instances.at(-1); socket.open(); await connecting;
+  await socket.receive({type: 'joined'}); await wait();
+  await client.startScreenShare();
+  assert.deepEqual(captures[0], {video: {width: {ideal: 1920}, height: {ideal: 1080}}, audio: false});
+  assert.equal(parameters.encodings[0].maxBitrate, 8000000);
+  assert.equal(parameters.degradationPreference, 'maintain-resolution');
+  assert.equal(fixture.track.contentHint, 'detail');
+  assert.deepEqual(fixture.track.appliedConstraints.at(-1), {width: {ideal: 1920}, height: {ideal: 1080}});
+  await client.stop();
+});
+
+test('leaves bitrate adaptive when dynamic mode is selected', async () => {
+  const fixture = streamFixture();
+  const parameters = {encodings: [{maxBitrate: 4000000, scaleResolutionDownBy: 1}]};
+  const sender = {track: fixture.track, getParameters: () => parameters, async setParameters(value) { Object.assign(parameters, value); }, async replaceTrack() {}};
+  class QualityPeer extends FakePeerConnection {
+    addTrack(track, stream) { this.tracks.push({track, stream}); return sender; }
+    getTransceivers() { return [{sender, setCodecPreferences() {}}]; }
+  }
+  FakeSocket.instances.length = 0; FakePeerConnection.instances.length = 0;
+  const client = new LauncherWebCastClient({WebSocketImpl: FakeSocket, RTCPeerConnectionImpl: QualityPeer,
+    mediaDevices: {getDisplayMedia: async () => fixture.stream},
+    videoQuality: {resolution: 'auto', bitrateMode: 'dynamic', bitrateKbps: 8000}});
+  const connecting = client.connect('1234'); const socket = FakeSocket.instances.at(-1); socket.open(); await connecting;
+  await socket.receive({type: 'joined'}); await wait();
+  await client.startScreenShare();
+  assert.equal(parameters.encodings[0].maxBitrate, 8000000);
+  assert.equal(parameters.degradationPreference, 'balanced');
+  assert.equal(parameters.encodings[0].scaleResolutionDownBy, 1);
+  await client.stop();
+});
+
 test('requires a four-character pairing code before opening Launcher signaling', async () => {
+  FakeSocket.instances.length = 0;
   const client = new LauncherWebCastClient({WebSocketImpl: FakeSocket, RTCPeerConnectionImpl: FakePeerConnection});
   await assert.rejects(() => client.connect('12'), /pairing code/i);
   assert.equal(FakeSocket.instances.length, 0);

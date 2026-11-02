@@ -4,6 +4,7 @@ const CODE_DISPLAY_REQUEST_TYPE = 'nearcast.code_display.request';
 const CODE_DISPLAY_RESULT_TYPE = 'nearcast.code_display.result';
 const CODE_DISPLAY_VERSION = 1;
 const CODE_DISPLAY_STATUSES = new Set(['shown', 'unavailable', 'rate_limited', 'not_supported']);
+import {DEFAULT_VIDEO_QUALITY, normalizeVideoQuality, videoCaptureConstraints, applyVideoTrackConstraints, applyVideoEncodingParameters} from './video-quality.mjs';
 let codeDisplaySequence = 0;
 
 const normalizeEndpoint = endpoint => {
@@ -53,6 +54,7 @@ export class LauncherWebCastClient {
     onSessionEnded,
     codeDisplayTransport = postCodeDisplay,
     codeDisplayTimeoutMs = 6000,
+    videoQuality = DEFAULT_VIDEO_QUALITY,
   } = {}) {
     if (typeof WebSocketImpl !== 'function') throw new TypeError('WebSocket implementation required');
     if (typeof RTCPeerConnectionImpl !== 'function') throw new TypeError('RTCPeerConnection implementation required');
@@ -70,6 +72,7 @@ export class LauncherWebCastClient {
     this.onSessionEnded = onSessionEnded ?? (() => {});
     this.codeDisplayTransport = codeDisplayTransport;
     this.codeDisplayTimeoutMs = codeDisplayTimeoutMs;
+    this.videoQuality = normalizeVideoQuality(videoQuality);
     this.socket = null;
     this.pc = null;
     this.channel = null;
@@ -289,7 +292,7 @@ export class LauncherWebCastClient {
     if (!this.pc || (this.status !== 'connected' && this.status !== 'joined' && this.status !== 'sharing')) throw new Error('Connect to a receiver before sharing');
     if (!this.mediaDevices || typeof this.mediaDevices.getDisplayMedia !== 'function') throw new Error('Screen capture is unavailable');
     const pc = this.pc;
-    const stream = await this.mediaDevices.getDisplayMedia({video, audio});
+    const stream = await this.mediaDevices.getDisplayMedia({video: video ? videoCaptureConstraints(this.videoQuality) : video, audio});
     if (this.pc !== pc || this.closed) { for (const track of stream.getTracks()) track.stop(); throw new Error('Screen capture cancelled with the previous connection'); }
     if (this.stream) await this.stopStream();
     this.stream = stream;
@@ -298,6 +301,11 @@ export class LauncherWebCastClient {
         const sender = this.mediaSenders.get(track.kind);
         if (sender) await sender.replaceTrack(track);
         else this.mediaSenders.set(track.kind, pc.addTrack(track, stream));
+        if (track.kind === 'video') {
+          if ('contentHint' in track) track.contentHint = 'detail';
+          await applyVideoTrackConstraints(track, this.videoQuality);
+          await applyVideoEncodingParameters(this.mediaSenders.get(track.kind), this.videoQuality);
+        }
         track.onended = () => { if (this.stream === stream) this.stopStream().catch(error => this.fail(error)); };
       }
       // NearCast's native receiver accepts H.264 / Opus, not Chromium's

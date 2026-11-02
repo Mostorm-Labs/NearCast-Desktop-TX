@@ -49,6 +49,15 @@
       <h1>Sharing to <span id="target-name">NearCast</span></h1>
       <p id="cast-status" class="panel-desc">Receiver is ready for casting.</p>
       <div id="preview-wrap" class="preview-wrap" hidden><video id="preview" autoplay muted playsinline></video><span class="preview-badge">LOCAL PREVIEW</span></div>
+      <section class="video-quality" aria-labelledby="video-quality-title">
+        <div class="quality-heading"><span id="video-quality-title">Video quality</span><span id="video-quality-summary">Fixed · 1920 × 1080 · 12 Mbps</span></div>
+        <div class="quality-grid">
+          <label>Resolution<select id="video-resolution"><option value="auto">Auto (source)</option><option value="1280x720">1280 × 720</option><option value="1920x1080" selected>1920 × 1080</option><option value="2560x1440">2560 × 1440</option><option value="3840x2160">3840 × 2160</option></select></label>
+          <label>Bitrate mode<select id="video-bitrate-mode"><option value="dynamic">Dynamic (adaptive)</option><option value="fixed" selected>Fixed target</option></select></label>
+          <label>Bitrate<select id="video-bitrate"><option value="2000">2 Mbps</option><option value="4000">4 Mbps</option><option value="8000">8 Mbps</option><option value="12000" selected>12 Mbps</option><option value="20000">20 Mbps</option></select></label>
+        </div>
+        <p class="quality-help">Dynamic adapts down under congestion; fixed tries to hold the selected target. Changes apply the next time you start sharing.</p>
+      </section>
       <div class="casting-actions">
         <button id="share-button" class="button primary" type="button">Start sharing</button>
         <button id="stop-share-button" class="button danger" type="button" hidden>Stop sharing</button>

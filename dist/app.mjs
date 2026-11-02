@@ -5,6 +5,7 @@ import {createPlatformInputSink} from './touchback/platform-input.mjs';
 import {TauriDeviceDiscovery} from './tauri-device-discovery.mjs';
 import {loadPlatformInfo, platformSummary, screenCaptureError, touchbackSummary, touchbackError} from './platform-capabilities.mjs';
 import {canAttachTouchbackChannel} from './webcast/touchback-channel-policy.mjs';
+import {normalizeVideoQuality} from './webcast/video-quality.mjs';
 
 const tauri = globalThis.__TAURI__ ?? {};
 const invoke = tauri.core?.invoke ?? (async () => false);
@@ -39,6 +40,10 @@ const touchbackStatus = document.querySelector('#touchback-status');
 const deviceGroups = document.querySelector('#device-groups');
 const deviceStatus = document.querySelector('#device-status');
 const refreshDevices = document.querySelector('#refresh-devices');
+const videoResolution = document.querySelector('#video-resolution');
+const videoBitrateMode = document.querySelector('#video-bitrate-mode');
+const videoBitrate = document.querySelector('#video-bitrate');
+const videoQualitySummary = document.querySelector('#video-quality-summary');
 
 const defaultEndpoint = new URLSearchParams(location.search).get('ws') || DEFAULT_ENDPOINT;
 let selectedEndpoint = defaultEndpoint;
@@ -52,6 +57,7 @@ let touchback;
 let platformReady = Promise.resolve();
 let controlGeneration = 0;
 let capturePending = false;
+let videoQuality = normalizeVideoQuality({resolution: videoResolution.value, bitrateMode: videoBitrateMode.value, bitrateKbps: videoBitrate.value});
 globalThis.__nearcastTouchbackDiagnostics = () => touchback?.diagnostics?.() ?? null;
 
 const setError = (element, error) => {
@@ -59,6 +65,16 @@ const setError = (element, error) => {
   element.hidden = !error;
 };
 const setCodeDisplayStatus = text => { codeDisplayStatus.textContent = text || ''; };
+const renderVideoQuality = () => {
+  videoQuality = normalizeVideoQuality({resolution: videoResolution.value, bitrateMode: videoBitrateMode.value, bitrateKbps: videoBitrate.value});
+  const resolution = videoQuality.resolution === 'auto' ? 'Auto' : videoQuality.resolution.replace('x', ' × ');
+  videoQualitySummary.textContent = `${videoQuality.bitrateMode === 'fixed' ? 'Fixed' : 'Dynamic'} · ${resolution}${videoQuality.bitrateMode === 'fixed' ? ` · ${videoQuality.bitrateKbps / 1000} Mbps` : ''}`;
+  videoBitrate.disabled = false;
+};
+videoResolution.addEventListener('change', renderVideoQuality);
+videoBitrateMode.addEventListener('change', renderVideoQuality);
+videoBitrate.addEventListener('change', renderVideoQuality);
+renderVideoQuality();
 const renderTrust = state => {
   trustCard.hidden = !state || state.phase === 'idle' || state.phase === 'trusted' && !state.fingerprint;
   trustCheck.checked = false; trustConfirm.disabled = true; trustConfirm.hidden = state?.phase !== 'compare'; trustCheckLabel.hidden = true; trustRevoke.hidden = true;
@@ -115,6 +131,7 @@ const buildTouchback = info => new WebCastTouchbackSender({
 touchback = buildTouchback({os: 'unknown', touchback: false, inputControl: 'none'});
 const client = new LauncherWebCastClient({
   endpoint: selectedEndpoint,
+  videoQuality,
   codeDisplayTransport: ({instance, request}) => invoke('nearcast_code_display', {instance, request}),
   onStatus: setView,
   onError: error => { setError(codeError, error); client.stop({notify: false}); activeDevice = null; },
@@ -190,7 +207,7 @@ shareButton.addEventListener('click', async () => {
   if (capturePending) return;
   capturePending = true; shareButton.disabled = true;
   setError(castError, null);
-  try { await client.startScreenShare({video: true, audio: false}); }
+  try { client.videoQuality = videoQuality; await client.startScreenShare({video: true, audio: false}); }
   catch (error) { setError(castError, screenCaptureError(error, platformInfo)); }
   finally { capturePending = false; shareButton.disabled = !['connected', 'sharing'].includes(currentStatus); }
 });

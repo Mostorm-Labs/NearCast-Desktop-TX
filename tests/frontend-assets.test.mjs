@@ -7,7 +7,7 @@ const root = process.cwd();
 test('Tauri frontend is self-contained under dist', () => {
   const app = fs.readFileSync(path.join(root, 'dist', 'app.mjs'), 'utf8');
   assert.equal(app.includes("../src/"), false);
-  for (const file of ['dist/webcast/launcher-webcast-client.mjs', 'dist/webcast/receiver-trust.mjs', 'dist/webcast/touchback-sender.mjs', 'dist/webcast/touchback-channel-policy.mjs', 'dist/webcast/launcher-compatible-sender.mjs', 'dist/touchback/codec.mjs', 'dist/touchback/session.mjs', 'dist/touchback/pointer-injection.mjs', 'dist/touchback/windows-pointer-injection.mjs', 'dist/touchback/tauri-native-bridge.mjs', 'dist/touchback/macos-input.mjs', 'dist/touchback/macos-native-bridge.mjs', 'dist/touchback/platform-input.mjs', 'dist/discovery-devices.mjs', 'dist/tauri-device-discovery.mjs', 'dist/platform-capabilities.mjs', 'dist/assets/background.webp']) {
+  for (const file of ['dist/webcast/launcher-webcast-client.mjs', 'dist/webcast/video-quality.mjs', 'dist/webcast/receiver-trust.mjs', 'dist/webcast/touchback-sender.mjs', 'dist/webcast/touchback-channel-policy.mjs', 'dist/webcast/launcher-compatible-sender.mjs', 'dist/touchback/codec.mjs', 'dist/touchback/session.mjs', 'dist/touchback/pointer-injection.mjs', 'dist/touchback/windows-pointer-injection.mjs', 'dist/touchback/tauri-native-bridge.mjs', 'dist/touchback/macos-input.mjs', 'dist/touchback/macos-native-bridge.mjs', 'dist/touchback/platform-input.mjs', 'dist/discovery-devices.mjs', 'dist/tauri-device-discovery.mjs', 'dist/platform-capabilities.mjs', 'dist/assets/background.webp']) {
     assert.equal(fs.existsSync(path.join(root, file)), true, `${file} missing`);
   }
 });
