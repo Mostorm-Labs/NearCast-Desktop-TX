@@ -1,1 +1,65 @@
-<!doctype html><html><body>NearCast Desktop TX</body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NearHub WebCast</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="webcast-sender">
+    <header class="topbar"><div class="logo"><span class="logo-mark">N</span><span>NearHub</span></div><span class="product-label">WebCast</span></header>
+
+    <section id="code-view" class="sender-panel">
+      <div class="panel-eyebrow">WEBCAST SENDER</div>
+      <h1>Welcome to cast screen</h1>
+      <p class="panel-desc">Enter the 4-digit code shown on your NearCast receiver.</p>
+      <p id="platform-status" class="platform-status" aria-live="polite">正在读取平台能力…</p>
+      <form id="pair-form">
+        <div class="code-input" aria-label="Pairing code">
+          <input class="code-digit" maxlength="1" inputmode="text" autocomplete="one-time-code" aria-label="Pairing code digit 1" />
+          <input class="code-digit" maxlength="1" inputmode="text" aria-label="Pairing code digit 2" />
+          <input class="code-digit" maxlength="1" inputmode="text" aria-label="Pairing code digit 3" />
+          <input class="code-digit" maxlength="1" inputmode="text" aria-label="Pairing code digit 4" />
+        </div>
+        <p class="pair-help">Pairing code</p>
+        <p id="code-display-status" class="code-display-status" aria-live="polite"></p>
+        <section id="trust-card" class="trust-card" hidden aria-live="polite">
+          <div class="trust-title">现场核对接收端指纹</div>
+          <p id="trust-copy" class="trust-copy"></p>
+          <pre id="trust-fingerprint" class="trust-fingerprint"></pre>
+          <label id="trust-check-label" class="trust-check" hidden><input id="trust-check" type="checkbox" /> 我已在接收端逐组核对完整指纹</label>
+          <div class="trust-actions"><button id="trust-confirm" class="button primary" type="button" hidden disabled>确认并信任设备</button><button id="trust-retry" class="button primary" type="button" hidden>重新显示指纹</button><button id="trust-cancel" class="button secondary" type="button">取消</button><button id="trust-revoke" class="button secondary" type="button" hidden>撤销此设备信任</button></div>
+          <p id="trust-error" class="error" hidden></p>
+        </section>
+        <button id="connect-button" class="button primary" type="submit">Join receiver</button>
+      </form>
+      <p id="code-error" class="error" hidden></p>
+
+      <section class="devices" aria-labelledby="devices-title">
+        <div class="devices-heading"><div><span class="section-kicker">LOCAL NETWORK</span><h2 id="devices-title">Available receivers</h2></div><button id="refresh-devices" class="refresh" type="button">↻ Scan</button></div>
+        <div id="device-status" class="device-status">Scanning for AirPlay and WebCast receivers…</div>
+        <div id="device-groups"></div>
+      </section>
+    </section>
+
+    <section id="casting-view" class="sender-panel casting-panel" hidden>
+      <div class="cast-icon">⌁</div>
+      <div class="panel-eyebrow">CONNECTED TO RECEIVER</div>
+      <h1>Sharing to <span id="target-name">NearCast</span></h1>
+      <p id="cast-status" class="panel-desc">Receiver is ready for casting.</p>
+      <div id="preview-wrap" class="preview-wrap" hidden><video id="preview" autoplay muted playsinline></video><span class="preview-badge">LOCAL PREVIEW</span></div>
+      <div class="casting-actions">
+        <button id="share-button" class="button primary" type="button">Start sharing</button>
+        <button id="stop-share-button" class="button danger" type="button" hidden>Stop sharing</button>
+        <button id="leave-button" class="button secondary" type="button">Leave receiver</button>
+      </div>
+      <p id="cast-error" class="error" hidden></p>
+      <p id="touchback-status" class="platform-status" aria-live="polite"></p>
+    </section>
+
+    <footer>Launcher-compatible WebCast · Windows Pointer Injection / macOS 鼠标反向控制 · 多指触控暂不支持</footer>
+  </main>
+  <script type="module" src="./app.mjs"></script>
+</body>
+</html>

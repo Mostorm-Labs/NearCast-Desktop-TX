@@ -3,7 +3,37 @@
   "productName": "NearCast Desktop TX",
   "version": "0.1.0",
   "identifier": "com.mostorm.nearcast.desktop.tx",
-  "build": {"frontendDist": "../dist"},
-  "app": {"windows": [{"title": "NearCast Desktop TX", "width": 960, "height": 640}], "security": {"csp": null}},
-  "bundle": {"active": false}
+  "build": {
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "NearCast Desktop TX",
+        "width": 960,
+        "height": 640
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": [{
+        "identifier": "main-events",
+        "description": "Receive native LAN discovery snapshots in the sender window",
+        "windows": ["main"],
+        "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+      }]
+    },
+    "withGlobalTauri": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi", "app", "dmg"],
+    "windows": {
+      "webviewInstallMode": {"type": "downloadBootstrapper", "silent": true}
+    },
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "infoPlist": "Info.plist"
+    }
+  }
 }

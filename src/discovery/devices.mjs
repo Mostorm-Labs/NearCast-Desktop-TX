@@ -2,6 +2,7 @@ const SERVICE_PROTOCOLS = Object.freeze({
   airplay: new Set(['_airplay._tcp.local.', '_raop._tcp.local.']),
   webcast: new Set(['_nearcast._tcp.local.']),
 });
+const PRIVATE_TXT_KEYS = new Set(['token', 'room', 'roomcode', 'paircode', 'password', 'secret']);
 
 const stripServiceSuffix = (instance, serviceType) => String(instance ?? '').replace(new RegExp(`\\.${serviceType.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}$`, 'i'), '').replace(/\.$/, '');
 const text = value => typeof value === 'string' ? value.trim() : '';
@@ -11,13 +12,23 @@ const instanceHardwareId = instance => {
   const match = text(instance).match(/^([0-9a-f]{2}(?:[-:][0-9a-f]{2}){5})@/i);
   return match ? canonicalDeviceId(match[1]) : '';
 };
-const secureEndpoint = (service, txt, hostname, port) => {
+const secureEndpoint = (txt, hostname, addresses, port) => {
   const advertised = text(txt.endpoint || txt.url || txt.wss || txt.https);
-  if (advertised) return advertised;
-  const host = hostname || (Array.isArray(service?.addresses) ? text(service.addresses[0]) : '');
-  if (!host) return '';
-  const authority = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-  return `https://${authority}:${port || 443}`;
+  if (advertised) {
+    let url; try { url = new URL(advertised); } catch { throw new RangeError('webcast endpoint'); }
+    if (!['https:', 'wss:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new RangeError('webcast endpoint must be TLS without credentials');
+  }
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new RangeError('webcast SRV port');
+  const build = host => {
+    if (!host || /[\s/@?#\\]/.test(host)) throw new RangeError('webcast resolved endpoint');
+    const authority = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+    const url = new URL(`https://${authority}:${port}`);
+    if (url.username || url.password || url.pathname !== '/') throw new RangeError('webcast resolved endpoint');
+    return url.origin;
+  };
+  const resolvedEndpoints = [...new Set([...addresses, ...(hostname ? [hostname] : [])].map(build))];
+  if (!resolvedEndpoints.length) throw new RangeError('webcast resolved endpoint required');
+  return {endpoint: hostname ? build(hostname) : resolvedEndpoints[0], resolvedEndpoints};
 };
 
 export function normalizeDiscoveryDevice(service, nowMs = Number(service?.nowMs ?? Date.now())) {
@@ -25,21 +36,25 @@ export function normalizeDiscoveryDevice(service, nowMs = Number(service?.nowMs 
   const protocol = SERVICE_PROTOCOLS.airplay.has(serviceType) ? 'airplay' : SERVICE_PROTOCOLS.webcast.has(serviceType) ? 'webcast' : null;
   if (!protocol) throw new RangeError('unsupported discovery service');
   const txt = service?.txt ?? {};
+  for (const key of Object.keys(txt)) if (PRIVATE_TXT_KEYS.has(String(key).toLowerCase())) throw new RangeError('private discovery field');
   const addresses = Array.isArray(service?.addresses) ? service.addresses.map(text).filter(Boolean) : [];
   const hostname = text(service?.hostname).replace(/\.$/, '');
   const port = Number(service?.port ?? 0);
   let displayName = text(txt.display) || stripServiceSuffix(text(service?.instance), serviceType) || hostname || 'Unknown device';
   if (serviceType === '_raop._tcp.local.' && displayName.includes('@')) displayName = displayName.slice(displayName.indexOf('@') + 1);
-  const endpoint = protocol === 'webcast' ? secureEndpoint(service, txt, hostname, port) : '';
+  const rawCapabilities = protocol === 'webcast' ? capabilityTokens(txt.capability) : new Set();
+  const isWebCast = protocol === 'webcast' && rawCapabilities.has('webcast');
+  const capabilities = isWebCast ? rawCapabilities : new Set();
+  const {endpoint = '', resolvedEndpoints = []} = isWebCast ? secureEndpoint(txt, hostname, addresses, port) : {};
   const advertisedDeviceId = text(txt.deviceId || txt.device_id || txt.id);
   const hardwareId = canonicalDeviceId(advertisedDeviceId || txt.deviceid) || (serviceType === '_raop._tcp.local.' ? instanceHardwareId(service?.instance) : '');
   const discoveryId = hardwareId ? `${protocol}:${hardwareId}` : `${protocol}:${text(service?.instance) || displayName}`;
   const ttlSeconds = Number(txt.ttl ?? 60);
   if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) throw new RangeError('ttl');
-  if (protocol === 'webcast' && !endpoint) throw new RangeError('webcast endpoint');
+  if (isWebCast && !endpoint) throw new RangeError('webcast endpoint');
   return {
     discoveryId,
-    deviceId: protocol === 'webcast' ? (advertisedDeviceId || null) : null,
+    deviceId: isWebCast ? (advertisedDeviceId || null) : null,
     protocol,
     displayName: displayName.slice(0, 128),
     instance: text(service?.instance),
@@ -47,14 +62,16 @@ export function normalizeDiscoveryDevice(service, nowMs = Number(service?.nowMs 
     addresses,
     port,
     endpoint: endpoint || null,
+    resolvedEndpoints,
     model: text(txt.model),
     version: text(txt.version || txt.srcvers),
-    capability: text(txt.capability),
-    capabilities: capabilityTokens(txt.capability),
-    supportsCodeDisplay: capabilityTokens(txt.capability).has('code-display-v1'),
-    supportsTouchback: capabilityTokens(txt.capability).has('touchback-v1'),
+    capability: isWebCast ? text(txt.capability) : '',
+    capabilities,
+    supportsCodeDisplay: isWebCast && capabilities.has('code-display-v1'),
+    supportsTrustDisplay: isWebCast && capabilities.has('trust-display-v1'),
+    supportsTouchback: isWebCast && capabilities.has('touchback-v1'),
     authorized: false,
-    selectable: protocol === 'webcast',
+    selectable: isWebCast,
     expiresAt: nowMs + Math.min(5 * 60 * 1000, ttlSeconds * 1000),
   };
 }

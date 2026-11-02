@@ -1,0 +1,47 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+            bundles: nsis,msi
+          - os: macos-15-intel
+            rust-target: x86_64-apple-darwin
+            bundles: app,dmg
+          - os: macos-15
+            rust-target: aarch64-apple-darwin
+            bundles: app,dmg
+    runs-on: ${{ matrix.os }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+      - name: Run JavaScript tests
+        run: npm test
+      - name: Check Rust backend
+        run: cargo check --locked --manifest-path src-tauri/Cargo.toml --target ${{ matrix.rust-target }}
+      - name: Test Rust backend
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --target ${{ matrix.rust-target }}
+      - name: Build Tauri bundle
+        run: npx --yes @tauri-apps/cli@2 build --target ${{ matrix.rust-target }} --bundles ${{ matrix.bundles }}
+        env:
+          CI: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nearcast-desktop-tx-${{ matrix.rust-target }}
+          path: src-tauri/target/${{ matrix.rust-target }}/release/bundle
