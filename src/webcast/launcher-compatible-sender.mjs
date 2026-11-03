@@ -8,17 +8,98 @@ export class LauncherCompatibleWebCastSender {
     this.resolveBinding = resolveBinding ?? (() => null);
     this.session = new TouchbackSession(limits);
     this.control = null;
+    this.sendSequence = 0;
+    this.controlRequestSequence = 0;
+    this.pendingControlRequests = new Map();
     this.stats = {binaryRejected: 0, binaryAccepted: 0, textAccepted: 0};
   }
   attachControlChannel(channel) {
     if (!channel || channel.readyState !== 'open') throw new Error('control channel is not open');
     this.control = channel;
   }
+  configureStream({streamId, epoch, canvasToken = 0, geometryToken = 0, binding = {}} = {}) {
+    if (!Number.isInteger(streamId) || streamId <= 0 || !Number.isInteger(epoch) || epoch < 0 || !Number.isInteger(canvasToken) || canvasToken < 0 || !Number.isInteger(geometryToken) || geometryToken < 0) return false;
+    this.sendSequence = 0;
+    const result = this.session.accept({kind: TouchbackFrameKind.BIND, binding: {
+      ...binding, streamId, epoch, canvasToken, geometryToken, wireVersion: 'axtp',
+      bindingToken: binding.bindingToken ?? `axtp:${streamId}:${epoch}`,
+    }});
+    if (result.status !== 'accepted') return false;
+    this.onControlFrame({kind: TouchbackFrameKind.BIND, wireVersion: 'axtp', streamId, epoch, canvasToken, geometryToken}, result);
+    return true;
+  }
+  requestControl(method, params = {}) {
+    if (!this.control || this.control.readyState !== 'open' || typeof method !== 'string' || !method) return Promise.reject(new Error('control channel is not open'));
+    const id = `axtp-${Date.now().toString(36)}-${(++this.controlRequestSequence).toString(36)}`;
+    const request = {action: 'axtp-control', id, method, params};
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.pendingControlRequests.delete(id); reject(new Error(`Control request timed out: ${method}`)); }, 8000);
+      this.pendingControlRequests.set(id, {resolve, reject, timer});
+      try { this.control.send(JSON.stringify(request)); } catch (error) { clearTimeout(timer); this.pendingControlRequests.delete(id); reject(error); }
+    });
+  }
+  getControlCapabilities(params = {}) { return this.requestControl('cast.getControlCapabilities', params); }
+  getTouchbackState(params = {}) { return this.requestControl('cast.getTouchbackState', params); }
+  setTouchbackEnabled(params = {}) { return this.requestControl('cast.setTouchbackEnabled', params); }
+  setTouchbackMode(params = {}) { return this.requestControl('cast.setTouchbackMode', params); }
+  setTouchbackResolutionPreference(params = {}) { return this.requestControl('cast.setTouchbackResolutionPreference', params); }
+  async openTouchbackStream(params = {}) {
+    const result = await this.requestControl('input.openStream', {streamKind: 'touchback', format: 'touch-batch-v1', preferredMode: 'touch', supportedModes: ['touch', 'mouse'], ...params});
+    if (result?.accepted !== false && Number.isInteger(result?.streamId) && Number.isInteger(result?.epoch)) {
+      if (!this.configureStream({streamId: result.streamId, epoch: result.epoch, canvasToken: result.canvasToken ?? 0, geometryToken: result.geometryToken ?? 0, binding: result.binding ?? {}})) throw new Error('Invalid input.openStream result');
+    }
+    return result;
+  }
+  closeTouchbackStream(params = {}) { return this.requestControl('input.closeStream', {streamKind: 'touchback', ...params}); }
   handleControlMessage(message) {
     if (!this.control || this.control.readyState !== 'open') return {status: 'stale'};
-    if (typeof message?.data === 'string') { this.stats.textAccepted += 1; return {status: 'text'}; }
+    if (typeof message?.data === 'string') {
+      this.stats.textAccepted += 1;
+      try {
+        const control = JSON.parse(message.data);
+        const result = control?.result ?? control?.params ?? control;
+        const method = control?.method ?? control?.type ?? control?.action;
+        if (control?.id && this.pendingControlRequests.has(control.id) && Object.hasOwn(control, 'result')) {
+          const pending = this.pendingControlRequests.get(control.id); this.pendingControlRequests.delete(control.id); clearTimeout(pending.timer);
+          if (control.error) pending.reject(new Error(control.error.message || String(control.error))); else pending.resolve(control.result);
+          return {status: 'control_response'};
+        }
+        if (method === 'input.openStream' && result?.accepted !== false && Number.isInteger(result.streamId) && Number.isInteger(result.epoch)) {
+          const opened = this.configureStream({streamId: result.streamId, epoch: result.epoch, canvasToken: result.canvasToken ?? 0, geometryToken: result.geometryToken ?? 0, binding: result.binding ?? {}});
+          return opened ? {status: 'stream_opened'} : {status: 'invalid_state'};
+        }
+        if (method === 'input.closeStream' && Number.isInteger(result?.streamId) && result.closed !== false) {
+          if (this.session.streamId === result.streamId && this.session.epoch === result.epoch) this.session.accept({kind: TouchbackFrameKind.CLOSE, epoch: result.epoch});
+          return {status: 'stream_closed'};
+        }
+        if ((method === 'cast.touchbackChanged' || method === 'cast.touchback.changed') && result?.effectiveEnabled === true) {
+          const stream = result.stream ?? result.inputStream ?? result.touchback?.stream;
+          if (stream && Number.isInteger(stream.streamId) && Number.isInteger(stream.epoch)) {
+            return this.configureStream({streamId: stream.streamId, epoch: stream.epoch, canvasToken: stream.canvasToken ?? 0, geometryToken: stream.geometryToken ?? 0, binding: stream.binding ?? {}}) ? {status: 'stream_opened'} : {status: 'invalid_state'};
+          }
+        }
+      } catch {}
+      return {status: 'text'};
+    }
     try {
       const frame = decodeTouchbackFrame(message?.data, this.session.limits);
+      if (frame.wireVersion === 'axtp' && frame.kind !== TouchbackFrameKind.BATCH) {
+        const result = this.handleControlFrame(frame);
+        if (result.status === 'invalid_state' || result.status === 'stale') this.stats.binaryRejected += 1;
+        else this.stats.binaryAccepted += 1;
+        return result;
+      }
+      if (frame.wireVersion === 'axtp') {
+        const result = this.session.acceptBytes(message.data);
+        if (result.status === 'applied' || result.status === 'closed' || result.status === 'reset') {
+          this.stats.binaryAccepted += 1;
+          if (result.status === 'applied') this.onTouchback(result.frame);
+        } else {
+          this.stats.binaryRejected += 1;
+          if (result.status === 'reset_required') this.requestReset();
+        }
+        return result;
+      }
       if (frame.kind !== TouchbackFrameKind.BATCH) {
         const result = this.handleControlFrame(frame);
         if (result.status === 'invalid_state' || result.status === 'stale') this.stats.binaryRejected += 1;
@@ -37,26 +118,35 @@ export class LauncherCompatibleWebCastSender {
   requestReset() {
     if (!this.control || this.control.readyState !== 'open' || !Number.isInteger(this.session.epoch) || this.session.epoch >= 0xffffffff || this.session.resetPending && this.session.epoch === this.lastResetEpoch) return false;
     const epoch = this.session.epoch + 1;
-    const result = this.session.accept({kind: TouchbackFrameKind.RESET, epoch});
+    const result = this.session.accept({kind: TouchbackFrameKind.RESET, epoch, wireVersion: this.session.wireVersion});
     if (result.status !== 'reset') return false;
-    const bytes = encodeTouchbackFrame({kind: TouchbackFrameKind.RESET, epoch, sequence: 0}, this.session.limits);
+    const modern = this.session.wireVersion === 'axtp';
+    const bytes = encodeTouchbackFrame(modern ? {
+      wireVersion: 'axtp', streamId: this.session.streamId, seqId: this.sendSequence++, cursor: BigInt(Date.now()) * 1000n,
+      kind: TouchbackFrameKind.RESET, epoch, canvasToken: this.session.canvasToken, geometryToken: this.session.geometryToken,
+    } : {kind: TouchbackFrameKind.RESET, epoch, sequence: 0}, this.session.limits);
     if (!bytes) return false;
     this.lastResetEpoch = epoch;
     this.control.send(bytes);
     return true;
   }
   handleControlFrame(frame) {
+    if (frame.kind === TouchbackFrameKind.CAPABILITY) {
+      const result = {status: 'accepted'};
+      this.onControlFrame(frame, result);
+      return result;
+    }
     if (!this.session.binding && frame.kind !== TouchbackFrameKind.BIND) return {status: 'stale'};
     if (frame.kind === TouchbackFrameKind.BIND) {
       const binding = this.resolveBinding(frame);
-      const result = binding ? this.session.accept({kind: TouchbackFrameKind.BIND, binding: {...binding, epoch: frame.epoch}}) : this.session.acceptBindFrame(frame);
+      const result = binding ? this.session.accept({kind: TouchbackFrameKind.BIND, binding: {...binding, epoch: frame.epoch, streamId: frame.streamId, canvasToken: frame.canvasToken, geometryToken: frame.geometryToken, wireVersion: frame.wireVersion}}) : this.session.acceptBindFrame(frame);
       this.onControlFrame(frame, result);
       return result;
     }
     if (frame.kind === TouchbackFrameKind.RESET || frame.kind === TouchbackFrameKind.RESET_ACK) {
-      const result = this.session.accept({kind: frame.kind, epoch: frame.epoch});
+      const result = this.session.accept({kind: frame.kind, epoch: frame.epoch, wireVersion: frame.wireVersion});
       this.onControlFrame(frame, result);
-      if (frame.kind === TouchbackFrameKind.RESET && result.status === 'reset' && this.control.readyState === 'open') {
+      if (frame.wireVersion !== 'axtp' && frame.kind === TouchbackFrameKind.RESET && result.status === 'reset' && this.control.readyState === 'open') {
         const ack = encodeTouchbackFrame({kind: TouchbackFrameKind.RESET_ACK, epoch: frame.epoch, sequence: frame.sequence}, this.session.limits);
         if (ack) this.control.send(ack);
       }

@@ -10,7 +10,7 @@ export class WebCastTouchbackSender {
       limits,
       resolveBinding,
       onControlFrame: (frame, result) => {
-        if (frame?.kind === TouchbackFrameKind.BIND || frame?.kind === TouchbackFrameKind.RESET || result?.status === 'reset') {
+        if (frame?.kind === TouchbackFrameKind.BIND || frame?.kind === TouchbackFrameKind.RESET || frame?.kind === TouchbackFrameKind.CLOSE || result?.status === 'reset' || result?.status === 'closed') {
           this.generation++;
           this.resetPointer();
         }
