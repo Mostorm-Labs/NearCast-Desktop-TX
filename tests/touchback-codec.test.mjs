@@ -11,21 +11,27 @@ import {
   encodeTouchbackBindPayload,
 } from '../src/touchback/codec.mjs';
 
-test('encodes the canonical little-endian 28/16 touchback layout', () => {
+test('encodes the canonical big-endian AXTP STREAM and touch-batch layout', () => {
   const bytes = encodeTouchbackFrame({
+    wireVersion: 'axtp',
+    streamId: 0x01020304,
+    seqId: 42,
+    cursor: 0x0102030405060708n,
     kind: TouchbackFrameKind.BATCH,
     epoch: 9,
-    sequence: 42,
+    canvasToken: 10,
+    geometryToken: 11,
     records: [
       {contactId: 7, phase: TouchbackPhase.DOWN, buttons: 3, x: 0x1234, y: 0xabcd, modifiers: 0x0201, dtMs: 9, recordFlags: 0x40},
       {contactId: 7, phase: TouchbackPhase.MOVE, buttons: 3, x: 0x1235, y: 0xabce, modifiers: 0x0201, dtMs: 8, recordFlags: 0x40},
     ],
   }, {maxBytes: 4096, maxRecords: 8});
 
-  assert.equal(bytes.byteLength, HEADER_BYTES + 2 * RECORD_BYTES);
-  assert.deepEqual([...new Uint8Array(bytes.slice(0, 4))], [0x42, 0x54, 1, 0]);
+  assert.equal(bytes.byteLength, 16 + HEADER_BYTES + 2 * RECORD_BYTES);
+  assert.deepEqual([...new Uint8Array(bytes.slice(0, 16))], [1, 2, 3, 4, 0, 0, 0, 42, 1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.deepEqual([...new Uint8Array(bytes.slice(16, 20))], [0x54, 0x42, 1, 0]);
   const decoded = decodeTouchbackFrame(bytes, {maxBytes: 4096, maxRecords: 8});
-  assert.equal(decoded.sequence, 42);
+  assert.equal(decoded.seqId, 42);
   assert.equal(decoded.records[1].x, 0x1235);
   assert.equal(decoded.records[1].phase, TouchbackPhase.MOVE);
 });
