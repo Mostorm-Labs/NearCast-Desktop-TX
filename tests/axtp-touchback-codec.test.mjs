@@ -194,6 +194,22 @@ test('accepts receiver-owned input.openStream request only after BIND and replie
   }}]);
 });
 
+test('fills sender-owned stream identity when input.openStream request omits streamId and epoch', () => {
+  const sent = [];
+  const sender = new LauncherCompatibleWebCastSender();
+  sender.attachControlChannel({readyState: 'open', send: value => sent.push(JSON.parse(value))});
+  const bindPayload = encodeTouchbackBindPayload({runtimeInstanceId: 'r', sessionId: 's', bindingToken: 't', sessionGeneration: 1, slotId: 0, bindingGeneration: 1, lifecycleGeneration: 1});
+  sender.handleControlMessage({data: encodeTouchbackFrame({wireVersion: 'axtp', streamId: 29, seqId: 0, cursor: 1n, kind: TouchbackFrameKind.BIND, epoch: 6, canvasToken: 7, geometryToken: 8, controlPayload: bindPayload})});
+  const result = sender.handleControlMessage({data: JSON.stringify({action: 'axtp-control', id: 'open-owned-1', method: 'input.openStream', params: {
+    streamKind: 'touchback', acceptedMode: 'mouse', format: 'touch-batch-v1', revision: 'rev-owned-1', accepted: true,
+  }})});
+  assert.equal(result.status, 'stream_opened');
+  assert.deepEqual(sent.at(-1), {action: 'axtp-control', id: 'open-owned-1', method: 'input.openStream', result: {
+    streamKind: 'touchback', acceptedMode: 'mouse', format: 'touch-batch-v1', revision: 'rev-owned-1', accepted: true,
+    streamId: 29, epoch: 6, canvasToken: 7, geometryToken: 8,
+  }});
+});
+
 test('rejects a mismatched receiver-owned open request and closes an active stream with a response', () => {
   const sent = [];
   const sender = new LauncherCompatibleWebCastSender();

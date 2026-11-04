@@ -68,7 +68,13 @@ export class LauncherCompatibleWebCastSender {
     const params = control?.params;
     if (typeof id !== 'string' || !id || typeof method !== 'string' || !method || !params || typeof params !== 'object') return {status: 'invalid_state'};
     if (method === 'input.openStream') {
-      const result = {...params, accepted: params.accepted !== false};
+      const bound = this.stream;
+      const result = {...params, accepted: params.accepted !== false,
+        streamId: params.streamId ?? bound?.streamId,
+        epoch: params.epoch ?? bound?.epoch,
+        canvasToken: params.canvasToken ?? bound?.canvasToken,
+        geometryToken: params.geometryToken ?? bound?.geometryToken,
+      };
       const opened = this.acceptOpenStreamResult(result);
       if (!opened) return this.controlError(id, method, 'INVALID_STATE', 'input.openStream does not match the current BIND or is incomplete');
       this.sendControlResponse(id, method, result);
