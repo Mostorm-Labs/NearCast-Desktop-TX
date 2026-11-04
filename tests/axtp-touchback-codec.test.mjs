@@ -178,6 +178,44 @@ test('activates only after a complete input.openStream result', () => {
   assert.equal(events.length, 1);
 });
 
+test('accepts receiver-owned input.openStream request only after BIND and replies with the original id and method', () => {
+  const sent = [];
+  const sender = new LauncherCompatibleWebCastSender();
+  sender.attachControlChannel({readyState: 'open', send: value => sent.push(JSON.parse(value))});
+  const bindPayload = encodeTouchbackBindPayload({runtimeInstanceId: 'r', sessionId: 's', bindingToken: 't', sessionGeneration: 1, slotId: 0, bindingGeneration: 1, lifecycleGeneration: 1});
+  sender.handleControlMessage({data: encodeTouchbackFrame({wireVersion: 'axtp', streamId: 9, seqId: 0, cursor: 1n, kind: TouchbackFrameKind.BIND, epoch: 2, canvasToken: 3, geometryToken: 4, controlPayload: bindPayload})});
+  const result = sender.handleControlMessage({data: JSON.stringify({action: 'axtp-control', id: 'open-1', method: 'input.openStream', params: {
+    streamId: 9, epoch: 2, acceptedMode: 'touch', format: 'touch-batch-v1', canvasToken: 3, geometryToken: 4, revision: 'rev-1', accepted: true,
+  }})});
+  assert.equal(result.status, 'stream_opened');
+  assert.equal(sender.snapshot().streamState, 'active');
+  assert.deepEqual(sent, [{action: 'axtp-control', id: 'open-1', method: 'input.openStream', result: {
+    streamId: 9, epoch: 2, acceptedMode: 'touch', format: 'touch-batch-v1', canvasToken: 3, geometryToken: 4, revision: 'rev-1', accepted: true,
+  }}]);
+});
+
+test('rejects a mismatched receiver-owned open request and closes an active stream with a response', () => {
+  const sent = [];
+  const sender = new LauncherCompatibleWebCastSender();
+  sender.attachControlChannel({readyState: 'open', send: value => sent.push(JSON.parse(value))});
+  const bindPayload = encodeTouchbackBindPayload({runtimeInstanceId: 'r', sessionId: 's', bindingToken: 't', sessionGeneration: 1, slotId: 0, bindingGeneration: 1, lifecycleGeneration: 1});
+  sender.handleControlMessage({data: encodeTouchbackFrame({wireVersion: 'axtp', streamId: 9, seqId: 0, cursor: 1n, kind: TouchbackFrameKind.BIND, epoch: 2, canvasToken: 3, geometryToken: 4, controlPayload: bindPayload})});
+  const rejected = sender.handleControlMessage({data: JSON.stringify({action: 'axtp-control', id: 'open-2', method: 'input.openStream', params: {
+    streamId: 10, epoch: 2, acceptedMode: 'mouse', format: 'touch-batch-v1', canvasToken: 3, geometryToken: 4, revision: 'rev-2', accepted: true,
+  }})});
+  assert.equal(rejected.status, 'invalid_state');
+  assert.equal(sent.at(-1).id, 'open-2');
+  assert.equal(sent.at(-1).method, 'input.openStream');
+  assert.equal(sent.at(-1).error.code, 'INVALID_STATE');
+  sender.handleControlMessage({data: JSON.stringify({action: 'axtp-control', id: 'open-3', method: 'input.openStream', params: {
+    streamId: 9, epoch: 2, acceptedMode: 'touch', format: 'touch-batch-v1', canvasToken: 3, geometryToken: 4, revision: 'rev-1', accepted: true,
+  }})});
+  const closed = sender.handleControlMessage({data: JSON.stringify({action: 'axtp-control', id: 'close-1', method: 'input.closeStream', params: {streamId: 9, epoch: 2}})});
+  assert.equal(closed.status, 'stream_closed');
+  assert.equal(sender.snapshot().streamState, 'bound');
+  assert.deepEqual(sent.at(-1), {action: 'axtp-control', id: 'close-1', method: 'input.closeStream', result: {streamId: 9, epoch: 2, closed: true, alreadyClosed: false}});
+});
+
 test('recognizes AXTP when streamId begins with the touch magic', () => {
   const bytes = encodeTouchbackFrame({
     wireVersion: 'axtp', streamId: 0x54420001, seqId: 0, cursor: 1n,

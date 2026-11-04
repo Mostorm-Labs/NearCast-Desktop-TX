@@ -51,12 +51,50 @@ export class LauncherCompatibleWebCastSender {
     throw new Error('Sender does not initiate input.openStream; wait for the receiver control result');
   }
   closeTouchbackStream(params = {}) { return this.requestControl('input.closeStream', {streamKind: 'touchback', ...params}); }
+  sendControlResponse(id, method, result, error) {
+    if (!this.control || this.control.readyState !== 'open' || typeof id !== 'string' || !id || typeof method !== 'string' || !method) return false;
+    const response = {action: 'axtp-control', id, method};
+    if (error) response.error = error;
+    else response.result = result;
+    try { this.control.send(JSON.stringify(response)); return true; } catch { return false; }
+  }
+  controlError(id, method, code, message) {
+    this.sendControlResponse(id, method, undefined, {code, message});
+    return {status: 'invalid_state', error: new Error(message)};
+  }
+  handleReceiverControlRequest(control) {
+    const id = control?.id;
+    const method = control?.method;
+    const params = control?.params;
+    if (typeof id !== 'string' || !id || typeof method !== 'string' || !method || !params || typeof params !== 'object') return {status: 'invalid_state'};
+    if (method === 'input.openStream') {
+      const result = {...params, accepted: params.accepted !== false};
+      const opened = this.acceptOpenStreamResult(result);
+      if (!opened) return this.controlError(id, method, 'INVALID_STATE', 'input.openStream does not match the current BIND or is incomplete');
+      this.sendControlResponse(id, method, result);
+      return {status: 'stream_opened'};
+    }
+    if (method === 'input.closeStream') {
+      const stream = this.stream;
+      if (!stream || !Number.isInteger(params.streamId) || !Number.isInteger(params.epoch) || params.streamId !== stream.streamId || params.epoch !== stream.epoch) return this.controlError(id, method, 'INVALID_STATE', 'input.closeStream does not match the current BIND');
+      const result = this.session.accept({kind: TouchbackFrameKind.CLOSE, epoch: params.epoch});
+      if (result.status !== 'closed') return this.controlError(id, method, 'INVALID_STATE', 'input.closeStream rejected by the current session');
+      this.streamState = 'bound';
+      this.stream = {...stream, acceptedMode: null};
+      const response = {streamId: params.streamId, epoch: params.epoch, closed: true, alreadyClosed: false};
+      this.sendControlResponse(id, method, response);
+      this.onControlFrame({kind: method, wireVersion: 'control', ...response}, {status: 'closed'});
+      return {status: 'stream_closed'};
+    }
+    return this.controlError(id, method, 'NOT_SUPPORTED', `Unsupported control method: ${method}`);
+  }
   handleControlMessage(message) {
     if (!this.control || this.control.readyState !== 'open') return {status: 'stale'};
     if (typeof message?.data === 'string') {
       this.stats.textAccepted += 1;
       try {
         const control = JSON.parse(message.data);
+        if (control?.action === 'axtp-control' && Object.hasOwn(control, 'params') && !Object.hasOwn(control, 'result') && !Object.hasOwn(control, 'error')) return this.handleReceiverControlRequest(control);
         const result = control?.result ?? control?.params ?? control;
         const method = control?.method ?? control?.type ?? control?.action;
         if (control?.id && this.pendingControlRequests.has(control.id) && Object.hasOwn(control, 'result')) {
