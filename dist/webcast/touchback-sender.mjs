@@ -14,7 +14,7 @@ export class WebCastTouchbackSender {
           this.generation++;
           this.resetPointer();
         }
-        if (frame?.kind === TouchbackFrameKind.BIND && result?.status === 'accepted' && this.authorized) this.onStatus(PointerInjectionStatus.ACCEPTED);
+        if (result?.status === 'active' && this.authorized) this.onStatus(PointerInjectionStatus.ACCEPTED);
         onControlFrame?.(frame, result);
       },
       onTouchback: frame => this.applyFrame(frame),

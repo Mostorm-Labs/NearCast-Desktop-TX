@@ -12,6 +12,8 @@ export class LauncherCompatibleWebCastSender {
     this.controlRequestSequence = 0;
     this.pendingControlRequests = new Map();
     this.stats = {binaryRejected: 0, binaryAccepted: 0, textAccepted: 0};
+    this.streamState = 'unavailable';
+    this.stream = null;
   }
   attachControlChannel(channel) {
     if (!channel || channel.readyState !== 'open') throw new Error('control channel is not open');
@@ -25,6 +27,8 @@ export class LauncherCompatibleWebCastSender {
       bindingToken: binding.bindingToken ?? `axtp:${streamId}:${epoch}`,
     }});
     if (result.status !== 'accepted') return false;
+    this.stream = {streamId, epoch, canvasToken, geometryToken, acceptedMode: binding.acceptedMode ?? null, format: binding.format ?? 'touch-batch-v1', revision: binding.revision ?? null, binding: {...binding}};
+    this.streamState = 'bound';
     this.onControlFrame({kind: TouchbackFrameKind.BIND, wireVersion: 'axtp', streamId, epoch, canvasToken, geometryToken}, result);
     return true;
   }
@@ -44,11 +48,7 @@ export class LauncherCompatibleWebCastSender {
   setTouchbackMode(params = {}) { return this.requestControl('cast.setTouchbackMode', params); }
   setTouchbackResolutionPreference(params = {}) { return this.requestControl('cast.setTouchbackResolutionPreference', params); }
   async openTouchbackStream(params = {}) {
-    const result = await this.requestControl('input.openStream', {streamKind: 'touchback', format: 'touch-batch-v1', preferredMode: 'touch', supportedModes: ['touch', 'mouse'], ...params});
-    if (result?.accepted !== false && Number.isInteger(result?.streamId) && Number.isInteger(result?.epoch)) {
-      if (!this.configureStream({streamId: result.streamId, epoch: result.epoch, canvasToken: result.canvasToken ?? 0, geometryToken: result.geometryToken ?? 0, binding: result.binding ?? {}})) throw new Error('Invalid input.openStream result');
-    }
-    return result;
+    throw new Error('Sender does not initiate input.openStream; wait for the receiver control result');
   }
   closeTouchbackStream(params = {}) { return this.requestControl('input.closeStream', {streamKind: 'touchback', ...params}); }
   handleControlMessage(message) {
@@ -64,18 +64,20 @@ export class LauncherCompatibleWebCastSender {
           if (control.error) pending.reject(new Error(control.error.message || String(control.error))); else pending.resolve(control.result);
           return {status: 'control_response'};
         }
-        if (method === 'input.openStream' && result?.accepted !== false && Number.isInteger(result.streamId) && Number.isInteger(result.epoch)) {
-          const opened = this.configureStream({streamId: result.streamId, epoch: result.epoch, canvasToken: result.canvasToken ?? 0, geometryToken: result.geometryToken ?? 0, binding: result.binding ?? {}});
+        if (method === 'input.openStream') {
+          const opened = this.acceptOpenStreamResult(result);
           return opened ? {status: 'stream_opened'} : {status: 'invalid_state'};
         }
         if (method === 'input.closeStream' && Number.isInteger(result?.streamId) && result.closed !== false) {
           if (this.session.streamId === result.streamId && this.session.epoch === result.epoch) this.session.accept({kind: TouchbackFrameKind.CLOSE, epoch: result.epoch});
+          this.streamState = 'bound';
+          if (this.stream) this.stream = {...this.stream, acceptedMode: null};
           return {status: 'stream_closed'};
         }
         if ((method === 'cast.touchbackChanged' || method === 'cast.touchback.changed') && result?.effectiveEnabled === true) {
           const stream = result.stream ?? result.inputStream ?? result.touchback?.stream;
           if (stream && Number.isInteger(stream.streamId) && Number.isInteger(stream.epoch)) {
-            return this.configureStream({streamId: stream.streamId, epoch: stream.epoch, canvasToken: stream.canvasToken ?? 0, geometryToken: stream.geometryToken ?? 0, binding: stream.binding ?? {}}) ? {status: 'stream_opened'} : {status: 'invalid_state'};
+            return this.acceptOpenStreamResult({...stream, accepted: true, acceptedMode: stream.acceptedMode ?? stream.mode, format: stream.format ?? 'touch-batch-v1', revision: stream.revision}) ? {status: 'stream_opened'} : {status: 'invalid_state'};
           }
         }
       } catch {}
@@ -90,6 +92,11 @@ export class LauncherCompatibleWebCastSender {
         return result;
       }
       if (frame.wireVersion === 'axtp') {
+        if (this.streamState !== 'active') {
+          this.stats.binaryRejected += 1;
+          this.requestReset();
+          return {status: 'reset_required'};
+        }
         const result = this.session.acceptBytes(message.data);
         if (result.status === 'applied' || result.status === 'closed' || result.status === 'reset') {
           this.stats.binaryAccepted += 1;
@@ -105,6 +112,11 @@ export class LauncherCompatibleWebCastSender {
         if (result.status === 'invalid_state' || result.status === 'stale') this.stats.binaryRejected += 1;
         else this.stats.binaryAccepted += 1;
         return result;
+      }
+      if (this.streamState !== 'active') {
+        this.stats.binaryRejected += 1;
+        this.requestReset();
+        return {status: 'reset_required'};
       }
       const result = this.session.acceptBytes(message.data);
       if (result.status === 'applied') { this.stats.binaryAccepted += 1; this.onTouchback(result.frame); }
@@ -140,11 +152,16 @@ export class LauncherCompatibleWebCastSender {
     if (frame.kind === TouchbackFrameKind.BIND) {
       const binding = this.resolveBinding(frame);
       const result = binding ? this.session.accept({kind: TouchbackFrameKind.BIND, binding: {...binding, epoch: frame.epoch, streamId: frame.streamId, canvasToken: frame.canvasToken, geometryToken: frame.geometryToken, wireVersion: frame.wireVersion}}) : this.session.acceptBindFrame(frame);
+      if (result.status === 'accepted') {
+        this.streamState = 'bound';
+        this.stream = {streamId: frame.streamId, epoch: frame.epoch, canvasToken: frame.canvasToken, geometryToken: frame.geometryToken, acceptedMode: null, format: null, revision: null, binding: binding ?? this.session.binding};
+      }
       this.onControlFrame(frame, result);
       return result;
     }
     if (frame.kind === TouchbackFrameKind.RESET || frame.kind === TouchbackFrameKind.RESET_ACK) {
       const result = this.session.accept({kind: frame.kind, epoch: frame.epoch, wireVersion: frame.wireVersion});
+      if (frame.kind === TouchbackFrameKind.RESET && result.status === 'reset') this.streamState = 'bound';
       this.onControlFrame(frame, result);
       if (frame.wireVersion !== 'axtp' && frame.kind === TouchbackFrameKind.RESET && result.status === 'reset' && this.control.readyState === 'open') {
         const ack = encodeTouchbackFrame({kind: TouchbackFrameKind.RESET_ACK, epoch: frame.epoch, sequence: frame.sequence}, this.session.limits);
@@ -161,6 +178,23 @@ export class LauncherCompatibleWebCastSender {
     this.onControlFrame(frame, result);
     return result;
   }
+  acceptOpenStreamResult(result) {
+    if (!result || result.accepted !== true || result.format !== 'touch-batch-v1' || !['touch', 'mouse'].includes(result.acceptedMode) || typeof result.revision !== 'string' || !result.revision.trim()) return false;
+    if (!Number.isInteger(result.streamId) || result.streamId <= 0 || !Number.isInteger(result.epoch) || result.epoch < 0 || !Number.isInteger(result.canvasToken) || result.canvasToken < 0 || !Number.isInteger(result.geometryToken) || result.geometryToken < 0) return false;
+    const bound = this.stream;
+    if (!bound || (bound.streamId != null && bound.streamId !== result.streamId) || (bound.epoch != null && bound.epoch !== result.epoch) || (bound.canvasToken != null && bound.canvasToken !== result.canvasToken) || (bound.geometryToken != null && bound.geometryToken !== result.geometryToken)) return false;
+    this.session.streamId = result.streamId;
+    this.session.epoch = result.epoch;
+    this.session.canvasToken = result.canvasToken;
+    this.session.geometryToken = result.geometryToken;
+    this.session.wireVersion = 'axtp';
+    this.session.resetPending = false;
+    this.session.nextSequence = 0;
+    this.stream = {...bound, acceptedMode: result.acceptedMode, format: result.format, revision: result.revision, limits: {maxBatchEvents: result.maxBatchEvents, maxFrameBytes: result.maxFrameBytes, maxContacts: result.maxContacts}};
+    this.streamState = 'active';
+    this.onControlFrame({kind: 'input.openStream', wireVersion: 'control', ...result}, {status: 'active', stream: this.stream});
+    return true;
+  }
   fence() { return this.session.fence(); }
-  snapshot() { return {...this.stats, activeContacts: this.session.activeContacts.size}; }
+  snapshot() { return {...this.stats, activeContacts: this.session.activeContacts.size, streamState: this.streamState, stream: this.stream ? {...this.stream} : null}; }
 }
