@@ -241,6 +241,21 @@ test('accepts an ordered modern reset without waiting for an application ACK', (
   assert.equal(events.length, 0);
 });
 
+test('accepts close after a receiver reset advances the bound epoch', () => {
+  const sent = [];
+  const sender = new LauncherCompatibleWebCastSender();
+  sender.attachControlChannel({readyState: 'open', send: value => sent.push(typeof value === 'string' ? JSON.parse(value) : value)});
+  const bind = encodeTouchbackFrame({wireVersion: 'axtp', streamId: 24, seqId: 0, cursor: 1n, kind: TouchbackFrameKind.BIND, epoch: 8, canvasToken: 9, geometryToken: 10, controlPayload: encodeTouchbackBindPayload({runtimeInstanceId: 'r', sessionId: 's', bindingToken: 't', sessionGeneration: 1, slotId: 0, bindingGeneration: 1, lifecycleGeneration: 1})});
+  assert.equal(sender.handleControlMessage({data: bind}).status, 'accepted');
+  assert.equal(sender.handleControlMessage({data: JSON.stringify({method: 'input.openStream', result: {streamId: 24, epoch: 8, acceptedMode: 'touch', format: 'touch-batch-v1', canvasToken: 9, geometryToken: 10, revision: 'rev-1', accepted: true}})}).status, 'stream_opened');
+  const reset = encodeTouchbackFrame({wireVersion: 'axtp', streamId: 24, seqId: 0, cursor: 2n, kind: TouchbackFrameKind.RESET, epoch: 9, canvasToken: 9, geometryToken: 10});
+  assert.equal(sender.handleControlMessage({data: reset}).status, 'reset');
+  assert.equal(sender.snapshot().stream.epoch, 9);
+  const closed = sender.handleControlMessage({data: JSON.stringify({action: 'axtp-control', id: 'close-after-reset', method: 'input.closeStream', params: {streamId: 24, epoch: 9}})});
+  assert.equal(closed.status, 'stream_closed');
+  assert.deepEqual(sent.at(-1), {action: 'axtp-control', id: 'close-after-reset', method: 'input.closeStream', result: {streamId: 24, epoch: 9, closed: true, alreadyClosed: false}});
+});
+
 test('modern close releases the sender binding contacts without sending an ACK', () => {
   let closeCalls = 0;
   const sender = new LauncherCompatibleWebCastSender({onControlFrame: (frame, result) => {

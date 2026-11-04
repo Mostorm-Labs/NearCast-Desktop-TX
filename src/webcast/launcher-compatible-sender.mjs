@@ -199,7 +199,12 @@ export class LauncherCompatibleWebCastSender {
     }
     if (frame.kind === TouchbackFrameKind.RESET || frame.kind === TouchbackFrameKind.RESET_ACK) {
       const result = this.session.accept({kind: frame.kind, epoch: frame.epoch, wireVersion: frame.wireVersion});
-      if (frame.kind === TouchbackFrameKind.RESET && result.status === 'reset') this.streamState = 'bound';
+      if (frame.kind === TouchbackFrameKind.RESET && result.status === 'reset') {
+        this.streamState = 'bound';
+        if (this.stream && this.session.streamId === this.stream.streamId) {
+          this.stream = {...this.stream, epoch: frame.epoch};
+        }
+      }
       this.onControlFrame(frame, result);
       if (frame.wireVersion !== 'axtp' && frame.kind === TouchbackFrameKind.RESET && result.status === 'reset' && this.control.readyState === 'open') {
         const ack = encodeTouchbackFrame({kind: TouchbackFrameKind.RESET_ACK, epoch: frame.epoch, sequence: frame.sequence}, this.session.limits);
