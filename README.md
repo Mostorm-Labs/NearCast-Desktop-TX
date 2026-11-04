@@ -12,7 +12,7 @@ $env:HTTPS_PROXY="http://127.0.0.1:7897"
 $env:CARGO_HTTP_PROXY="http://127.0.0.1:7897"
 
 # 验证 JavaScript 协议和发送端流程
-node --test tests
+npm test
 
 # 检查 Tauri Rust 后端
 cargo check --manifest-path src-tauri/Cargo.toml
@@ -21,6 +21,23 @@ cargo check --manifest-path src-tauri/Cargo.toml
 cargo build --release --manifest-path src-tauri/Cargo.toml
 .\src-tauri\target\release\nearcast_desktop_tx.exe
 ```
+
+macOS 本地调试请构建并打开 `.app`：
+
+```sh
+npm run build:macos
+open "src-tauri/target/debug/bundle/macos/NearCast Desktop TX.app"
+```
+
+`build:macos` 优先选择钥匙串中唯一的 Apple Development 证书（没有开发证书时选择 Developer ID Application），也可通过 `APPLE_SIGNING_IDENTITY` 明确指定。脚本拒绝使用 ad-hoc 签名进行权限联调，并在应用仍运行时拒绝覆盖 `.app`。配置中的 `signingIdentity: "-"` 仅供无证书的 CI 生成构建产物；ad-hoc 代码身份随构建变化，不能保证保留旧版本的录屏与辅助功能授权。正式权限联调使用稳定的 Apple 签名身份。参见 [Apple 代码身份说明](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)。首次启动请允许本地网络访问；可在“系统设置 → 隐私与安全 → 本地网络”检查 NearCast Desktop TX。
+
+从旧 ad-hoc 包切换到稳定签名后，旧授权可能仍绑定原来的代码哈希，单纯关闭再开启系统开关不会更新该身份。本机系统日志会报告 `Failed to match existing code requirement`。仅重置当前应用对应的 `Accessibility` / `ScreenCapture` 授权，再由用户重新确认；不要清空其他应用的授权或修改 TCC 数据库。
+
+WKWebView 需要至少一个媒体用途声明才暴露 `navigator.mediaDevices`。`Info.plist` 包含 `NSMicrophoneUsageDescription` 以启用此接口；屏幕分享仍传入 `audio:false`，不申请或采集麦克风音频。
+
+macOS 界面顶部提供“本地网络”“录屏与系统录音”“辅助功能”三个权限开关入口。点击任一入口会打开对应的系统设置页面，由用户确认授权或关闭；回到应用后自动重新检测，也可点击“刷新状态”。录屏和辅助功能读取系统授权状态；本地网络显示实际组播访问检测结果“网络可用”，检测失败显示“待确认”，不把离线或网络异常误判为用户拒绝。修改本地网络权限后返回配对页会重新扫描。首次配置录屏或辅助功能时会触发对应系统授权提示，授权后如系统要求重启，请重新打开 `.app`。Windows 隐藏此面板。
+
+部分 macOS 版本的本地网络链接会打开“隐私与安全”总页，此时再选择“本地网络”；新版系统可能将“辅助功能”权限显示为“设备控制和数据访问”。
 
 启动后输入接收端显示的 4 位配对码，点击“连接”，待接收端确认后点击“开始分享屏幕”。浏览器会弹出系统屏幕选择器；点击“停止分享”会停止媒体轨道但保留连接，点击“断开连接”会关闭 WebRTC/WebSocket 并清理 Touchback 状态。
 

@@ -6,6 +6,7 @@ import {TauriDeviceDiscovery} from './tauri-device-discovery.mjs';
 import {loadPlatformInfo, platformSummary, screenCaptureError, touchbackSummary, touchbackError} from './platform-capabilities.mjs';
 import {canAttachTouchbackChannel} from './webcast/touchback-channel-policy.mjs';
 import {normalizeVideoQuality} from './webcast/video-quality.mjs';
+import {MacOsPermissions} from './macos-permissions.mjs';
 
 const tauri = globalThis.__TAURI__ ?? {};
 const invoke = tauri.core?.invoke ?? (async () => false);
@@ -44,6 +45,13 @@ const videoResolution = document.querySelector('#video-resolution');
 const videoBitrateMode = document.querySelector('#video-bitrate-mode');
 const videoBitrate = document.querySelector('#video-bitrate');
 const videoQualitySummary = document.querySelector('#video-quality-summary');
+const permissionsPanel = document.querySelector('#macos-permissions');
+const permissionRows = document.querySelector('#permission-rows');
+const refreshPermissionsButton = document.querySelector('#refresh-permissions');
+const permissionsError = document.querySelector('#permissions-error');
+const permissions = new MacOsPermissions({invoke});
+let permissionActionPending = false;
+let permissionSettingsOpened = null;
 
 const defaultEndpoint = new URLSearchParams(location.search).get('ws') || DEFAULT_ENDPOINT;
 let selectedEndpoint = defaultEndpoint;
@@ -266,9 +274,60 @@ const startDiscovery = async () => {
   finally { refreshDevices.disabled = false; }
 };
 refreshDevices.addEventListener('click', startDiscovery);
+
+const renderPermissions = () => {
+  for (const row of permissions.rows()) {
+    let toggle = permissionRows.querySelector(`[data-permission="${row.id}"]`);
+    if (!toggle) {
+      const item = document.createElement('div'); item.className = 'permission-row';
+      const control = document.createElement('div'); control.className = 'permission-control';
+      const title = document.createElement('span'); title.className = 'permission-title'; title.textContent = row.title;
+      toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'permission-toggle'; toggle.dataset.permission = row.id;
+      toggle.setAttribute('aria-label', `${row.title}权限设置`);
+      toggle.setAttribute('aria-describedby', `permission-status-${row.id}`);
+      toggle.title = `前往系统设置配置${row.title}`;
+      toggle.addEventListener('click', async () => {
+        if (permissionActionPending) return;
+        permissionActionPending = true; permissionSettingsOpened = row.id;
+        setError(permissionsError, null); renderPermissions();
+        try { await permissions.openSettings(row.id); }
+        catch (error) { setError(permissionsError, error); }
+        finally { permissionActionPending = false; renderPermissions(); }
+      });
+      const detail = document.createElement('p'); detail.className = 'permission-detail';
+      const state = document.createElement('span'); state.className = 'permission-state'; state.id = `permission-status-${row.id}`; state.setAttribute('aria-live', 'polite');
+      detail.append(state, document.createElement('br'), row.help);
+      control.append(title, toggle); item.append(control, detail); permissionRows.append(item);
+    }
+    toggle.disabled = permissionActionPending;
+    toggle.dataset.state = row.enabled === null ? 'unknown' : row.enabled ? 'on' : 'off';
+    if (row.enabled === null) { toggle.removeAttribute('role'); toggle.removeAttribute('aria-checked'); }
+    else { toggle.setAttribute('role', 'switch'); toggle.setAttribute('aria-checked', String(row.enabled)); }
+    const state = document.querySelector(`#permission-status-${row.id}`);
+    state.textContent = row.status;
+    if (row.id === 'localNetwork' && row.enabled === null) state.textContent = '待确认 · 请在系统设置中查看';
+  }
+};
+const refreshPermissions = async () => {
+  if (platformInfo?.os !== 'macos') return;
+  refreshPermissionsButton.disabled = true;
+  setError(permissionsError, null);
+  try { await permissions.refresh(); }
+  catch (error) { setError(permissionsError, error); }
+  finally { renderPermissions(); refreshPermissionsButton.disabled = false; }
+};
+refreshPermissionsButton.addEventListener('click', refreshPermissions);
+window.addEventListener('focus', async () => {
+  const opened = permissionSettingsOpened; permissionSettingsOpened = null;
+  await refreshPermissions();
+  if (opened === 'localNetwork' && currentStatus === 'idle') await startDiscovery();
+});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshPermissions(); });
 setView('idle');
 platformReady = loadPlatformInfo(invoke).then(info => {
   platformInfo = info;
+  permissionsPanel.hidden = info.os !== 'macos';
+  if (info.os === 'macos') { renderPermissions(); refreshPermissions(); }
   platformStatus.textContent = platformSummary(info);
   touchbackStatus.textContent = touchbackSummary(info);
   if (currentStatus === 'idle') touchback = buildTouchback(info);

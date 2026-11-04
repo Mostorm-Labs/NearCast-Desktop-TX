@@ -10,6 +10,13 @@
   <main class="webcast-sender">
     <header class="topbar"><div class="logo"><span class="logo-mark">N</span><span>NearHub</span></div><span class="product-label">WebCast</span></header>
 
+    <section id="macos-permissions" class="permissions-panel" aria-labelledby="permissions-title" hidden>
+      <div class="permissions-heading"><h2 id="permissions-title">macOS 权限</h2><button id="refresh-permissions" class="refresh" type="button">刷新状态</button></div>
+      <p class="permissions-help">点击开关前往系统设置修改，返回后自动刷新。授权后如未生效，请重新启动应用。</p>
+      <div id="permission-rows" class="permission-grid"></div>
+      <p id="permissions-error" class="error" role="status" hidden></p>
+    </section>
+
     <section id="code-view" class="sender-panel">
       <div class="panel-eyebrow">WEBCAST SENDER</div>
       <h1>Welcome to cast screen</h1>
