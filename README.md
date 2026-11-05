@@ -1,5 +1,7 @@
 # NearCast Desktop TX
 
+2026-11-05 协议修复后的真机 Touch 实测流程、已验证 EXE 指纹及诊断说明见 [Touch 注入验证 handoff](docs/superpowers/handoffs/2026-11-05-touch-injection-device-handoff.md)。协议生命周期已联调通过，物理触摸注入仍待现场验证。
+
 支持 Windows 10/11 和 macOS 13 及以上版本。Windows 使用 WebView2；Windows 安装包会在安装时下载并静默安装 WebView2 Bootstrapper。macOS 首次分享屏幕前，需要在“系统设置 → 隐私与安全性 → 屏幕录制”允许 NearCast Desktop TX。
 
 NearCast Desktop TX 是基于 Tauri 的 WebCast 发送端，复用 Launcher 的发送流程：配对码加入房间、WebSocket 信令、WebRTC `RTCPeerConnection` 和 DataChannel 控制通道。
@@ -28,13 +30,17 @@ cargo build --release --manifest-path src-tauri/Cargo.toml
 
 发送端等待控制 DataChannel 建立后才启用分享按钮。初始 Offer 使用 WebSocket，携带 Launcher 的 roomId/userId/hostUserId/targetId；随后优先用 `webrtc-signal` DataChannel 消息协商 H.264/Opus，ICE 在 Answer 到达前排队。停止分享时清空 sender 的 track，重新选择时复用原 sender，避免出现重复视频轨道。取消或拒绝屏幕选择会保留连接并在分享页显示错误。
 
-Touchback 继续使用现有 Launcher-compatible binary control channel。Windows 使用 Pointer Injection；macOS 13+ 使用 CoreGraphics 注入主屏幕的鼠标移动、左/右/中键、拖拽和已有修饰键字段。反向控制时请分享主屏幕；窗口/副屏需要后续加入捕获区域映射。macOS 首次使用反向控制需要在“系统设置 → 隐私与安全性 → 辅助功能”允许 NearCast Desktop TX。当前 Touchback 帧没有独立键码和滚轮增量字段，因此键盘和滚轮等待版本化协议扩展；多指触控不支持。AirPlay 仍仅展示，不授权 Touchback。
+Touchback 使用 WebCast control DataChannel 上的 canonical AXTP STREAM：16-byte 大端 STREAM header、28-byte 大端 TouchBatch header、CRC、每 packet 一个 seqId，普通输入和 RESET 均不发送应用 ACK。BIND payload 的字符串长度和 generation 同样采用大端，uint64 generation 保留为十进制字符串，避免 JavaScript 精度丢失。输入通道不再通过旧 `{method,result}` 消息直接激活 stream，也不接受旧的无 STREAM header 二进制帧。
 
-连接页的反控状态分两步显示：先显示“本机输入已初始化，等待接收端开启反控”，收到接收端 Touchback Bind 后才显示“反控已就绪”。要启用反控，请从局域网扫描结果中选择带 `touchback-v1` 能力的 WebCast 接收端，再在接收端打开 Touchback 开关；手动输入配对码仍可用于屏幕分享。
+接收端拥有 `input.openStream` 请求。发送端先接受 BIND，再校验 request 的 runtimeInstanceId、完整 target generation 和 canvas/geometry token，根据 preferred/required 与本机能力选择模式，生成 acceptedMode、revision 和协商上限后回复同 id/method 的 result。相同 commandId/参数在 5 分钟缓存窗口内重放同一结果；冲突参数会被拒绝。切换/重开遵循 RESET（新 epoch）→ closeStream → openStream，close 保留 BIND，并拒绝旧 epoch 输入。
+
+Windows 原生桥提供 Touch（最多 10 contacts）；macOS 13+ 原生桥提供现有 CoreGraphics Mouse 路径（单 contact）。Windows Mouse required 请求明确返回 NOT_SUPPORTED；preferred 可在对端声明支持 Touch 时明确回退到 Touch，本次协议修复没有新增 Windows 鼠标注入。macOS 原生桥尚未实现独立键码/滚轮注入。反向控制时请分享主屏幕；窗口/副屏需要后续加入捕获区域映射。macOS 首次使用反向控制需要在“系统设置 → 隐私与安全性 → 辅助功能”允许 NearCast Desktop TX。AirPlay 仍仅展示，不授权 Touchback。
+
+连接页先显示“本机输入已初始化，等待接收端开启反控”；BIND 只建立协议绑定，收到有效 receiver-owned input.openStream 请求并生成结果后才显示“反控已就绪”。接收端需开启 Touchback gate；手动配对和从发现列表选择接收端均可建立已认证的 WebCast 控制通道。
 
 手动输入配对码时，已认证的 WebCast control channel 也会绑定 Touchback，不再要求先从扫描列表选择设备。接收端在发送端原生输入初始化完成前发出的 BIND/BATCH 会暂存并按顺序处理；AirPlay 或未打开的非 WebCast channel 仍不会授权反控。
 
-真实联调时可在发送端 WebView DevTools 执行 `globalThis.__nearcastTouchbackDiagnostics()` 查看状态：`controlChannelReady` 表示 DataChannel 已打开，`nativeReady` 表示本机输入接口已初始化，`bindingReady` 表示发送端已收到并接受 BIND，`injectionCount` / `lastInjectionStatus` 表示是否实际调用过输入注入。`receiverEnabled` 固定为 `null`，因为当前 Touchback wire protocol 不传递接收端本地开关状态；BIND 只能证明协议绑定成功，不能证明接收端 UI 开关已开启。
+真实联调时可在投屏页展开“反控收包诊断”，或执行 `globalThis.__nearcastTouchbackDiagnostics()`。`controlChannelReady`、`nativeReady`、`bindingReady` 分别表示通道、本机初始化、BIND 已完成；`control.streamState`、`control.stream` 显示协商状态和 stream/epoch/模式；`control.recentControl` 保留最近 32 条控制消息的允许字段及处理结果，二进制收帧单独计数；`injectionCount` / `lastInjectionStatus` / `lastInjectionFailure` 表示实际注入及错误。诊断不保留配对码或 bindingToken。`receiverEnabled` 仍为 null，接收端本地 gate 和 effectiveEnabled 应通过接收端状态查询核对。
 
 WebSocket 地址默认为 `wss://cast.nearhub.us`，也可以通过 Tauri 页面 URL 的 `?ws=` 参数覆盖，例如 `?ws=wss%3A%2F%2Flocalhost%3A8888`。
 

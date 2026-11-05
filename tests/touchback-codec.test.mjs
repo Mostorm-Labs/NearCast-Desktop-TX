@@ -50,5 +50,5 @@ test('rejects corrupted, truncated, unknown, and over-limit frames before alloca
 
 test('round trips the canonical bind owner payload', () => {
   const payload = {runtimeInstanceId: 'runtime-a', sessionId: 'session-a', bindingToken: 'opaque-token', sessionGeneration: 4, slotId: 2, bindingGeneration: 8, lifecycleGeneration: 11};
-  assert.deepEqual(decodeTouchbackBindPayload(encodeTouchbackBindPayload(payload)), payload);
+  assert.deepEqual(decodeTouchbackBindPayload(encodeTouchbackBindPayload(payload)), {...payload,sessionGeneration:'4',bindingGeneration:'8',lifecycleGeneration:'11'});
 });

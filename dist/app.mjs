@@ -58,7 +58,12 @@ let platformReady = Promise.resolve();
 let controlGeneration = 0;
 let capturePending = false;
 let videoQuality = normalizeVideoQuality({resolution: videoResolution.value, bitrateMode: videoBitrateMode.value, bitrateKbps: videoBitrate.value});
-globalThis.__nearcastTouchbackDiagnostics = () => touchback?.diagnostics?.() ?? null;
+globalThis.__nearcastTouchbackDiagnostics = () => touchback ? {...touchback.diagnostics(), control: touchback.controlDiagnostics()} : null;
+const controlDiagnostics = document.querySelector('#touchback-diagnostics');
+const renderControlDiagnostics = () => {
+  if (controlDiagnostics) controlDiagnostics.textContent = JSON.stringify(globalThis.__nearcastTouchbackDiagnostics(), null, 2);
+};
+setInterval(renderControlDiagnostics, 1000);
 
 const setError = (element, error) => {
   element.textContent = error ? (error.message || String(error)) : '';

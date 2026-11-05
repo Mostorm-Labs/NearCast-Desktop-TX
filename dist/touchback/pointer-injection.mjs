@@ -6,6 +6,7 @@ export class PointerInjectionSink {
   constructor({native = null, maxContacts = 10} = {}) {
     this.native = native;
     this.maxContacts = maxContacts;
+    this.supportedModes = ['touch'];
     this.initialized = false;
     this.active = new Map();
     this.resetBlocked = false;

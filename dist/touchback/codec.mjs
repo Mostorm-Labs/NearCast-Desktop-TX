@@ -101,5 +101,47 @@ export function encodeTouchbackFrame(frame, limits) { return hasAxtpFields(frame
 export function decodeTouchbackFrame(input, limits) { const bytes = asBytes(input); if (bytes.byteLength >= STREAM_HEADER_BYTES + HEADER_BYTES && bytes[STREAM_HEADER_BYTES] === 0x54 && bytes[STREAM_HEADER_BYTES + 1] === 0x42) return decodeAxtpFrame(bytes, limits); return decodeLegacyFrame(bytes, limits); }
 export {crc32};
 
-export function encodeTouchbackBindPayload(payload) { const values = [payload?.runtimeInstanceId, payload?.sessionId, payload?.bindingToken]; if (values.some(value => typeof value !== 'string' || value.length === 0 || value.length > 128)) return null; const encoded = values.map(value => new TextEncoder().encode(value)); if ([payload?.sessionGeneration, payload?.bindingGeneration, payload?.lifecycleGeneration].some(value => !Number.isSafeInteger(value) || value <= 0) || !Number.isSafeInteger(payload?.slotId) || payload.slotId < 0 || payload.slotId > 0xffffffff) return null; const size = 6 + encoded.reduce((total, value) => total + value.length, 0) + 8 + 4 + 8 + 8; if (size > 1024) return null; const out = new Uint8Array(size); const view = new DataView(out.buffer); let offset = 0; for (const value of encoded) { view.setUint16(offset, value.length, true); offset += 2; out.set(value, offset); offset += value.length; } view.setBigUint64(offset, BigInt(payload.sessionGeneration), true); offset += 8; view.setUint32(offset, payload.slotId, true); offset += 4; view.setBigUint64(offset, BigInt(payload.bindingGeneration), true); offset += 8; view.setBigUint64(offset, BigInt(payload.lifecycleGeneration), true); return out.buffer; }
-export function decodeTouchbackBindPayload(input) { const bytes = asBytes(input); if (bytes.byteLength < 6 + 8 + 4 + 8 + 8 || bytes.byteLength > 1024) return null; const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength); let offset = 0; const readString = () => { if (offset + 2 > bytes.byteLength) return null; const length = view.getUint16(offset, true); offset += 2; if (!length || length > 128 || offset + length > bytes.byteLength) return null; const value = new TextDecoder().decode(bytes.subarray(offset, offset + length)); offset += length; return value; }; const runtimeInstanceId = readString(); const sessionId = readString(); const bindingToken = readString(); if (!runtimeInstanceId || !sessionId || !bindingToken || offset + 8 + 4 + 8 + 8 !== bytes.byteLength) return null; const sessionGeneration = Number(view.getBigUint64(offset, true)); offset += 8; const slotId = view.getUint32(offset, true); offset += 4; const bindingGeneration = Number(view.getBigUint64(offset, true)); offset += 8; const lifecycleGeneration = Number(view.getBigUint64(offset, true)); if (![sessionGeneration, bindingGeneration, lifecycleGeneration].every(Number.isSafeInteger) || !sessionGeneration || !bindingGeneration || !lifecycleGeneration) return null; return {runtimeInstanceId, sessionId, bindingToken, sessionGeneration, slotId, bindingGeneration, lifecycleGeneration}; }
+function generation(value) {
+  if (!(typeof value === 'string' && /^[1-9][0-9]*$/.test(value)) && !(typeof value === 'number' && Number.isSafeInteger(value) && value > 0) && typeof value !== 'bigint') return null;
+  try { const n = BigInt(value); return n > 0n && n <= 0xffffffffffffffffn ? n : null; } catch { return null; }
+}
+
+export function encodeTouchbackBindPayload(payload) {
+  const strings = [payload?.runtimeInstanceId, payload?.sessionId, payload?.bindingToken];
+  if (strings.some(value => typeof value !== 'string' || !value || value.includes('\0'))) return null;
+  const encoded = strings.map(value => new TextEncoder().encode(value));
+  const generations = [payload.sessionGeneration, payload.bindingGeneration, payload.lifecycleGeneration].map(generation);
+  if (encoded.some(value => value.length > 128) || generations.includes(null) || !uint32(payload.slotId)) return null;
+  const bytes = new Uint8Array(34 + encoded.reduce((n, value) => n + value.length, 0));
+  const view = new DataView(bytes.buffer); let offset = 0;
+  for (const value of encoded) { view.setUint16(offset, value.length, false); offset += 2; bytes.set(value, offset); offset += value.length; }
+  view.setBigUint64(offset, generations[0], false); offset += 8;
+  view.setUint32(offset, payload.slotId, false); offset += 4;
+  view.setBigUint64(offset, generations[1], false); offset += 8;
+  view.setBigUint64(offset, generations[2], false);
+  return bytes.buffer;
+}
+
+export function decodeTouchbackBindPayload(input) {
+  const bytes = asBytes(input);
+  if (bytes.length < 37 || bytes.length > 1024) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.length); let offset = 0;
+  try {
+    const strings = [];
+    for (let i = 0; i < 3; i++) {
+      if (offset + 2 > bytes.length) return null;
+      const length = view.getUint16(offset, false); offset += 2;
+      if (!length || length > 128 || offset + length > bytes.length) return null;
+      const value = new TextDecoder('utf-8', {fatal: true}).decode(bytes.subarray(offset, offset + length));
+      if (value.includes('\0')) return null;
+      strings.push(value); offset += length;
+    }
+    if (offset + 28 !== bytes.length) return null;
+    const sessionGeneration = view.getBigUint64(offset, false); offset += 8;
+    const slotId = view.getUint32(offset, false); offset += 4;
+    const bindingGeneration = view.getBigUint64(offset, false); offset += 8;
+    const lifecycleGeneration = view.getBigUint64(offset, false);
+    if (!sessionGeneration || !bindingGeneration || !lifecycleGeneration) return null;
+    return {runtimeInstanceId: strings[0], sessionId: strings[1], bindingToken: strings[2], sessionGeneration: String(sessionGeneration), slotId, bindingGeneration: String(bindingGeneration), lifecycleGeneration: String(lifecycleGeneration)};
+  } catch { return null; }
+}

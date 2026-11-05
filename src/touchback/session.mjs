@@ -72,10 +72,15 @@ export class TouchbackSession {
       if (frame.sequence < this.nextSequence) return {status: 'stale'};
       if (frame.sequence > this.nextSequence) { this.resetPending = true; this.activeContacts.clear(); return {status: 'reset_required'}; }
     }
+    const contacts = new Map(this.activeContacts);
     for (const record of frame.records) {
-      if (record.phase === TouchbackPhase.DOWN || record.phase === TouchbackPhase.MOVE) this.activeContacts.set(record.contactId, record);
-      else this.activeContacts.delete(record.contactId);
+      if (record.phase === TouchbackPhase.DOWN || record.phase === TouchbackPhase.MOVE) contacts.set(record.contactId, record);
+      else contacts.delete(record.contactId);
+      if (contacts.size > (this.limits.maxContacts ?? Infinity)) {
+        this.resetPending = true; this.activeContacts.clear(); return {status: 'reset_required'};
+      }
     }
+    this.activeContacts = contacts;
     this.nextSequence += frame.wireVersion === 'axtp' ? 1 : frame.records.length;
     return {status: 'applied', frame};
   }

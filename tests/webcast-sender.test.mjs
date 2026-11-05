@@ -1,7 +1,8 @@
+import {encodeTouchbackFrame, openCurrent} from './helpers/canonical-touchback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {WebCastTouchbackSender} from '../src/webcast/touchback-sender.mjs';
-import {encodeTouchbackFrame, encodeTouchbackBindPayload, TouchbackFrameKind} from '../src/touchback/codec.mjs';
+import {encodeTouchbackBindPayload, TouchbackFrameKind} from '../src/touchback/codec.mjs';
 import {PointerInjectionSink} from '../src/touchback/pointer-injection.mjs';
 
 test('requires explicit WebCast authorization and disables AirPlay', () => {
@@ -21,7 +22,7 @@ test('reports native readiness separately from receiver Touchback binding', asyn
   sender.handleControlMessage({data: encodeTouchbackFrame({kind: TouchbackFrameKind.BIND, epoch: 1,
     controlPayload: encodeTouchbackBindPayload({runtimeInstanceId: 'r', sessionId: 's', bindingToken: 't', sessionGeneration: 1, slotId: 0, bindingGeneration: 1, lifecycleGeneration: 1})})});
   assert.equal(statuses.at(-1), 'native_ready');
-  sender.handleControlMessage({data: JSON.stringify({method: 'input.openStream', result: {streamId: 1, epoch: 1, acceptedMode: 'touch', format: 'touch-batch-v1', canvasToken: 0, geometryToken: 0, revision: 'rev-1', accepted: true}})});
+  sender.handleControlMessage({data: JSON.stringify(openCurrent(sender))});
   assert.equal(statuses.at(-1), 'accepted');
 });
 
@@ -45,7 +46,7 @@ test('buffers BIND and the first BATCH while native input initializes', async ()
   await attaching;
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(applied, []);
-  sender.handleControlMessage({data: JSON.stringify({method: 'input.openStream', result: {streamId: 1, epoch: 1, acceptedMode: 'touch', format: 'touch-batch-v1', canvasToken: 0, geometryToken: 0, revision: 'rev-1', accepted: true}})});
+  sender.handleControlMessage({data: JSON.stringify(openCurrent(sender))});
   sender.handleControlMessage({data: encodeTouchbackFrame({wireVersion: 'axtp', streamId: 1, seqId: 0, cursor: 1n, kind: TouchbackFrameKind.BATCH, epoch: 1, canvasToken: 0, geometryToken: 0, records: [{contactId: 0, phase: 0, buttons: 1, x: 100, y: 100}]})});
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(applied, [0]);
@@ -78,7 +79,7 @@ test('exposes channel, native, binding and injection diagnostics without claimin
   assert.equal(beforeInput.nativeReady, true);
   assert.equal(beforeInput.bindingReady, true);
   assert.equal(beforeInput.receiverEnabled, null);
-  sender.handleControlMessage({data: JSON.stringify({method: 'input.openStream', result: {streamId: 1, epoch: 1, acceptedMode: 'touch', format: 'touch-batch-v1', canvasToken: 0, geometryToken: 0, revision: 'rev-1', accepted: true}})});
+  sender.handleControlMessage({data: JSON.stringify(openCurrent(sender))});
   const batch = encodeTouchbackFrame({wireVersion: 'axtp', streamId: 1, seqId: 0, cursor: 1n, kind: TouchbackFrameKind.BATCH, epoch: 1, canvasToken: 0, geometryToken: 0,
     records: [{contactId: 0, phase: 0, buttons: 1, x: 100, y: 100}]});
   sender.handleControlMessage({data: batch});
@@ -132,7 +133,7 @@ test('drives a high-ID Touchback contact through bind, move, up and reset', asyn
   const bind = encodeTouchbackFrame({kind: TouchbackFrameKind.BIND, epoch: 1,
     controlPayload: encodeTouchbackBindPayload({runtimeInstanceId: 'r', sessionId: 's', bindingToken: 't', sessionGeneration: 1, slotId: 0, bindingGeneration: 1, lifecycleGeneration: 1})});
   assert.equal(sender.handleControlMessage({data: bind}).status, 'accepted');
-  sender.handleControlMessage({data: JSON.stringify({method: 'input.openStream', result: {streamId: 1, epoch: 1, acceptedMode: 'touch', format: 'touch-batch-v1', canvasToken: 0, geometryToken: 0, revision: 'rev-1', accepted: true}})});
+  sender.handleControlMessage({data: JSON.stringify(openCurrent(sender))});
   const sendBatch = (sequence, phase, x) => sender.handleControlMessage({data: encodeTouchbackFrame({kind: TouchbackFrameKind.BATCH, epoch: 1, sequence, records: [{contactId: 65535, phase, buttons: 1, x, y: 20}]})});
   assert.equal(sendBatch(0, 0, 10).status, 'applied');
   await new Promise(resolve => setImmediate(resolve));
@@ -190,7 +191,7 @@ test('remote reset, rebind and sequence gap release native input state', async (
   bind(1); const afterBind = resets;
   send({kind: TouchbackFrameKind.RESET, epoch:2});
   assert.equal(resets, afterBind + 1);
-  bind(3);
+  bind(3); sender.handleControlMessage({data:JSON.stringify(openCurrent(sender))});
   assert.equal(resets, afterBind + 2);
   send({kind: TouchbackFrameKind.BATCH, epoch:3, sequence:4, records:[{contactId:0, phase:0, buttons:1, x:10, y:10}]});
   assert.equal(resets, afterBind + 3);

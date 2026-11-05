@@ -11,6 +11,8 @@ const errorStatus = error => {
 export class MacOsInputSink {
   constructor({native = null} = {}) {
     this.native = native;
+    this.supportedModes = ['mouse'];
+    this.maxContacts = 1;
     this.initialized = false;
     this.button = 0;
     this.activeContact = null;
