@@ -24,14 +24,14 @@
         </div>
         <p class="pair-help">Pairing code</p>
         <p id="code-display-status" class="code-display-status" aria-live="polite"></p>
-        <section id="trust-card" class="trust-card" hidden aria-live="polite">
-          <div class="trust-title">现场核对接收端指纹</div>
+        <details id="trust-card" class="trust-card" hidden aria-live="polite">
+          <summary id="trust-title" class="trust-title">现场核对接收端指纹</summary>
           <p id="trust-copy" class="trust-copy"></p>
           <pre id="trust-fingerprint" class="trust-fingerprint"></pre>
           <label id="trust-check-label" class="trust-check" hidden><input id="trust-check" type="checkbox" /> 我已在接收端逐组核对完整指纹</label>
           <div class="trust-actions"><button id="trust-confirm" class="button primary" type="button" hidden disabled>确认并信任设备</button><button id="trust-retry" class="button primary" type="button" hidden>重新显示指纹</button><button id="trust-cancel" class="button secondary" type="button">取消</button><button id="trust-revoke" class="button secondary" type="button" hidden>撤销此设备信任</button></div>
           <p id="trust-error" class="error" hidden></p>
-        </section>
+        </details>
         <button id="connect-button" class="button primary" type="submit">Join receiver</button>
       </form>
       <p id="code-error" class="error" hidden></p>

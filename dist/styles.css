@@ -22,7 +22,8 @@ h1 { margin: 10px 0 0; color: #fff; font-size: clamp(28px, 4vw, 38px); line-heig
 .button:hover:not(:disabled) { transform: translateY(-1px); }.button:disabled { opacity: .45; cursor: not-allowed; }.primary { background: linear-gradient(135deg,#438fff,#6a62ff); box-shadow: 0 9px 25px #3d78ff44; }.secondary { color: #e4e8f3; background: #ffffff16; }.danger { background: #a8394d; box-shadow: 0 8px 22px #a8394d44; }
 .error { max-width: 480px; margin: 15px auto 0; padding: 10px 13px; border-radius: 9px; color: #ffb6c1; background: #9b334822; font-size: 13px; }
 .trust-card { margin: 18px auto 0; padding: 16px; border: 1px solid #72e8ff45; border-radius: 14px; background: #071522aa; text-align: left; }
-.trust-title { color: #9ce9ff; font-size: 13px; font-weight: 700; }
+.trust-title { color: #9ce9ff; font-size: 13px; font-weight: 700; cursor: pointer; }
+.trust-title:focus-visible { outline: 2px solid #73e3ff; outline-offset: 4px; border-radius: 2px; }
 .trust-copy { margin: 8px 0 12px; color: #b7c4d9; font-size: 12px; line-height: 1.45; }
 .trust-fingerprint { margin: 0; padding: 11px 13px; border-radius: 9px; color: #fff; background: #050b15; font: 700 15px/1.75 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .06em; text-align: center; }
 .trust-check { display: flex; gap: 8px; align-items: center; margin-top: 12px; color: #dbe5f3; font-size: 12px; }

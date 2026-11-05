@@ -18,6 +18,7 @@ const connectButton = document.querySelector('#connect-button');
 const codeError = document.querySelector('#code-error');
 const codeDisplayStatus = document.querySelector('#code-display-status');
 const trustCard = document.querySelector('#trust-card');
+const trustTitle = document.querySelector('#trust-title');
 const trustCopy = document.querySelector('#trust-copy');
 const trustFingerprint = document.querySelector('#trust-fingerprint');
 const trustCheck = document.querySelector('#trust-check');
@@ -82,6 +83,8 @@ videoBitrate.addEventListener('change', renderVideoQuality);
 renderVideoQuality();
 const renderTrust = state => {
   trustCard.hidden = !state || state.phase === 'idle' || state.phase === 'trusted' && !state.fingerprint;
+  trustCard.open = state?.phase !== 'trusted';
+  trustTitle.textContent = state?.phase === 'trusted' ? '已配对 · 接收端指纹' : '现场核对接收端指纹';
   trustCheck.checked = false; trustConfirm.disabled = true; trustConfirm.hidden = state?.phase !== 'compare'; trustCheckLabel.hidden = true; trustRevoke.hidden = true;
   trustRetry.hidden = !['changed','expired','untrusted','error'].includes(state?.phase) || !state.device?.supportsTrustDisplay;
   trustFingerprint.textContent = '';
