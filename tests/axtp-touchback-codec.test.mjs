@@ -12,6 +12,8 @@ import {
 } from '../src/touchback/codec.mjs';
 import {LauncherCompatibleWebCastSender} from '../src/webcast/launcher-compatible-sender.mjs';
 
+import {openCurrent} from './helpers/canonical-touchback.mjs';
+
 test('encodes AXTP STREAM header and big-endian touch-batch-v1 payload', () => {
   const bytes = new Uint8Array(encodeTouchbackFrame({
     streamId: 0x01020304,
@@ -58,28 +60,21 @@ test('sender fences AXTP stream identity and emits one ordered reset packet with
   const sent = [];
   const sender = new LauncherCompatibleWebCastSender({onTouchback() {}});
   sender.attachControlChannel({readyState: 'open', send: value => sent.push(value)});
-  assert.equal(sender.configureStream({streamId: 9, epoch: 2, canvasToken: 3, geometryToken: 4}), true);
+  const bind = encodeTouchbackFrame({wireVersion: 'axtp', streamId: 9, seqId: 0, cursor: 1n, kind: TouchbackFrameKind.BIND, epoch: 2, canvasToken: 3, geometryToken: 4, controlPayload: encodeTouchbackBindPayload({runtimeInstanceId: 'r', sessionId: 's', bindingToken: 't', sessionGeneration: 1, slotId: 0, bindingGeneration: 1, lifecycleGeneration: 1})});
+  assert.equal(sender.handleControlMessage({data: bind}).status, 'accepted');
+  assert.equal(sender.handleControlMessage({data: JSON.stringify(openCurrent(sender))}).status, 'stream_opened');
   const first = encodeTouchbackFrame({streamId: 9, seqId: 0, cursor: 1n, kind: TouchbackFrameKind.BATCH, epoch: 2, canvasToken: 3, geometryToken: 4, records: [{contactId: 1, phase: TouchbackPhase.DOWN, x: 1, y: 2}]});
   assert.equal(sender.handleControlMessage({data: first}).status, 'applied');
   const gap = encodeTouchbackFrame({streamId: 9, seqId: 2, cursor: 2n, kind: TouchbackFrameKind.BATCH, epoch: 2, canvasToken: 3, geometryToken: 4, records: [{contactId: 1, phase: TouchbackPhase.MOVE, x: 2, y: 3}]});
   assert.equal(sender.handleControlMessage({data: gap}).status, 'reset_required');
-  assert.equal(sent.length, 1);
-  const reset = decodeTouchbackFrame(sent[0]);
+  const binary = sent.filter(value => typeof value !== 'string');
+  assert.equal(binary.length, 1);
+  const reset = decodeTouchbackFrame(binary[0]);
   assert.equal(reset.kind, TouchbackFrameKind.RESET);
   assert.equal(reset.streamId, 9);
   assert.equal(reset.epoch, 3);
   assert.equal(reset.canvasToken, 3);
   assert.equal(reset.geometryToken, 4);
-});
-
-test('opens the AXTP touch stream from the input.openStream control result', () => {
-  const events = [];
-  const sender = new LauncherCompatibleWebCastSender({onTouchback: frame => events.push(frame)});
-  sender.attachControlChannel({readyState: 'open', send() {}});
-  assert.equal(sender.handleControlMessage({data: JSON.stringify({method: 'input.openStream', result: {streamId: 17, epoch: 4, canvasToken: 5, geometryToken: 6, accepted: true}})}).status, 'stream_opened');
-  const bytes = encodeTouchbackFrame({streamId: 17, seqId: 0, cursor: 1n, kind: TouchbackFrameKind.BATCH, epoch: 4, canvasToken: 5, geometryToken: 6, records: [{contactId: 3, phase: TouchbackPhase.DOWN, x: 10, y: 20}]});
-  assert.equal(sender.handleControlMessage({data: bytes}).status, 'applied');
-  assert.equal(events.length, 1);
 });
 
 test('uses registered control methods for touchback negotiation', async () => {
@@ -88,26 +83,11 @@ test('uses registered control methods for touchback negotiation', async () => {
   sender.attachControlChannel({readyState: 'open', send: value => sent.push(JSON.parse(value))});
   const request = sender.getControlCapabilities();
   assert.equal(sent[0].method, 'cast.getControlCapabilities');
-  sender.handleControlMessage({data: JSON.stringify({id: sent[0].id, result: {touchback: true}})});
+  sender.handleControlMessage({data: JSON.stringify({action: 'axtp-control', method: sent[0].method, id: sent[0].id, result: {touchback: true}})});
   assert.deepEqual(await request, {touchback: true});
 });
 
-test('decodes the receiver modern Bind control frame with its formal kind values', () => {
-  assert.equal(TouchbackFrameKind.BIND, 3);
-  assert.equal(TouchbackFrameKind.CAPABILITY, 4);
-  const controlPayload = new Uint8Array([1, 2, 3, 4]);
-  const bytes = encodeTouchbackFrame({
-    wireVersion: 'axtp', streamId: 9, seqId: 0, cursor: 1n,
-    kind: TouchbackFrameKind.BIND, epoch: 2, canvasToken: 3, geometryToken: 4,
-    controlPayload,
-  });
-  assert.ok(bytes);
-  const decoded = decodeTouchbackFrame(bytes);
-  assert.equal(decoded.kind, TouchbackFrameKind.BIND);
-  assert.deepEqual([...new Uint8Array(decoded.controlPayload)], [...controlPayload]);
-});
-
-test('accepts a modern binary Bind before applying touch batches', () => {
+test('does not activate a stream from BIND alone', () => {
   const events = [];
   const sender = new LauncherCompatibleWebCastSender({onTouchback: frame => events.push(frame)});
   sender.attachControlChannel({readyState: 'open', send() {}});
@@ -118,13 +98,14 @@ test('accepts a modern binary Bind before applying touch batches', () => {
     controlPayload: bindPayload,
   });
   assert.equal(sender.handleControlMessage({data: bind}).status, 'accepted');
+  assert.equal(sender.snapshot().streamState, 'bound');
   const batch = encodeTouchbackFrame({
     wireVersion: 'axtp', streamId: 9, seqId: 0, cursor: 2n,
     kind: TouchbackFrameKind.BATCH, epoch: 2, canvasToken: 3, geometryToken: 4,
     records: [{contactId: 1, phase: TouchbackPhase.DOWN, x: 10, y: 20}],
   });
-  assert.equal(sender.handleControlMessage({data: batch}).status, 'applied');
-  assert.equal(events.length, 1);
+  assert.equal(sender.handleControlMessage({data: batch}).status, 'stale');
+  assert.equal(events.length, 0);
 });
 
 test('recognizes AXTP when streamId begins with the touch magic', () => {
@@ -135,27 +116,13 @@ test('recognizes AXTP when streamId begins with the touch magic', () => {
   assert.equal(decodeTouchbackFrame(bytes).wireVersion, 'axtp');
 });
 
-test('accepts an ordered modern reset without waiting for an application ACK', () => {
-  const events = [];
-  const sender = new LauncherCompatibleWebCastSender({onTouchback: frame => events.push(frame)});
-  sender.attachControlChannel({readyState: 'open', send: value => {
-    assert.equal(decodeTouchbackFrame(value).kind, TouchbackFrameKind.RESET);
-  }});
-  assert.equal(sender.configureStream({streamId: 19, epoch: 4, canvasToken: 5, geometryToken: 6}), true);
-  const reset = encodeTouchbackFrame({wireVersion: 'axtp', streamId: 19, seqId: 0, cursor: 1n, kind: TouchbackFrameKind.RESET, epoch: 5, canvasToken: 5, geometryToken: 6});
-  assert.equal(sender.handleControlMessage({data: reset}).status, 'reset');
-  const batch = encodeTouchbackFrame({wireVersion: 'axtp', streamId: 19, seqId: 0, cursor: 2n, kind: TouchbackFrameKind.BATCH, epoch: 5, canvasToken: 5, geometryToken: 6, records: [{contactId: 1, phase: TouchbackPhase.DOWN, x: 1, y: 2}]});
-  assert.equal(sender.handleControlMessage({data: batch}).status, 'applied');
-  assert.equal(events.length, 1);
-});
-
 test('modern close releases the sender binding contacts without sending an ACK', () => {
   let closeCalls = 0;
   const sender = new LauncherCompatibleWebCastSender({onControlFrame: (frame, result) => {
     if (frame.kind === TouchbackFrameKind.CLOSE && result.status === 'closed') closeCalls += 1;
   }});
   sender.attachControlChannel({readyState: 'open', send() {}});
-  assert.equal(sender.configureStream({streamId: 22, epoch: 7, canvasToken: 8, geometryToken: 9}), true);
+  sender.handleControlMessage({data: encodeTouchbackFrame({wireVersion: 'axtp', streamId: 22, seqId: 0, cursor: 1n, kind: TouchbackFrameKind.BIND, epoch: 7, canvasToken: 8, geometryToken: 9, controlPayload: encodeTouchbackBindPayload({runtimeInstanceId: 'r', sessionId: 's', bindingToken: 't', sessionGeneration: 1, slotId: 0, bindingGeneration: 1, lifecycleGeneration: 1})})});
   const close = encodeTouchbackFrame({wireVersion: 'axtp', streamId: 22, seqId: 0, cursor: 1n, kind: TouchbackFrameKind.CLOSE, epoch: 7, canvasToken: 8, geometryToken: 9});
   assert.equal(sender.handleControlMessage({data: close}).status, 'closed');
   assert.equal(sender.snapshot().activeContacts, 0);

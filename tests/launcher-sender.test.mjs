@@ -1,7 +1,8 @@
+import {encodeTouchbackFrame, openCurrent} from './helpers/canonical-touchback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {LauncherCompatibleWebCastSender} from '../src/webcast/launcher-compatible-sender.mjs';
-import {TouchbackFrameKind, encodeTouchbackFrame, encodeTouchbackBindPayload} from '../src/touchback/codec.mjs';
+import {TouchbackFrameKind, encodeTouchbackBindPayload} from '../src/touchback/codec.mjs';
 
 test('accepts binary touchback through the existing Launcher control channel', async () => {
   const events = [];
@@ -19,7 +20,7 @@ test('dispatches capability and bind binary controls through the session boundar
   const binding = {runtimeInstanceId: 'runtime-a', sessionId: 'peer-a', sessionGeneration: 4, slotId: 2, bindingGeneration: 8, lifecycleGeneration: 11, bindingToken: 'opaque-a'};
   const sender = new LauncherCompatibleWebCastSender({resolveBinding: () => binding, onControlFrame: frame => controls.push(frame.kind)});
   sender.attachControlChannel({readyState: 'open', send() {}});
-  const bytes = encodeTouchbackFrame({kind: TouchbackFrameKind.BIND, epoch: 3}, {maxBytes: 4096, maxRecords: 8});
+  const bytes = encodeTouchbackFrame({kind: TouchbackFrameKind.BIND, epoch: 3, controlPayload: encodeTouchbackBindPayload(binding)}, {maxBytes: 4096, maxRecords: 8});
   sender.handleControlMessage({data: bytes});
   assert.deepEqual(controls, [TouchbackFrameKind.BIND]);
   assert.equal(sender.snapshot().activeContacts, 0);
@@ -35,12 +36,12 @@ test('decodes canonical bind payload without a side channel resolver', () => {
   assert.deepEqual(controls, [TouchbackFrameKind.BIND]);
 });
 
-test('answers a newer reset epoch and fences injection until ack state is clear', () => {
+test('accepts a newer reset epoch without sending an application ACK', () => {
   const sent = [];
   const sender = new LauncherCompatibleWebCastSender();
   sender.attachControlChannel({readyState: 'open', send: value => sent.push(value)});
-  sender.session.accept({kind: TouchbackFrameKind.BIND, binding: {bindingToken: 'opaque', epoch: 3}});
+  sender.handleControlMessage({data: encodeTouchbackFrame({kind: TouchbackFrameKind.BIND, epoch:3, controlPayload:encodeTouchbackBindPayload({runtimeInstanceId:'r',sessionId:'s',bindingToken:'opaque',sessionGeneration:1,slotId:0,bindingGeneration:1,lifecycleGeneration:1})})});
   const bytes = encodeTouchbackFrame({kind: TouchbackFrameKind.RESET, epoch: 4, sequence: 0}, {maxBytes: 4096, maxRecords: 8});
   assert.equal(sender.handleControlMessage({data: bytes}).status, 'reset');
-  assert.equal(sent.length, 1);
+  assert.equal(sent.length, 0);
 });

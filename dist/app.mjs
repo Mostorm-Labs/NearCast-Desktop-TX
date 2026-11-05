@@ -19,6 +19,7 @@ const connectButton = document.querySelector('#connect-button');
 const codeError = document.querySelector('#code-error');
 const codeDisplayStatus = document.querySelector('#code-display-status');
 const trustCard = document.querySelector('#trust-card');
+const trustTitle = document.querySelector('#trust-title');
 const trustCopy = document.querySelector('#trust-copy');
 const trustFingerprint = document.querySelector('#trust-fingerprint');
 const trustCheck = document.querySelector('#trust-check');
@@ -66,7 +67,12 @@ let platformReady = Promise.resolve();
 let controlGeneration = 0;
 let capturePending = false;
 let videoQuality = normalizeVideoQuality({resolution: videoResolution.value, bitrateMode: videoBitrateMode.value, bitrateKbps: videoBitrate.value});
-globalThis.__nearcastTouchbackDiagnostics = () => touchback?.diagnostics?.() ?? null;
+globalThis.__nearcastTouchbackDiagnostics = () => touchback ? {...touchback.diagnostics(), control: touchback.controlDiagnostics()} : null;
+const controlDiagnostics = document.querySelector('#touchback-diagnostics');
+const renderControlDiagnostics = () => {
+  if (controlDiagnostics) controlDiagnostics.textContent = JSON.stringify(globalThis.__nearcastTouchbackDiagnostics(), null, 2);
+};
+setInterval(renderControlDiagnostics, 1000);
 
 const setError = (element, error) => {
   element.textContent = error ? (error.message || String(error)) : '';
@@ -85,6 +91,8 @@ videoBitrate.addEventListener('change', renderVideoQuality);
 renderVideoQuality();
 const renderTrust = state => {
   trustCard.hidden = !state || state.phase === 'idle' || state.phase === 'trusted' && !state.fingerprint;
+  trustCard.open = state?.phase !== 'trusted';
+  trustTitle.textContent = state?.phase === 'trusted' ? '已配对 · 接收端指纹' : '现场核对接收端指纹';
   trustCheck.checked = false; trustConfirm.disabled = true; trustConfirm.hidden = state?.phase !== 'compare'; trustCheckLabel.hidden = true; trustRevoke.hidden = true;
   trustRetry.hidden = !['changed','expired','untrusted','error'].includes(state?.phase) || !state.device?.supportsTrustDisplay;
   trustFingerprint.textContent = '';

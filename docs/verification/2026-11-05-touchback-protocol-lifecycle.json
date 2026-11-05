@@ -1,0 +1,34 @@
+{
+  "date": "2026-11-05",
+  "scope": "Canonical Touchback protocol lifecycle using actual TX and RX processes with synthetic video",
+  "physicalTouchInjectionVerified": false,
+  "txBranch": "codex/touchback-input-diagnostics",
+  "txRevision": "The commit containing this evidence and the device handoff; full SHA is recorded in the delivery manifest",
+  "txExecutableSha256": "85958CF6DDE80C6865BFDA2273E32EBFD7A87ED0E3C6416F63FD3EABCE745B2A",
+  "rxNearCastCommit": "d7e3721cbeb1f4701b18505c412225d44afb0477",
+  "rxAxentCommit": "d34bab2",
+  "rxRuntimeCommit": "1bfcfa8",
+  "axtpVersion": "0.18.0-dev.041e48592d85",
+  "checks": {
+    "nodeTests": {"total": 131, "passed": 131, "failed": 0},
+    "cargoCheckLocked": "passed",
+    "cargoBuildLocked": "passed",
+    "gitDiffCheck": "passed",
+    "srcDistModuleHashesMatched": 6,
+    "edgeVideoIntegration": "passed",
+    "realEdgeDataChannelReplay": "passed",
+    "actualTxRxProcessLifecycle": "passed"
+  },
+  "lifecycle": [
+    {"step": "BIND", "tx": "accepted", "rxPhase": "bound", "streamId": 1, "epoch": 2},
+    {"step": "open", "tx": "stream_opened", "rxPhase": "active", "effectiveEnabled": true, "negotiatedMode": "touch", "streamId": 1, "epoch": 2},
+    {"step": "reset-close", "tx": "reset then stream_closed", "rxPhase": "bound", "effectiveEnabled": false, "streamId": 1, "epoch": 3},
+    {"step": "reopen", "tx": "stream_opened", "rxPhase": "active", "effectiveEnabled": true, "negotiatedMode": "touch", "streamId": 1, "epoch": 3},
+    {"step": "reset-close", "tx": "reset then stream_closed", "rxPhase": "bound", "effectiveEnabled": false, "streamId": 1, "epoch": 4}
+  ],
+  "binaryRejected": 0,
+  "videoRemainedActive": true,
+  "physicalInjectionCount": 0,
+  "cleanup": {"syntheticStreamStopped": true, "temporaryFixtureRemoved": true, "pairingPageRestored": true},
+  "notVerified": ["Physical Touch input reaching a Windows application", "Physical contact release and coordinate/DPI behavior", "Windows 11 hardware", "Windows Mouse injection", "Elevated input helper or secure desktop input", "macOS hardware"]
+}

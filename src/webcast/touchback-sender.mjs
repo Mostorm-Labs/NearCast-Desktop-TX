@@ -2,19 +2,25 @@ import {LauncherCompatibleWebCastSender} from './launcher-compatible-sender.mjs'
 import {PointerInjectionStatus} from '../touchback/pointer-injection.mjs';
 import {TouchbackFrameKind} from '../touchback/codec.mjs';
 
+const diagnosticFields = ['streamId', 'epoch', 'canvasToken', 'geometryToken', 'accepted', 'acceptedMode', 'preferredMode', 'mode', 'format', 'revision', 'closed'];
+const summarizeControl = value => Object.fromEntries(diagnosticFields.filter(key =>
+  ['string', 'number', 'boolean'].includes(typeof value?.[key])
+).map(key => [key, typeof value[key] === 'string' ? value[key].slice(0, 96) : value[key]]));
+
 export class WebCastTouchbackSender {
   constructor({nativeBridge, onStatus, onControlFrame, resolveBinding, limits} = {}) {
     this.onStatus = onStatus ?? (() => {});
     this.pointer = nativeBridge;
     this.receiver = new LauncherCompatibleWebCastSender({
-      limits,
+      limits: {...limits, maxContacts: nativeBridge?.maxContacts ?? limits?.maxContacts ?? 10},
+      supportedModes: nativeBridge?.supportedModes ?? ['touch'],
       resolveBinding,
       onControlFrame: (frame, result) => {
         if (frame?.kind === TouchbackFrameKind.BIND || frame?.kind === TouchbackFrameKind.RESET || frame?.kind === TouchbackFrameKind.CLOSE || result?.status === 'reset' || result?.status === 'closed') {
           this.generation++;
           this.resetPointer();
         }
-        if (frame?.kind === TouchbackFrameKind.BIND && result?.status === 'accepted' && this.authorized) this.onStatus(PointerInjectionStatus.ACCEPTED);
+        if (result?.status === 'active' && this.authorized) this.onStatus(PointerInjectionStatus.ACCEPTED);
         onControlFrame?.(frame, result);
       },
       onTouchback: frame => this.applyFrame(frame),
@@ -30,6 +36,7 @@ export class WebCastTouchbackSender {
     this._lastInjectionStatus = 'idle';
     this._injectionCount = 0;
     this._lastInjectionFailure = null;
+    this._controlDiagnostics = {textReceived: 0, binaryReceived: 0, recentControl: [], lastBinary: null};
   }
   resetPointer() {
     let result;
@@ -61,15 +68,42 @@ export class WebCastTouchbackSender {
     return initialization;
   }
   handleControlMessage(message) {
+    const text = typeof message?.data === 'string';
+    const diagnostics = this._controlDiagnostics;
+    diagnostics[text ? 'textReceived' : 'binaryReceived']++;
+    const entry = {receivedAt: new Date().toISOString()};
+    if (text) {
+      try {
+        const control = JSON.parse(message.data);
+        const method = control?.method ?? control?.type ?? control?.action;
+        entry.method = typeof method === 'string' && /^[a-zA-Z0-9_.-]{1,96}$/.test(method) ? method : 'unknown';
+        entry.envelope = Object.hasOwn(control, 'params') ? 'request/event' : Object.hasOwn(control, 'result') ? 'response' : 'other';
+        entry.params = summarizeControl(control?.params ?? control?.result);
+      } catch { entry.method = 'invalid_json'; }
+    } else entry.bytes = message?.data?.byteLength ?? message?.data?.size ?? null;
+    const result = this._handleControlMessage(message);
+    entry.status = result?.status ?? 'unknown';
+    if (result?.error) entry.error = String(result.error.message ?? result.error).slice(0, 256);
+    entry.streamState = this.receiver.streamState;
+    if (text) {
+      diagnostics.recentControl.push(entry);
+      if (diagnostics.recentControl.length > 32) diagnostics.recentControl.shift();
+    } else diagnostics.lastBinary = entry;
+    return result;
+  }
+  _handleControlMessage(message) {
     if (!this.authorized) {
       if (this._initialization) { this._pendingControlMessages.push(message); return {status: 'pending'}; }
       return {status: 'not_supported'};
     }
     const result = this.receiver.handleControlMessage(message);
-    if (result?.status === 'reset_required' || result?.status === 'invalid_state') {
+    if (result?.status === 'reset_required' && !result.resetSent || result?.status === 'invalid_state') {
       this.generation++;
       this.resetPointer();
-      if (result.status === 'invalid_state') this.authorized = false;
+      if (result.status === 'invalid_state') {
+        this.receiver.streamState = this.receiver.session.binding ? 'bound' : 'unavailable';
+        this.receiver.session.fence();
+      }
     }
     return result;
   }
@@ -125,6 +159,18 @@ export class WebCastTouchbackSender {
       lastInjectionStatus: this._lastInjectionStatus,
       lastInjectionFailure: this._lastInjectionFailure,
     };
+  }
+  controlDiagnostics() {
+    return structuredClone({...this._controlDiagnostics,
+      authorized: this.authorized,
+      streamState: this.receiver.streamState,
+      stream: this.receiver.stream ? summarizeControl({...this.receiver.stream,
+        streamId: this.receiver.session.streamId, epoch: this.receiver.session.epoch,
+        canvasToken: this.receiver.session.canvasToken, geometryToken: this.receiver.session.geometryToken,
+      }) : null,
+      session: {epoch: this.receiver.session.epoch, nextSequence: this.receiver.session.nextSequence, resetPending: this.receiver.session.resetPending},
+      decoded: {...this.receiver.stats},
+    });
   }
   snapshot() { return {...this.receiver.snapshot(), pointer: this.pointer.snapshot(), authorized: this.authorized}; }
 }
