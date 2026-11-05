@@ -97,8 +97,14 @@ fn ensure_trusted() -> Result<(), String> {
 }
 
 pub fn move_pointer(x: i32, y: i32, modifiers: u16) -> Result<(), String> {
-    ensure_trusted()?;
     let point = display_point(x, y)?;
+    move_at_point(point.x,point.y,modifiers)
+}
+
+pub fn move_at_point(x:f64,y:f64,modifiers:u16)->Result<(),String>{
+    ensure_trusted()?;
+    if !x.is_finite()||!y.is_finite(){return Err("invalid_native_point".into());}
+    let point=CGPoint{x,y};
     let mut state = POINTER.lock().map_err(|_| "macOS input state poisoned")?;
     let (event, button) = match state.button {
         Some(mask) => { let button = mouse_button(mask)?; (button.drag, button.number) },
@@ -110,9 +116,15 @@ pub fn move_pointer(x: i32, y: i32, modifiers: u16) -> Result<(), String> {
 }
 
 pub fn button(button: u8, down: bool, x: i32, y: i32, modifiers: u16) -> Result<(), String> {
-    ensure_trusted()?;
-    let descriptor = mouse_button(button)?;
     let point = display_point(x, y)?;
+    button_at_point(button,down,point.x,point.y,modifiers)
+}
+
+pub fn button_at_point(button:u8,down:bool,x:f64,y:f64,modifiers:u16)->Result<(),String>{
+    ensure_trusted()?;
+    if !x.is_finite()||!y.is_finite(){return Err("invalid_native_point".into());}
+    let descriptor = mouse_button(button)?;
+    let point=CGPoint{x,y};
     let mut state = POINTER.lock().map_err(|_| "macOS input state poisoned")?;
     if state.scroll.is_some() || (down && state.button.is_some()) || (!down && state.button != Some(button)) { return Err("invalid_state".into()); }
     post_mouse(if down {descriptor.down} else {descriptor.up}, point, descriptor.number, modifiers)?;

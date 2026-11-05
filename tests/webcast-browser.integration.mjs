@@ -27,13 +27,16 @@ for (;;) {
 let browser;
 try {
   browser = await chromium.launch({channel: process.env.BROWSER_CHANNEL || 'msedge', headless: true});
-  const page = await browser.newPage();
+  const page = await browser.newPage({viewport:{width:960,height:640}});
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(() => {
     globalThis.testReceiver = {signals: [], receivedTracks: [], frames: 0, mode: 'capture'};
     const state = globalThis.testReceiver;
     const receiver = new RTCPeerConnection({iceServers: []});
+    state.receiverPeer=receiver;
+    const NativePeer=globalThis.RTCPeerConnection;
+    globalThis.RTCPeerConnection=new Proxy(NativePeer,{construct(target,args){const pc=Reflect.construct(target,args);state.senderPeer=pc;return pc;}});
     let channel, socket, chain = Promise.resolve(), pending = [];
     const context = {roomId: 'room-1', userId: 'host-1', hostUserId: 'host-1', targetId: 'sender-1'};
     const send = (type, payload) => {
@@ -64,15 +67,36 @@ try {
       state.receivedTracks.push(event.track.kind);
       const video = document.createElement('video'); video.muted = true; video.autoplay = true;
       video.srcObject = new MediaStream([event.track]); document.body.append(video);
-      const countFrame = () => { state.frames++; video.requestVideoFrameCallback(countFrame); };
-      video.requestVideoFrameCallback(countFrame);
+      // Count actual decoder output. requestVideoFrameCallback stops when the
+      // fixture video scrolls outside the viewport as the sender UI grows.
+      if(!state.decodePoll)state.decodePoll=setInterval(async()=>{
+        const stats=await receiver.getStats();
+        state.frames=[...stats.values()].filter(row=>row.type==='inbound-rtp'&&row.kind==='video').reduce((sum,row)=>sum+(row.framesDecoded||0),0);
+      },100);
     };
     receiver.ondatachannel = event => {
       channel = event.channel;
       state.closeControl = () => channel.close();
-      channel.onopen = () => { state.channelOpen = true; };
+      state.sendMalformedInput = () => channel.send(new Uint8Array([1,2,3]));
+      const inputChannel=channel;let heartbeat,frameCodec,sessionCodec,heartbeatId=20;
+      channel.binaryType='arraybuffer';
+      channel.onopen = async () => {
+        state.channelOpen = true; state.channelCount = (state.channelCount || 0) + 1;state.inputReady=false;
+        frameCodec=await import('/touchback/frame-codec.mjs');sessionCodec=await import('/touchback/axtp-session.mjs');
+        inputChannel.send(Uint8Array.from('4158010100160000000100010100010000040210000701070801010a0203e80b010034f2'.match(/../g),v=>parseInt(v,16)));
+        heartbeat=setInterval(()=>{if(inputChannel.readyState==='open')inputChannel.send(frameCodec.encodeStandardFrame(sessionCodec.controlPayload(4,++heartbeatId),{payloadType:1}));},1000);
+      };
+      channel.onclose=()=>clearInterval(heartbeat);
       channel.onmessage = event => {
-        if (typeof event.data !== 'string') return;
+        if (typeof event.data !== 'string') {
+          const frame=frameCodec.decodeStandardFrame(event.data);
+          if(frame.payloadType===2){
+            const message=JSON.parse(new TextDecoder().decode(frame.payload.subarray(1)));
+            if(message.op===0)inputChannel.send(frameCodec.encodeStandardFrame(sessionCodec.rpcPayload({sid:'',op:2,d:{randomSeed:123,eventMasks:'050101'}}),{payloadType:2}));
+            if(message.op===3)state.inputReady=true;
+          }
+          return;
+        }
         const message = JSON.parse(event.data);
         if (message.action === 'webrtc-signal') signal(message.data.type, message.data.payload, 'datachannel');
       };
@@ -112,6 +136,7 @@ try {
   await page.locator('#connect-button').click();
   await page.waitForFunction(() => testReceiver.releaseAnswer || testReceiver.error);
   assert.equal(await page.locator('#casting-view').isVisible(), true);
+  assert.equal(await page.locator('#input-enabled').isChecked(), false);
   assert.equal(await page.locator('#share-button').isDisabled(), true, 'sharing waits for the control connection');
   await page.evaluate(() => testReceiver.releaseAnswer());
   await page.waitForFunction(() => testReceiver.channelOpen || testReceiver.error);
@@ -129,7 +154,12 @@ try {
   const beforeRestart = await page.evaluate(() => testReceiver.frames);
   await page.locator('#share-button').click();
   await page.waitForFunction(() => testReceiver.signals.filter(x => x.type === 'offer').length >= 3);
-  await page.waitForFunction(before => testReceiver.frames >= before + 3 || testReceiver.error, beforeRestart);
+  await page.waitForFunction(before => testReceiver.frames >= before + 3 || testReceiver.error, beforeRestart).catch(async failure=>{
+    console.log(JSON.stringify(await page.evaluate(async()=>{
+      const state=testReceiver;const stats=pc=>pc.getStats().then(rows=>[...rows.values()].filter(row=>['outbound-rtp','inbound-rtp'].includes(row.type)));
+      return{error:state.error,frames:state.frames,signals:state.signals,errors:[document.querySelector('#cast-error').textContent,document.querySelector('#code-error').textContent],sender:{connection:state.senderPeer.connectionState,signaling:state.senderPeer.signalingState,stats:await stats(state.senderPeer)},receiver:{connection:state.receiverPeer.connectionState,signaling:state.receiverPeer.signalingState,stats:await stats(state.receiverPeer)},input:__nearcastTouchbackDiagnostics()};
+    }),null,2));throw failure;
+  });
   // A second active video m-line makes NearCast reject multiple_tracks_per_kind.
   const activeVideo = await page.evaluate(async () => {
     const preview = document.querySelector('#preview');
@@ -140,11 +170,23 @@ try {
   assert.deepEqual(await page.evaluate(() => [...new Set(testReceiver.videoCodecs)]), ['H264'], 'NearCast accepts H.264 video only');
   assert.equal(activeVideo.signals.some(signal => signal.type === 'offer' && signal.transport === 'datachannel'), true);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({result: 'PASS', frames: await page.evaluate(() => testReceiver.frames), ...activeVideo}, null, 2));
-  await page.evaluate(() => testReceiver.closeControl());
+  await page.evaluate(() => testReceiver.sendMalformedInput());
+  await page.waitForFunction(() => !document.querySelector('#input-reconnect').disabled);
+  assert.equal(await page.locator('#casting-view').isVisible(), true);
+  const beforeClose=await page.evaluate(()=>testReceiver.frames);
+  await page.waitForFunction(before=>testReceiver.frames>=before+3,beforeClose);
+  assert.equal(await page.evaluate(()=>document.querySelector('#preview').srcObject.getVideoTracks()[0].readyState),'live');
+  await page.locator('#input-reconnect').click();
+  await page.waitForFunction(()=>testReceiver.channelCount===2);
+  await page.waitForFunction(()=>__nearcastTouchbackDiagnostics()?.appReady);
+  assert.equal(await page.locator('#casting-view').isVisible(), true);
+  await page.locator('#input-reconnect').click();
+  await page.waitForFunction(()=>testReceiver.channelCount===3&&__nearcastTouchbackDiagnostics()?.appReady);
+  if(process.env.BROWSER_SCREENSHOT)await page.screenshot({path:process.env.BROWSER_SCREENSHOT,fullPage:true});
+  await page.locator('#leave-button').click();
   await page.waitForFunction(() => !document.querySelector('#code-view').hidden);
-  assert.equal(await page.locator('#code-view').isVisible(), true);
-  assert.match(await page.locator('#code-error').textContent(), /控制通道.*关闭/);
+  assert.deepEqual(errors, []);
+  console.log(JSON.stringify({result: 'PASS', mediaSurvivedMalformedInput:true, controlChannels:await page.evaluate(()=>testReceiver.channelCount), frames: await page.evaluate(() => testReceiver.frames), ...activeVideo}, null, 2));
 } finally {
   await browser?.close();
   await new Promise(resolve => server.close(resolve));

@@ -47,6 +47,7 @@ export class LauncherWebCastClient {
     onStatus,
     onError,
     onControlChannel,
+    onControlClosed,
     onControlMessage,
     onStream,
     onCodeDisplayResult,
@@ -65,6 +66,7 @@ export class LauncherWebCastClient {
     this.onStatus = onStatus ?? (() => {});
     this.onError = onError ?? (() => {});
     this.onControlChannel = onControlChannel ?? (() => {});
+    this.onControlClosed = onControlClosed ?? (() => {});
     this.onControlMessage = onControlMessage ?? (() => {});
     this.onStream = onStream ?? (() => {});
     this.onCodeDisplayResult = onCodeDisplayResult ?? (() => {});
@@ -266,7 +268,21 @@ export class LauncherWebCastClient {
     pc.onconnectionstatechange = () => {
       if (current() && (pc.connectionState === 'failed' || pc.connectionState === 'closed')) this.fail(new Error('WebRTC connection failed'));
     };
-    const channel = pc.createDataChannel('control'); this.channel = channel;
+    pc.ondatachannel = event => { if (current()) this.adoptControlChannel(event.channel,pc); else event.channel.close?.(); };
+    this.adoptControlChannel(pc.createDataChannel('control',{ordered:true}),pc);
+    if (!createOffer) return;
+    const offer = await pc.createOffer();
+    if (!current()) return;
+    await pc.setLocalDescription(offer);
+    if (!current()) return;
+    this.send({type: 'offer', offer});
+  }
+
+  adoptControlChannel(channel,pc=this.pc) {
+    const current=()=>this.pc===pc&&!this.closed;
+    if(!current()||channel?.label!=='control'||channel.ordered===false||channel.maxRetransmits!=null||channel.maxPacketLifeTime!=null){channel?.close?.();return false;}
+    if(this.channel&&this.channel!==channel&&!['closed','closing'].includes(this.channel.readyState)){channel.close?.();return false;}
+    this.channel=channel;
     channel.binaryType = 'arraybuffer';
     channel.onopen = () => { if (current() && this.channel === channel) { this.setStatus(this.stream ? 'sharing' : 'connected'); this.onControlChannel(channel, {...this.context}); } };
     channel.onmessage = event => {
@@ -279,13 +295,24 @@ export class LauncherWebCastClient {
       }
       this.onControlMessage(event, {...this.context});
     };
-    channel.onclose = () => { if (current() && this.channel === channel) this.fail(new Error('接收端控制通道已关闭，请重新连接。')); };
-    if (!createOffer) return;
-    const offer = await pc.createOffer();
-    if (!current()) return;
-    await pc.setLocalDescription(offer);
-    if (!current()) return;
-    this.send({type: 'offer', offer});
+    channel.onclose = () => {
+      if(current()&&this.channel===channel){this.channel=null;this.onControlClosed(new Error('反控通道已关闭，投屏继续；可重建反控连接。'),{...this.context});}
+    };
+    if(channel.readyState==='open')channel.onopen();
+    return true;
+  }
+
+  recreateControlChannel({replace=false}={}) {
+    if(!this.pc||this.closed)throw new Error('Connect to a receiver before reconnecting control');
+    if(this.channel&&!['closed','closing'].includes(this.channel.readyState)){
+      if(!replace)throw new Error('Control channel already exists');
+      const previous=this.channel;this.channel=null;
+      previous.onmessage=null;previous.onopen=null;previous.onclose=null;
+      this.onControlClosed(new Error('Explicit input session replacement'),{...this.context});previous.close?.();
+    }
+    const channel=this.pc.createDataChannel('control',{ordered:true});
+    if(!this.adoptControlChannel(channel))throw new Error('Control channel unavailable');
+    return channel;
   }
 
   async startScreenShare({video = true, audio = false} = {}) {
@@ -353,7 +380,7 @@ export class LauncherWebCastClient {
     this.onSessionEnded();
     if (this.stream) { const stream = this.stream; this.stream = null; for (const track of stream.getTracks()) track.stop(); this.onStream(null); }
     if (this.channel) { const channel = this.channel; this.channel = null; channel.onmessage = null; channel.onopen = null; channel.onclose = null; channel.close?.(); }
-    if (this.pc) { const pc = this.pc; this.pc = null; pc.onicecandidate = null; pc.onconnectionstatechange = null; pc.close?.(); }
+    if (this.pc) { const pc = this.pc; this.pc = null; pc.onicecandidate = null; pc.onconnectionstatechange = null; pc.ondatachannel = null; pc.close?.(); }
   }
 
   async stop({notify = true} = {}) {

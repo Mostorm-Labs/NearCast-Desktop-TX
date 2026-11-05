@@ -44,3 +44,4 @@ h1 { margin: 10px 0 0; color: #fff; font-size: clamp(28px, 4vw, 38px); line-heig
 .macos-interaction select:disabled { opacity: .5; }
 .macos-interaction p { margin: 8px 0 0; color: #9ba8bf; font-size: 11px; line-height: 1.5; }
 .touchback-diagnostics pre { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.casting-panel .platform-status { margin: 16px auto 0; }

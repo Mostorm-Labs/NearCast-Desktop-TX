@@ -1,5 +1,7 @@
 # Windows native Mouse adapter
 
+> Historical design. The runtime protocol and capability declarations below are superseded by [TI-3 typed input](../handoffs/2026-11-06-tx-typed-input-ti3.md). Native implementation history remains useful; do not implement the old BIND/epoch/single-mode protocol.
+
 ## Scope and responsibility
 
 The sender implements Windows native input and cleanup. The receiver owns gesture

@@ -22,7 +22,8 @@ test('normalizes Windows 10/11 capabilities from the native command', () => {
   assert.equal(info.screenCapture, true);
   assert.equal(info.touchback, true);
   assert.match(platformSummary(info), /Windows 10\/11/);
-  assert.match(touchbackSummary(info), /Windows Touch \/ Mouse/);
+  assert.match(touchbackSummary(info), /Windows.*Touch/);
+  assert.doesNotMatch(touchbackSummary(info), /Touch \/ Mouse/);
 });
 
 test('normalizes macOS 13+ capabilities and calls out Screen Recording permission', () => {
@@ -44,8 +45,8 @@ test('normalizes macOS 13+ capabilities and calls out Screen Recording permissio
   assert.match(platformSummary(info), /macOS 13\+/);
   assert.match(platformSummary(info), /屏幕录制/);
   assert.match(touchbackSummary(info), /主屏幕/);
-  assert.match(touchbackSummary(info), /鼠标或触控式滚动/);
-  assert.match(touchbackSummary(info), /多指触控暂不支持/);
+  assert.match(touchbackSummary(info), /Mouse/);
+  assert.match(touchbackSummary(info), /不转换 Touch/);
   assert.match(touchbackError('not_authorized', info).message, /隐私与安全性 → 辅助功能/);
   assert.match(screenCaptureError(new DOMException('denied', 'NotAllowedError'), info).message, /屏幕录制/);
 });

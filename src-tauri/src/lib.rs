@@ -5,14 +5,20 @@ mod code_display;
 mod discovery;
 mod pinned_tls;
 mod trust;
+mod input_geometry;
+mod input_native;
+#[cfg(all(test,windows))]
+mod input_native_tests;
 mod macos_permissions;
 #[cfg(target_os = "macos")]
 mod macos_input;
 #[cfg(any(target_os = "macos", test))]
 mod macos_input_model;
+// Retain the native Mouse provider; Windows TI-3 currently exposes typed Touch only.
 #[cfg(windows)]
+#[allow(dead_code)]
 mod windows_mouse;
-#[cfg_attr(not(windows), allow(dead_code))]
+#[allow(dead_code)]
 mod windows_mouse_model;
 use discovery::{DiscoveryCache, SERVICE_TYPES, SNAPSHOT_INTERVAL, BRIDGE_LEASE_MS};
 
@@ -171,8 +177,12 @@ mod pointer {
         okay
     }
 
-    pub fn inject(contact_id: u32, phase: u8, x: i32, y: i32) -> Result<(), String> {
-        inject_batch(&[Record {contact_id, phase, x, y}])
+    pub fn active_points() -> Vec<(u32,POINT)> { ACTIVE.lock().map(|active|active.clone()).unwrap_or_default() }
+    pub fn reset_all() -> bool { reset(&active_points().iter().map(|(id,_)|*id).collect::<Vec<_>>()) }
+    pub fn cancel_possible(records: &[crate::input_native::TouchRecord]) -> Result<(),String> {
+        let infos=records.iter().map(|record|{let mut info=POINTER_TOUCH_INFO::default();info.pointerInfo.pointerType=PT_TOUCH;info.pointerInfo.pointerId=record.contact_id;info.pointerInfo.ptPixelLocation=POINT{x:record.x,y:record.y};info.pointerInfo.pointerFlags=POINTER_FLAG_CANCELED|POINTER_FLAG_UP;info}).collect::<Vec<_>>();
+        unsafe{InjectTouchInput(&infos)}.map_err(|error|format!("native_touch_uncertain_cleanup_failed:0x{:08X}",error.code().0 as u32))?;
+        ACTIVE.lock().map_err(|_|"windows_pointer_state_poisoned".to_string())?.clear();Ok(())
     }
 
     pub fn reset(ids: &[u32]) -> bool {
@@ -216,92 +226,6 @@ mod pointer {
 }
 
 #[tauri::command]
-fn nearcast_pointer_initialize(max_contacts: u32) -> bool {
-    #[cfg(windows)] { return pointer::initialize(max_contacts.min(10).max(1)); }
-    #[cfg(not(windows))] { let _ = max_contacts; false }
-}
-
-#[tauri::command]
-fn nearcast_pointer_inject(contact_id: u32, phase: u8, x: i32, y: i32) -> Result<(), String> {
-    #[cfg(windows)] { return pointer::inject(contact_id, phase, x, y); }
-    #[cfg(not(windows))] { let _ = (contact_id, phase, x, y); Err("not_supported".into()) }
-}
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PointerRecord { contact_id: u32, phase: u8, x: i32, y: i32 }
-
-#[tauri::command]
-fn nearcast_pointer_inject_batch(records: Vec<PointerRecord>) -> Result<(), String> {
-    #[cfg(windows)] { return pointer::inject_batch(&records.iter().map(|record| pointer::Record {contact_id: record.contact_id, phase: record.phase, x: record.x, y: record.y}).collect::<Vec<_>>()); }
-    #[cfg(not(windows))] { let _ = records; Err("not_supported".into()) }
-}
-
-#[tauri::command]
-fn nearcast_pointer_reset(contact_ids: Vec<u32>) -> bool {
-    #[cfg(windows)] { return pointer::reset(&contact_ids); }
-    #[cfg(not(windows))] { let _ = contact_ids; false }
-}
-
-#[tauri::command]
-fn nearcast_windows_mouse_initialize() -> Result<bool, String> {
-    #[cfg(windows)] { return windows_mouse::initialize(); }
-    #[cfg(not(windows))] { Err("not_supported".into()) }
-}
-
-#[tauri::command]
-fn nearcast_windows_mouse_inject(records: Vec<windows_mouse_model::Record>) -> Result<(), String> {
-    #[cfg(windows)] { return windows_mouse::inject(&records); }
-    #[cfg(not(windows))] { let _ = records; Err("not_supported".into()) }
-}
-
-#[tauri::command]
-fn nearcast_windows_mouse_reset() -> Result<(), String> {
-    #[cfg(windows)] { return windows_mouse::reset(); }
-    #[cfg(not(windows))] { Err("not_supported".into()) }
-}
-
-#[tauri::command]
-fn nearcast_macos_input_initialize() -> Result<bool, String> {
-    #[cfg(target_os = "macos")]
-    { return Ok(macos_input::initialize()); }
-    #[cfg(not(target_os = "macos"))]
-    { Err("not_supported".into()) }
-}
-
-#[tauri::command]
-fn nearcast_macos_input_move(x: i32, y: i32, modifiers: u16) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    { return macos_input::move_pointer(x, y, modifiers); }
-    #[cfg(not(target_os = "macos"))]
-    { let _ = (x, y, modifiers); Err("not_supported".into()) }
-}
-
-#[tauri::command]
-fn nearcast_macos_input_button(button: u8, down: bool, x: i32, y: i32, modifiers: u16) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    { return macos_input::button(button, down, x, y, modifiers); }
-    #[cfg(not(target_os = "macos"))]
-    { let _ = (button, down, x, y, modifiers); Err("not_supported".into()) }
-}
-
-#[tauri::command]
-fn nearcast_macos_input_scroll(x: i32, y: i32, delta_x: i32, delta_y: i32, phase: String, modifiers: u16) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    { return macos_input::scroll(x, y, delta_x, delta_y, &phase, modifiers); }
-    #[cfg(not(target_os = "macos"))]
-    { let _ = (x, y, delta_x, delta_y, phase, modifiers); Err("not_supported".into()) }
-}
-
-#[tauri::command]
-fn nearcast_macos_input_reset() -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    { return macos_input::reset(); }
-    #[cfg(not(target_os = "macos"))]
-    { Err("not_supported".into()) }
-}
-
-#[tauri::command]
 fn nearcast_macos_permissions() -> Result<serde_json::Value, String> {
     macos_permissions::status()
 }
@@ -324,11 +248,21 @@ fn nearcast_platform_info() -> serde_json::Value {
     { serde_json::json!({"os":"unknown","webview":"unknown","screenCapture":false,"screenCapturePermission":"required","touchback":false,"inputControl":"none","multiTouch":false,"accessibilityPermission":"not_required"}) }
 }
 
+#[tauri::command]
+fn nearcast_input_probe()->serde_json::Value{input_native::probe()}
+#[tauri::command]
+fn nearcast_input_prepare(owner_id:String,source_binding_id:String,geometry_revision:String,native_id:String,input_types:Vec<String>,max_contacts:u32)->serde_json::Value{input_native::prepare(owner_id,source_binding_id,geometry_revision,native_id,input_types,max_contacts)}
+#[tauri::command]
+fn nearcast_input_apply(owner_id:String,lease_id:String,geometry_revision:String,action:input_native::Action)->serde_json::Value{input_native::apply(owner_id,lease_id,geometry_revision,action)}
+#[tauri::command]
+fn nearcast_input_release(owner_id:String,lease_id:Option<String>)->serde_json::Value{input_native::release(owner_id,lease_id)}
+
 pub fn run() {
     tauri::Builder::default()
         .manage(MdnsState(Mutex::new(None)))
         .manage(TrustState::default())
         .on_window_event(|_, event| {
+            if matches!(event,tauri::WindowEvent::CloseRequested{..}|tauri::WindowEvent::Destroyed){input_native::shutdown();}
             #[cfg(target_os = "macos")]
             if matches!(event, tauri::WindowEvent::Destroyed) { let _ = macos_input::reset(); }
             #[cfg(windows)]
@@ -338,7 +272,7 @@ pub fn run() {
             #[cfg(not(target_os = "macos"))]
             let _ = event;
         })
-        .invoke_handler(tauri::generate_handler![nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_pointer_initialize, nearcast_pointer_inject, nearcast_pointer_inject_batch, nearcast_pointer_reset, nearcast_windows_mouse_initialize, nearcast_windows_mouse_inject, nearcast_windows_mouse_reset, nearcast_macos_input_initialize, nearcast_macos_input_move, nearcast_macos_input_button, nearcast_macos_input_scroll, nearcast_macos_input_reset, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info])
+        .invoke_handler(tauri::generate_handler![nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info])
         .run(tauri::generate_context!())
         .expect("error while running NearCast Desktop TX");
 }

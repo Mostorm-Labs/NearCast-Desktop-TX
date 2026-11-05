@@ -1,3 +1,5 @@
+// Retained explicit gesture-policy material. The Native production provider
+// does not import this conversion policy or infer Mouse from Touch records.
 import {TouchbackPhase} from './codec.mjs';
 
 export const MACOS_INPUT_STATUS = Object.freeze({ACCEPTED: 'accepted', NOT_SUPPORTED: 'not_supported', NOT_AUTHORIZED: 'not_authorized', INVALID_STATE: 'invalid_state'});

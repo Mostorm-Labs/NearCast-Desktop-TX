@@ -18,6 +18,7 @@ class FakeSocket {
 }
 
 class FakeChannel {
+  label = 'control'; ordered = true; maxRetransmits = null; maxPacketLifeTime = null;
   readyState = 'connecting';
   sent = [];
   open() { this.readyState = 'open'; this.onopen?.(); }
@@ -28,7 +29,7 @@ class FakeChannel {
 class FakePeerConnection {
   static instances = [];
   constructor() { this.connectionState = 'new'; this.iceConnectionState = 'new'; this.tracks = []; this.localDescriptions = []; this.remoteDescriptions = []; this.candidates = []; this.dataChannel = new FakeChannel(); FakePeerConnection.instances.push(this); }
-  createDataChannel() { return this.dataChannel; }
+  createDataChannel() { if(!this.channelCreated){this.channelCreated=true;return this.dataChannel;}return this.dataChannel=new FakeChannel(); }
   async createOffer() { return {type: 'offer', sdp: `offer-${this.localDescriptions.length + 1}`}; }
   async setLocalDescription(value) { this.localDescriptions.push(value); }
   async setRemoteDescription(value) { this.remoteDescriptions.push(value); }
@@ -350,24 +351,27 @@ test('reports the signaling close reason instead of silently returning to pairin
   await client.stop();
 });
 
-test('a closed control channel retires sharing and cannot start another capture', async () => {
-  const errors = []; const fixture = streamFixture(); let captures = 0;
+test('control channel failure preserves media and accepts a fresh authenticated control channel', async () => {
+  const errors = [], closed = []; const fixture = streamFixture(); let captures = 0;
   const client = new LauncherWebCastClient({WebSocketImpl: FakeSocket, RTCPeerConnectionImpl: FakePeerConnection,
-    mediaDevices: {getDisplayMedia: async () => { captures++; return fixture.stream; }}, onError: error => errors.push(error)});
+    mediaDevices: {getDisplayMedia: async () => { captures++; return fixture.stream; }}, onError: error => errors.push(error), onControlClosed: error=>closed.push(error)});
   const connecting = client.connect('1234'); const socket = FakeSocket.instances.at(-1); socket.open(); await connecting;
   await socket.receive({type: 'joined'}); client.channel.open();
   await client.startScreenShare();
-  client.channel.close();
-  assert.equal(client.status, 'error');
-  assert.equal(fixture.track.stopped, true);
-  assert.equal(client.stream, null);
-  assert.match(errors[0]?.message ?? '', /控制通道.*关闭/);
-  await assert.rejects(client.startScreenShare(), /Connect to a receiver/);
+  const pc=client.pc,old=client.channel;old.close();
+  assert.equal(client.status, 'sharing');
+  assert.equal(fixture.track.stopped, false);
+  assert.equal(client.stream, fixture.stream);
+  assert.equal(client.pc,pc);assert.equal(closed.length,1);assert.equal(errors.length,0);
+  const replacement=new FakeChannel();pc.ondatachannel({channel:replacement});replacement.open();
+  assert.equal(client.channel,replacement);
+  const extra=new FakeChannel();pc.ondatachannel({channel:extra});assert.equal(extra.readyState,'closed');
+  old.onclose?.();assert.equal(client.channel,replacement);
   assert.equal(captures, 1);
   await client.stop();
 });
 
-test('control closure while the picker is pending releases a late capture', async () => {
+test('control closure while the picker is pending preserves capture and renegotiates over WebSocket', async () => {
   let finishCapture; const fixture = streamFixture();
   const client = new LauncherWebCastClient({WebSocketImpl: FakeSocket, RTCPeerConnectionImpl: FakePeerConnection,
     mediaDevices: {getDisplayMedia: () => new Promise(resolve => { finishCapture = resolve; })}});
@@ -375,10 +379,20 @@ test('control closure while the picker is pending releases a late capture', asyn
   await socket.receive({type: 'joined'}); client.channel.open();
   const capture = client.startScreenShare();
   client.channel.close(); finishCapture(fixture.stream);
-  await assert.rejects(capture, /cancel/i);
-  assert.equal(fixture.track.stopped, true);
-  assert.equal(client.stream, null);
+  await capture;
+  assert.equal(fixture.track.stopped, false);
+  assert.equal(client.stream, fixture.stream);
+  assert.equal(socket.sent.at(-1).type,'offer');
   await client.stop();
+});
+
+test('explicit control replacement retires callbacks while retaining the current media peer',async()=>{
+  const closed=[];const client=new LauncherWebCastClient({WebSocketImpl:FakeSocket,RTCPeerConnectionImpl:FakePeerConnection,onControlClosed:()=>closed.push(true)});
+  const connecting=client.connect('1234');const socket=FakeSocket.instances.at(-1);socket.open();await connecting;
+  await socket.receive({type:'joined'});client.channel.open();const old=client.channel,pc=client.pc;
+  const next=client.recreateControlChannel({replace:true});
+  assert.equal(old.readyState,'closed');assert.equal(client.channel,next);assert.equal(client.pc,pc);assert.equal(closed.length,1);
+  next.open();assert.equal(client.status,'connected');await client.stop();
 });
 
 test('exposes the existing control channel and forwards binary messages', async () => {
@@ -393,4 +407,3 @@ test('exposes the existing control channel and forwards binary messages', async 
   assert.equal(controls.length, 1);
   assert.equal(controls[0].data.byteLength, 2);
 });
-

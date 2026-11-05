@@ -1,10 +1,10 @@
+// Future explicit gesture-policy material; not connected to Native typed input.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {MacOsInputSink, MACOS_INPUT_STATUS} from '../src/touchback/macos-input.mjs';
-import {createMacOsInputBridge} from '../src/touchback/macos-native-bridge.mjs';
 import {TouchbackPhase} from '../src/touchback/codec.mjs';
 
-for (const directory of ['src', 'dist']) {
+for (const directory of ['src']) {
   test(`${directory}: maps receiver contact records with zero buttons to a complete primary mouse gesture`, async () => {
     const {MacOsInputSink} = await import(`../${directory}/touchback/macos-input.mjs`);
     const calls = [];
@@ -123,18 +123,6 @@ test('rejects multi-contact records and reports missing macOS accessibility perm
   authorized = true; assert.equal(await sink.initialize(), MACOS_INPUT_STATUS.ACCEPTED);
   assert.equal(await sink.apply({contactId: 1, phase: TouchbackPhase.DOWN, x: 0, y: 0, buttons: 1, modifiers: 0, dtMs: 0, recordFlags: 0}), MACOS_INPUT_STATUS.ACCEPTED);
   assert.equal(await sink.apply({contactId: 2, phase: TouchbackPhase.MOVE, x: 0, y: 0, buttons: 1, modifiers: 0, dtMs: 0, recordFlags: 0}), MACOS_INPUT_STATUS.INVALID_STATE);
-});
-
-test('bridges macOS input operations to dedicated Tauri commands', async () => {
-  const calls = [];
-  const bridge = createMacOsInputBridge({invoke: async (command, args) => { calls.push([command, args]); return true; }});
-  await bridge.initialize(); await bridge.move(10, 20); await bridge.button(1, true); await bridge.reset();
-  assert.deepEqual(calls, [
-    ['nearcast_macos_input_initialize', undefined],
-    ['nearcast_macos_input_move', {x: 10, y: 20, modifiers: 0}],
-    ['nearcast_macos_input_button', {button: 1, down: true, x: 0, y: 0, modifiers: 0}],
-    ['nearcast_macos_input_reset', undefined],
-  ]);
 });
 
 test('failed reset is reported and must succeed before input can initialize again', async () => {

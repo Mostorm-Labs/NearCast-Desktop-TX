@@ -56,13 +56,12 @@
       <h1>Sharing to <span id="target-name">NearCast</span></h1>
       <p id="cast-status" class="panel-desc">Receiver is ready for casting.</p>
       <div id="preview-wrap" class="preview-wrap" hidden><video id="preview" autoplay muted playsinline></video><span class="preview-badge">LOCAL PREVIEW</span></div>
-      <section id="macos-interaction" class="macos-interaction" hidden>
-        <label for="macos-interaction-mode">反控操作方式</label>
-        <select id="macos-interaction-mode" aria-describedby="macos-interaction-help">
-          <option value="mouse">鼠标</option>
-          <option value="touch-scroll">触控式滚动</option>
-        </select>
-        <p id="macos-interaction-help">按住并移动可选中文字、拖动窗口或文件。</p>
+      <section class="macos-interaction" aria-label="反向控制">
+        <label><input id="input-enabled" type="checkbox"> 允许接收端反控本机</label>
+        <p id="input-state" aria-live="polite">反控未启用</p>
+        <p class="quality-help">使用原生输入。反控需要双方启用，并分享单一主屏幕；分辨率请选择 Auto 或屏幕原始分辨率。</p>
+        <button id="input-reconnect" class="refresh" type="button" disabled>重建反控连接</button>
+        <button id="input-cleanup" class="refresh" type="button" hidden>重试释放输入</button>
       </section>
       <section class="video-quality" aria-labelledby="video-quality-title">
         <div class="quality-heading"><span id="video-quality-title">Video quality</span><span id="video-quality-summary">Fixed · 1920 × 1080 · 12 Mbps</span></div>
@@ -80,13 +79,13 @@
       </div>
       <p id="cast-error" class="error" hidden></p>
       <p id="touchback-status" class="platform-status" aria-live="polite"></p>
-      <details class="touchback-diagnostics" open>
+      <details class="touchback-diagnostics">
         <summary>反控收包诊断</summary>
         <pre id="touchback-diagnostics"></pre>
       </details>
     </section>
 
-    <footer>Launcher-compatible WebCast · Windows Touch / Mouse · macOS 鼠标与触控式滚动</footer>
+    <footer>Launcher-compatible WebCast · Native Touch / Mouse input</footer>
   </main>
   <script type="module" src="./app.mjs"></script>
 </body>

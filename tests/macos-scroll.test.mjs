@@ -1,3 +1,4 @@
+// Future explicit gesture-policy material; not connected to Native typed input.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -10,26 +11,8 @@ const nativeRecorder = calls => ({
   reset: async () => calls.push(['reset']),
 });
 
-for (const directory of ['src', 'dist']) {
+for (const directory of ['src']) {
   const {MacOsInputSink} = await import(`../${directory}/touchback/macos-input.mjs`);
-  const {WebCastTouchbackSender} = await import(`../${directory}/webcast/touchback-sender.mjs`);
-  const {createPlatformInputSink} = await import(`../${directory}/touchback/platform-input.mjs`);
-
-  test(`${directory}: the selected mode reaches native pixel scrolling with an anchored position and phases`, async () => {
-    const calls = [];
-    const sink = createPlatformInputSink({os: 'macos', touchback: true, inputControl: 'macos-mouse'}, {
-      interactionMode: 'touch-scroll',
-      invoke: async (command, args) => {calls.push([command, args]); return command.endsWith('initialize') ? true : null;},
-    });
-    await sink.initialize();
-    for (const r of [record(0), record(1, {y: 18000}), record(2, {y: 18000})]) assert.equal(await sink.apply(r), 'accepted');
-    assert.deepEqual(calls, [
-      ['nearcast_macos_input_initialize', undefined],
-      ['nearcast_macos_input_move', {x: 10000, y: 20000, modifiers: 0}],
-      ['nearcast_macos_input_scroll', {x: 10000, y: 20000, deltaX: 0, deltaY: -2000, phase: 'began', modifiers: 0}],
-      ['nearcast_macos_input_scroll', {x: 10000, y: 20000, deltaX: 0, deltaY: 0, phase: 'ended', modifiers: 0}],
-    ]);
-  });
 
   test(`${directory}: touch scrolling sends anchored two-axis deltas and ends without a mouse press`, async () => {
     const calls = [];
@@ -117,31 +100,4 @@ for (const directory of ['src', 'dist']) {
     assert.equal(sink.snapshot().initialized, false);
   });
 
-  test(`${directory}: mode change fences queued frames and waits for in-flight native input`, async () => {
-    const calls = [];
-    let finishPress;
-    const native = nativeRecorder(calls);
-    native.button = async (...args) => {
-      calls.push(['button', ...args]);
-      if (args[1]) await new Promise(resolve => {finishPress = resolve;});
-    };
-    const sink = new MacOsInputSink({native});
-    const sender = new WebCastTouchbackSender({nativeBridge: sink});
-    await sender.attachControlChannel({readyState: 'open', send() {}}, {authorized: true});
-    calls.length = 0;
-    const pressing = sender.applyFrame({records: [record(0)]});
-    await new Promise(resolve => setImmediate(resolve));
-    const changing = sender.setLocalInteractionMode('touch-scroll');
-    const tail = sender.applyFrame({records: [record(1), record(2)]});
-    assert.deepEqual(calls, [['button', 1, true, 10000, 20000, 0]]);
-    finishPress();
-    await pressing;
-    assert.equal(await changing, 'accepted');
-    assert.equal((await tail).status, 'applied');
-    assert.equal(sender.snapshot().authorized, true);
-    assert.equal(sink.snapshot().interactionMode, 'touch-scroll');
-    assert.deepEqual(calls, [['button', 1, true, 10000, 20000, 0], ['reset']]);
-    assert.equal((await sender.applyFrame({records: [record(0), record(1, {y: 18000}), record(2, {y: 18000})]})).status, 'applied');
-    assert.equal(calls.filter(c => c[0] === 'scroll').length, 2);
-  });
 }

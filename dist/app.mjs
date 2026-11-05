@@ -1,9 +1,9 @@
 import {LauncherWebCastClient, DEFAULT_ENDPOINT} from './webcast/launcher-webcast-client.mjs';
 import {ReceiverTrust, formatFingerprint} from './webcast/receiver-trust.mjs';
 import {WebCastTouchbackSender} from './webcast/touchback-sender.mjs';
-import {createPlatformInputSink} from './touchback/platform-input.mjs';
+import {createPlatformInputAdapter} from './touchback/platform-input.mjs';
 import {TauriDeviceDiscovery} from './tauri-device-discovery.mjs';
-import {loadPlatformInfo, platformSummary, screenCaptureError, touchbackSummary, touchbackError} from './platform-capabilities.mjs';
+import {loadPlatformInfo, platformSummary, screenCaptureError, touchbackSummary} from './platform-capabilities.mjs';
 import {canAttachTouchbackChannel} from './webcast/touchback-channel-policy.mjs';
 import {normalizeVideoQuality} from './webcast/video-quality.mjs';
 import {MacOsPermissions} from './macos-permissions.mjs';
@@ -51,10 +51,10 @@ const permissionRows = document.querySelector('#permission-rows');
 const refreshPermissionsButton = document.querySelector('#refresh-permissions');
 const permissionsError = document.querySelector('#permissions-error');
 const permissions = new MacOsPermissions({invoke});
-const macosInteractionPanel = document.querySelector('#macos-interaction');
-const macosInteractionSelect = document.querySelector('#macos-interaction-mode');
-const macosInteractionHelp = document.querySelector('#macos-interaction-help');
-let macosInteractionMode = 'mouse';
+const inputEnabled = document.querySelector('#input-enabled');
+const inputState = document.querySelector('#input-state');
+const inputReconnect = document.querySelector('#input-reconnect');
+const inputCleanup = document.querySelector('#input-cleanup');
 let permissionActionPending = false;
 let permissionSettingsOpened = null;
 
@@ -71,7 +71,7 @@ let platformReady = Promise.resolve();
 let controlGeneration = 0;
 let capturePending = false;
 let videoQuality = normalizeVideoQuality({resolution: videoResolution.value, bitrateMode: videoBitrateMode.value, bitrateKbps: videoBitrate.value});
-globalThis.__nearcastTouchbackDiagnostics = () => touchback ? {...touchback.diagnostics(), control: touchback.controlDiagnostics(), ...(platformInfo?.os === 'macos' ? {macosInput: touchback.pointer.snapshot()} : {})} : null;
+globalThis.__nearcastTouchbackDiagnostics = () => touchback ? {...touchback.diagnostics(), control: touchback.controlDiagnostics()} : null;
 const controlDiagnostics = document.querySelector('#touchback-diagnostics');
 const renderControlDiagnostics = () => {
   if (controlDiagnostics) controlDiagnostics.textContent = JSON.stringify(globalThis.__nearcastTouchbackDiagnostics(), null, 2);
@@ -140,29 +140,32 @@ digits.forEach((input, index) => {
   });
 });
 
-const buildTouchback = info => new WebCastTouchbackSender({
-  nativeBridge: createPlatformInputSink(info, {invoke, viewport: {width: screen.width, height: screen.height}, interactionMode: macosInteractionMode}),
-  onStatus: status => {
-    if (status === 'accepted') touchbackStatus.textContent = `${touchbackSummary(info)} · 反控已就绪`;
-    else if (status === 'native_ready') touchbackStatus.textContent = `${touchbackSummary(info)} · 本机输入已初始化，等待接收端开启反控`;
-    else setError(castError, touchbackError(status, info));
+const buildTouchback = () => new WebCastTouchbackSender({
+  provider: createPlatformInputAdapter({}, {invoke}),
+  onStatus: (_status, state) => {
+    const reasons = {LOCAL_INPUT_DISABLED:'反控未启用', APP_NOT_READY:'等待接收端建立反控会话', TARGET_UNBOUND:'等待接收端绑定投屏来源', CAPTURE_UNAVAILABLE:'请先分享主屏幕', CAPTURE_MUTED:'采集已暂停', NATIVE_CLEANUP_PENDING:'等待释放上一次输入', NATIVE_PERMISSION_UNAVAILABLE:'本机输入不可用，请检查系统权限', NATIVE_DOMAIN_BUSY:'本机输入正由其他会话使用', NATIVE_GEOMETRY_UNAVAILABLE:'无法确认屏幕映射，请选择单一主屏幕和原始分辨率', TARGET_CONTRACT_MISMATCH:'接收端反控协议版本不匹配', INPUT_SESSION_FAULT:'反控连接异常，可重建连接'};
+    inputState.textContent = !state.localEnabled ? '反控未启用' : state.state === 'active' ? `反控已开启 · ${state.acceptedInputTypes.join(' / ')} · stream ${state.streamId}` : state.sourceReady ? '本机已就绪，等待接收端开启反控' : state.disabledReason === 'NATIVE_PROBE_FAILED' ? '无法读取本机输入能力，请重试或检查系统权限' : reasons[state.disabledReason] || '正在准备反控';
+    inputCleanup.hidden = !state.cleanupPending;
+    inputReconnect.disabled = state.cleanupPending || !['connected','sharing'].includes(currentStatus);
+    touchbackStatus.textContent = touchbackSummary(platformInfo ?? {});
+    renderControlDiagnostics();
   },
 });
-touchback = buildTouchback({os: 'unknown', touchback: false, inputControl: 'none'});
-macosInteractionSelect.addEventListener('change', async () => {
-  const sender = touchback;
-  const requestedMode = macosInteractionSelect.value;
-  macosInteractionSelect.disabled = true;
-  setError(castError, null);
-  try {
-    const status = await sender.setLocalInteractionMode(requestedMode);
-    if (status !== 'accepted') throw touchbackError(status, platformInfo);
-    macosInteractionMode = requestedMode;
-    macosInteractionHelp.textContent = requestedMode === 'touch-scroll'
-      ? '轻点点击，单指滑动可滚动网页或列表。选中文字、拖动窗口或文件时请切换到“鼠标”。'
-      : '按住并移动可选中文字、拖动窗口或文件。';
-  } catch (error) { if (sender === touchback) setError(castError, error); }
-  finally { macosInteractionSelect.value = macosInteractionMode; macosInteractionSelect.disabled = false; }
+touchback = buildTouchback();
+inputEnabled.addEventListener('change', () => { void touchback.setEnabled(inputEnabled.checked); });
+inputCleanup.addEventListener('click', async () => {
+  inputCleanup.disabled = true;
+  try { await touchback.retryCleanup(); } finally { inputCleanup.disabled = false; }
+});
+inputReconnect.addEventListener('click', async () => {
+  inputReconnect.disabled = true;
+  if (touchback.diagnostics().cleanupPending) return;
+  if (!await touchback.fence('explicit control replacement')) {
+    inputState.textContent = '输入尚未释放，请先重试释放输入';
+    return;
+  }
+  try { client.recreateControlChannel({replace: true}); }
+  catch (error) { inputState.textContent = error.message; }
 });
 const client = new LauncherWebCastClient({
   endpoint: selectedEndpoint,
@@ -181,18 +184,20 @@ const client = new LauncherWebCastClient({
     if (String(error.message || error).includes('NEARCAST_KEY_MISMATCH')) trustManager.keyMismatch(error.message || error);
   },
   onSessionEnded: () => { controlGeneration++; touchback.fence(); },
-  onControlChannel: channel => {
+  onControlClosed: () => { controlGeneration++; void touchback.fence('control channel closed'); inputReconnect.disabled = false; inputState.textContent = '反控连接已关闭，投屏继续'; },
+  onControlChannel: (channel, mediaIdentity) => {
     if (!canAttachTouchbackChannel(channel)) return;
     const generation = ++controlGeneration;
     try {
       platformReady.then(() => {
         if (generation !== controlGeneration || channel.readyState !== 'open') return;
-        return touchback.attachControlChannel(channel, {authorized: true, protocol: 'webcast'});
+        return touchback.attachControlChannel(channel, {authorized: true, protocol: 'webcast', mediaIdentity});
       }).catch(error => { if (generation === controlGeneration) setError(castError, error); });
     } catch (error) { setError(castError, error); }
   },
   onControlMessage: message => touchback.handleControlMessage(message),
   onStream: stream => {
+    void touchback.setCaptureTrack(stream?.getVideoTracks()[0] ?? null);
     preview.srcObject = stream;
     previewWrap.hidden = !stream;
     shareButton.hidden = Boolean(stream);
@@ -229,7 +234,9 @@ pairForm.addEventListener('submit', async event => {
   client.endpoint = selectedEndpoint;
   try {
     await platformReady;
-    touchback = buildTouchback(platformInfo ?? {});
+    await touchback.fence('new pairing');
+    inputEnabled.checked = false;
+    await touchback.setEnabled(false);
     await client.connect(pairCode);
     targetName.textContent = selectedDevice?.displayName || 'NearCast';
   } catch (error) {
@@ -354,11 +361,10 @@ setView('idle');
 platformReady = loadPlatformInfo(invoke).then(info => {
   platformInfo = info;
   permissionsPanel.hidden = info.os !== 'macos';
-  macosInteractionPanel.hidden = info.os !== 'macos' || !info.touchback;
   if (info.os === 'macos') { renderPermissions(); refreshPermissions(); }
   platformStatus.textContent = platformSummary(info);
   touchbackStatus.textContent = touchbackSummary(info);
-  if (currentStatus === 'idle') touchback = buildTouchback(info);
+  touchback.status();
   return info;
 }).catch(() => ({os: 'unknown', touchback: false, inputControl: 'none'}));
 startDiscovery();
