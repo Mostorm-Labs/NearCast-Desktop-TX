@@ -43,8 +43,8 @@ test('normalizes macOS 13+ capabilities and calls out Screen Recording permissio
   assert.equal(info.inputControl, 'macos-mouse');
   assert.match(platformSummary(info), /macOS 13\+/);
   assert.match(platformSummary(info), /屏幕录制/);
-  assert.match(touchbackSummary(info), /macOS 主屏幕鼠标反向控制/);
-  assert.match(touchbackSummary(info), /键盘.*滚轮.*协议扩展/);
+  assert.match(touchbackSummary(info), /主屏幕/);
+  assert.match(touchbackSummary(info), /鼠标或触控式滚动/);
   assert.match(touchbackSummary(info), /多指触控暂不支持/);
   assert.match(touchbackError('not_authorized', info).message, /隐私与安全性 → 辅助功能/);
   assert.match(screenCaptureError(new DOMException('denied', 'NotAllowedError'), info).message, /屏幕录制/);

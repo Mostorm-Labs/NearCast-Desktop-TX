@@ -56,6 +56,14 @@
       <h1>Sharing to <span id="target-name">NearCast</span></h1>
       <p id="cast-status" class="panel-desc">Receiver is ready for casting.</p>
       <div id="preview-wrap" class="preview-wrap" hidden><video id="preview" autoplay muted playsinline></video><span class="preview-badge">LOCAL PREVIEW</span></div>
+      <section id="macos-interaction" class="macos-interaction" hidden>
+        <label for="macos-interaction-mode">反控操作方式</label>
+        <select id="macos-interaction-mode" aria-describedby="macos-interaction-help">
+          <option value="mouse">鼠标</option>
+          <option value="touch-scroll">触控式滚动</option>
+        </select>
+        <p id="macos-interaction-help">按住并移动可选中文字、拖动窗口或文件。</p>
+      </section>
       <section class="video-quality" aria-labelledby="video-quality-title">
         <div class="quality-heading"><span id="video-quality-title">Video quality</span><span id="video-quality-summary">Fixed · 1920 × 1080 · 12 Mbps</span></div>
         <div class="quality-grid">
@@ -78,7 +86,7 @@
       </details>
     </section>
 
-    <footer>Launcher-compatible WebCast · Windows Pointer Injection / macOS 鼠标反向控制 · 多指触控暂不支持</footer>
+    <footer>Launcher-compatible WebCast · Windows Pointer Injection / macOS 鼠标与触控式滚动 · 多指触控暂不支持</footer>
   </main>
   <script type="module" src="./app.mjs"></script>
 </body>

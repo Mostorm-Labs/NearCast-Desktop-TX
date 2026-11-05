@@ -37,4 +37,10 @@ h1 { margin: 10px 0 0; color: #fff; font-size: clamp(28px, 4vw, 38px); line-heig
 @media (max-width: 650px) { body { min-width: 360px; }.webcast-sender { padding: 18px 16px; }.sender-panel { padding: 30px 22px 25px; }.code-digit { width: 52px; height: 60px; }.devices { margin-top: 23px; } }
 .video-quality{width:min(520px,100%);margin:2px 0 18px;padding:13px 15px 11px;border:1px solid #ffffff18;border-radius:13px;background:#ffffff08;text-align:left}.quality-heading{display:flex;align-items:center;justify-content:space-between;color:#dfe7f5;font-size:12px;font-weight:700}.quality-heading span:last-child{color:#7adfff;font-size:11px;font-weight:500}.quality-grid{display:grid;grid-template-columns:1.2fr 1.2fr .8fr;gap:9px;margin-top:10px}.quality-grid label{color:#9ba8bf;font-size:10px}.quality-grid select{display:block;width:100%;margin-top:5px;padding:8px 7px;border:1px solid #ffffff20;border-radius:7px;color:#e9effa;background:#0c1020;font:inherit;font-size:11px}.quality-grid select:disabled{opacity:.45}.quality-help{margin:8px 0 0;color:#78869e;font-size:10px;line-height:1.35}@media (max-width:650px){.quality-grid{grid-template-columns:1fr}}
 .touchback-diagnostics { margin-top: 16px; text-align: left; font-size: 12px; }
+.macos-interaction { width: min(520px, 100%); margin: 2px 0 16px; padding: 13px 15px; border: 1px solid #ffffff18; border-radius: 13px; background: #ffffff08; text-align: left; }
+.macos-interaction label { color: #dfe7f5; font-size: 12px; font-weight: 700; }
+.macos-interaction select { display: block; width: 100%; margin-top: 9px; padding: 8px; border: 1px solid #ffffff20; border-radius: 7px; color: #e9effa; background: #0c1020; font: inherit; font-size: 12px; }
+.macos-interaction select:focus-visible { outline: 2px solid #7adfff; outline-offset: 2px; }
+.macos-interaction select:disabled { opacity: .5; }
+.macos-interaction p { margin: 8px 0 0; color: #9ba8bf; font-size: 11px; line-height: 1.5; }
 .touchback-diagnostics pre { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }

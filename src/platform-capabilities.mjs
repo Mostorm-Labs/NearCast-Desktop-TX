@@ -23,7 +23,7 @@ export function platformSummary(info) {
 
 export function touchbackSummary(info) {
   const value = normalizePlatformInfo(info);
-  if (value.inputControl === 'macos-mouse') return 'Touchback：macOS 主屏幕鼠标反向控制；请分享主屏幕；键盘和滚轮等待协议扩展；多指触控暂不支持；首次使用需允许“辅助功能”';
+  if (value.inputControl === 'macos-mouse') return 'Touchback：macOS 单点反向控制；请分享主屏幕；可选择鼠标或触控式滚动；多指触控暂不支持；首次使用需允许“辅助功能”';
   if (value.inputControl === 'windows-pointer') return 'Touchback：Windows Pointer Injection';
   return 'Touchback：当前平台不支持反向控制';
 }

@@ -4,6 +4,44 @@ import {MacOsInputSink, MACOS_INPUT_STATUS} from '../src/touchback/macos-input.m
 import {createMacOsInputBridge} from '../src/touchback/macos-native-bridge.mjs';
 import {TouchbackPhase} from '../src/touchback/codec.mjs';
 
+for (const directory of ['src', 'dist']) {
+  test(`${directory}: maps receiver contact records with zero buttons to a complete primary mouse gesture`, async () => {
+    const {MacOsInputSink} = await import(`../${directory}/touchback/macos-input.mjs`);
+    const calls = [];
+    const sink = new MacOsInputSink({native: {
+      initialize: async () => true,
+      button: async (...args) => calls.push(['button', ...args]),
+      move: async (...args) => calls.push(['move', ...args]),
+      reset: async () => calls.push(['reset']),
+    }});
+    assert.equal(await sink.initialize(), 'accepted');
+    // Captured from the real receiver: a touch has a contact lifecycle and no
+    // mouse button mask, even when the negotiated output mode is mouse.
+    const down = {contactId: 350, phase: 0, buttons: 0, x: 41523, y: 18978, modifiers: 0, wheel: 0, dtMs: 0, recordFlags: 0};
+    assert.equal(await sink.apply(down), 'accepted');
+    assert.equal(await sink.apply({...down, phase: 1, x: 44108, y: 15337}), 'accepted');
+    assert.equal(await sink.apply({...down, phase: 2, x: 44108, y: 15337}), 'accepted');
+    assert.equal(sink.snapshot().activeContacts, 0);
+    assert.equal(await sink.apply({...down, contactId: 351}), 'accepted');
+    assert.equal(await sink.apply({...down, contactId: 351, phase: 3}), 'accepted');
+    assert.equal(sink.snapshot().buttons, 0);
+    assert.deepEqual(calls, [
+      ['button', 1, true, 41523, 18978, 0],
+      ['move', 44108, 15337, 0],
+      ['button', 1, false, 44108, 15337, 0],
+      ['button', 1, true, 41523, 18978, 0],
+      ['button', 1, false, 41523, 18978, 0],
+    ]);
+  });
+}
+
+test('does not accept a missing held button on an explicit mouse gesture', async () => {
+  const sink = new MacOsInputSink({native: {initialize: () => true, button() {}, move() {}}});
+  await sink.initialize();
+  assert.equal(await sink.apply({contactId: 1, phase: 0, buttons: 1, x: 0, y: 0}), 'accepted');
+  assert.equal(await sink.apply({contactId: 1, phase: 1, buttons: 0, x: 1, y: 1}), 'invalid_state');
+});
+
 test('maps launcher touchback records to macOS mouse events without changing the wire frame', async () => {
   const calls = [];
   const sink = new MacOsInputSink({

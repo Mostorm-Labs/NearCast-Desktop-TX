@@ -146,6 +146,18 @@ export class WebCastTouchbackSender {
     };
     return Promise.resolve(this._resetBarrier).then(() => applyAt(0));
   }
+  setLocalInteractionMode(mode) {
+    if (typeof this.pointer.setInteractionMode !== 'function') return Promise.resolve(PointerInjectionStatus.NOT_SUPPORTED);
+    const generation = ++this.generation;
+    const run = async () => {
+      await this._resetBarrier;
+      if (generation !== this.generation) return PointerInjectionStatus.INVALID_STATE;
+      return this.pointer.setInteractionMode(mode);
+    };
+    const result = this._frameQueue.then(run, run);
+    this._frameQueue = result.catch(() => {});
+    return result;
+  }
   fence() { this.generation++; this.authorized = false; this._nativeReady = false; this._initialization = null; this._pendingControlMessages = []; this.resetPointer(); this.receiver.control = null; return this.receiver.fence(); }
   diagnostics() {
     return {

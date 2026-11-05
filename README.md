@@ -53,11 +53,13 @@ Touchback 使用 WebCast control DataChannel 上的 canonical AXTP STREAM：16-b
 
 Windows 原生桥提供 Touch（最多 10 contacts）；macOS 13+ 原生桥提供现有 CoreGraphics Mouse 路径（单 contact）。Windows Mouse required 请求明确返回 NOT_SUPPORTED；preferred 可在对端声明支持 Touch 时明确回退到 Touch，本次协议修复没有新增 Windows 鼠标注入。macOS 原生桥尚未实现独立键码/滚轮注入。反向控制时请分享主屏幕；窗口/副屏需要后续加入捕获区域映射。macOS 首次使用反向控制需要在“系统设置 → 隐私与安全性 → 辅助功能”允许 NearCast Desktop TX。AirPlay 仍仅展示，不授权 Touchback。
 
+macOS 投屏页提供“反控操作方式”：默认“鼠标”将单点接触转换成左键点击和拖拽，可选中文字、移动窗口或文件；“触控式滚动”在轻点松开时点击，在滑动超过少量距离后产生系统平滑滚动，可滚动网页和列表。滚动模式不会在接触开始时按住鼠标，因此滑动不会选中文字；需要拖拽物体时请切回“鼠标”。这是 Mac 本机的单点操作映射，协议协商仍为 Mouse，不提供 Windows 式原生多点 Touch 注入，也不模拟惯性。选项在本次应用运行期间跨连接保留，重启默认恢复鼠标。切换模式会释放鼠标或结束滚动，并忽略上一接触的尾部记录；新接触从 DOWN 开始。断开、reset 和权限失效同样执行清理。
+
 连接页先显示“本机输入已初始化，等待接收端开启反控”；BIND 只建立协议绑定，收到有效 receiver-owned input.openStream 请求并生成结果后才显示“反控已就绪”。接收端需开启 Touchback gate；手动配对和从发现列表选择接收端均可建立已认证的 WebCast 控制通道。
 
 手动输入配对码时，已认证的 WebCast control channel 也会绑定 Touchback，不再要求先从扫描列表选择设备。接收端在发送端原生输入初始化完成前发出的 BIND/BATCH 会暂存并按顺序处理；AirPlay 或未打开的非 WebCast channel 仍不会授权反控。
 
-真实联调时可在投屏页展开“反控收包诊断”，或执行 `globalThis.__nearcastTouchbackDiagnostics()`。`controlChannelReady`、`nativeReady`、`bindingReady` 分别表示通道、本机初始化、BIND 已完成；`control.streamState`、`control.stream` 显示协商状态和 stream/epoch/模式；`control.recentControl` 保留最近 32 条控制消息的允许字段及处理结果，二进制收帧单独计数；`injectionCount` / `lastInjectionStatus` / `lastInjectionFailure` 表示实际注入及错误。诊断不保留配对码或 bindingToken。`receiverEnabled` 仍为 null，接收端本地 gate 和 effectiveEnabled 应通过接收端状态查询核对。
+真实联调时可在投屏页展开“反控收包诊断”，或执行 `globalThis.__nearcastTouchbackDiagnostics()`。`controlChannelReady`、`nativeReady`、`bindingReady` 分别表示通道、本机初始化、BIND 已完成；`control.streamState`、`control.stream` 显示协商状态和 stream/epoch/模式；`control.recentControl` 保留最近 32 条控制消息的允许字段及处理结果，二进制收帧单独计数；`injectionCount` / `lastInjectionStatus` / `lastInjectionFailure` 表示实际注入及错误。Mac 额外显示 `macosInput.interactionMode`、`activeContacts` 和 `buttons`，可核对本机操作方式及释放状态。诊断不保留配对码或 bindingToken。`receiverEnabled` 仍为 null，接收端本地 gate 和 effectiveEnabled 应通过接收端状态查询核对。
 
 WebSocket 地址默认为 `wss://cast.nearhub.us`，也可以通过 Tauri 页面 URL 的 `?ws=` 参数覆盖，例如 `?ws=wss%3A%2F%2Flocalhost%3A8888`。
 
