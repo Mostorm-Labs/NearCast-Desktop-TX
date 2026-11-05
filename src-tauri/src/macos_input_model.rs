@@ -27,9 +27,56 @@ pub fn modifier_flags(modifiers: u16) -> Result<u64, String> {
     Ok(((modifiers as u64) & 0x0f) << 17)
 }
 
+pub fn scroll_delta(value: i32, extent: f64, remainder: f64) -> Result<(i32, f64), String> {
+    if !(-65535..=65535).contains(&value) || !extent.is_finite() || extent < 1.0 || extent > i32::MAX as f64 || !remainder.is_finite() || remainder.abs() > 0.5 {
+        return Err("invalid_state".into());
+    }
+    let points = f64::from(value) * (extent - 1.0) / 65535.0 + remainder;
+    let rounded = points.round();
+    Ok((rounded as i32, points - rounded))
+}
+
+pub fn scroll_phase(phase: &str) -> Result<u32, String> {
+    match phase {
+        "began" => Ok(1),
+        "changed" => Ok(2),
+        "ended" => Ok(4),
+        "cancelled" => Ok(8),
+        _ => Err("invalid_state".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scroll_deltas_use_display_points_and_accumulate_small_movements() {
+        assert_eq!(scroll_delta(65535, 1440.0, 0.0).unwrap(), (1439, 0.0));
+        assert_eq!(scroll_delta(-65535, 900.0, 0.0).unwrap(), (-899, 0.0));
+        let mut remainder = 0.0;
+        let mut emitted = 0;
+        for _ in 0..4 {
+            let (delta, next) = scroll_delta(1, 16384.75, remainder).unwrap();
+            emitted += delta;
+            remainder = next;
+        }
+        assert_eq!(emitted, 1);
+        assert_eq!(remainder, 0.0);
+        assert!(scroll_delta(65536, 1440.0, 0.0).is_err());
+        assert!(scroll_delta(1, f64::NAN, 0.0).is_err());
+        assert!(scroll_delta(1, 1440.0, f64::NAN).is_err());
+        assert!(scroll_delta(1, 0.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn scroll_phases_have_terminal_end_and_cancel_events() {
+        assert_eq!(scroll_phase("began").unwrap(), 1);
+        assert_eq!(scroll_phase("changed").unwrap(), 2);
+        assert_eq!(scroll_phase("ended").unwrap(), 4);
+        assert_eq!(scroll_phase("cancelled").unwrap(), 8);
+        assert!(scroll_phase("other").is_err());
+    }
 
     #[test]
     fn button_masks_select_down_up_and_drag_events() {

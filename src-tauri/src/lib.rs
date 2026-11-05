@@ -5,6 +5,7 @@ mod code_display;
 mod discovery;
 mod pinned_tls;
 mod trust;
+mod macos_permissions;
 #[cfg(target_os = "macos")]
 mod macos_input;
 #[cfg(any(target_os = "macos", test))]
@@ -285,11 +286,30 @@ fn nearcast_macos_input_button(button: u8, down: bool, x: i32, y: i32, modifiers
 }
 
 #[tauri::command]
+fn nearcast_macos_input_scroll(x: i32, y: i32, delta_x: i32, delta_y: i32, phase: String, modifiers: u16) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    { return macos_input::scroll(x, y, delta_x, delta_y, &phase, modifiers); }
+    #[cfg(not(target_os = "macos"))]
+    { let _ = (x, y, delta_x, delta_y, phase, modifiers); Err("not_supported".into()) }
+}
+
+#[tauri::command]
 fn nearcast_macos_input_reset() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     { return macos_input::reset(); }
     #[cfg(not(target_os = "macos"))]
     { Err("not_supported".into()) }
+}
+
+#[tauri::command]
+fn nearcast_macos_permissions() -> Result<serde_json::Value, String> {
+    macos_permissions::status()
+}
+
+#[tauri::command]
+async fn nearcast_macos_permission_settings(permission: macos_permissions::Permission) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || macos_permissions::open_settings(permission))
+        .await.map_err(|_| "Permission settings task failed".to_string())?
 }
 
 #[tauri::command]
@@ -318,7 +338,7 @@ pub fn run() {
             #[cfg(not(target_os = "macos"))]
             let _ = event;
         })
-        .invoke_handler(tauri::generate_handler![nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_pointer_initialize, nearcast_pointer_inject, nearcast_pointer_inject_batch, nearcast_pointer_reset, nearcast_windows_mouse_initialize, nearcast_windows_mouse_inject, nearcast_windows_mouse_reset, nearcast_macos_input_initialize, nearcast_macos_input_move, nearcast_macos_input_button, nearcast_macos_input_reset, nearcast_platform_info])
+        .invoke_handler(tauri::generate_handler![nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_pointer_initialize, nearcast_pointer_inject, nearcast_pointer_inject_batch, nearcast_pointer_reset, nearcast_windows_mouse_initialize, nearcast_windows_mouse_inject, nearcast_windows_mouse_reset, nearcast_macos_input_initialize, nearcast_macos_input_move, nearcast_macos_input_button, nearcast_macos_input_scroll, nearcast_macos_input_reset, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info])
         .run(tauri::generate_context!())
         .expect("error while running NearCast Desktop TX");
 }

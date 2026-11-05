@@ -1,0 +1,56 @@
+{
+  "date": "2026-11-05",
+  "branch": "codex/macos-input-control",
+  "mergeCommit": "0ce2f37",
+  "mergedRemoteRevision": "25ee65cfb01feaa36d0ba1a2064ded8462ba9f9a",
+  "scope": "Real macOS TX with LAN receiver; single-contact mouse output",
+  "buildIncludesUncommittedFix": true,
+  "macosInputModuleSha256": "79b30cdd4057b46e9e800aed9b5cfc349332e413124093e56f6692ad54c6275e",
+  "signedExecutableSha256": "07e7be66bbef2dae6ed4188f2d2bbfe1439ee9970f597aa5e1d29715f65da624",
+  "rootCause": {
+    "negotiatedMode": "mouse",
+    "receiverRecord": {"contactId": 350, "phase": 0, "buttons": 0, "x": 41523, "y": 18978, "modifiers": 0, "wheel": 0, "dtMs": 0, "recordFlags": 0},
+    "before": "MacOsInputSink rejected contact DOWN with buttons=0 as invalid_state, stopping further input",
+    "fix": "Translate a buttonless contact lifecycle to primary mouse down/drag/up; preserve explicit mouse button validation"
+  },
+  "checks": {
+    "javascriptTests": {"passed": 163, "failed": 0},
+    "rustTests": {"passed": 23, "failed": 0, "ignored": 1},
+    "regressionFailedBeforeFix": true,
+    "sourceDistHashesMatch": true,
+    "macosBuild": "passed",
+    "stableCodeSignatureVerification": "passed",
+    "rustIntermittentFailure": {
+      "test": "pinned_tls::tests::mismatch_is_rejected_before_any_http_bytes_but_same_key_reissue_is_allowed",
+      "error": "Receiver HTTPS response failed: Invalid argument (os error 22)",
+      "failedAttempts": 2,
+      "finalUninstrumentedFullSuite": "passed",
+      "cause": "Unconfirmed; TLS source unchanged and temporary tracing removed"
+    }
+  },
+  "realSessionAfterFix": {
+    "receiver": "nearcast-1bby",
+    "screenSharing": true,
+    "controlChannelReady": true,
+    "nativeReady": true,
+    "bindingReady": true,
+    "injectionCount": 931,
+    "lastInjectionStatus": "accepted",
+    "lastInjectionFailure": null,
+    "operatorConfirmedMouseResponse": true,
+    "operatorObservation": "Operator confirmed both modes work after testing tap, scroll, release and returning to mouse selection",
+    "touchStyleContentScrollingImplemented": true,
+    "visibleClickConfirmed": true,
+    "releaseAndReopenVerified": false
+  },
+  "localInteractionModes": {
+    "mouse": "Mouse click, text selection and object drag",
+    "touch-scroll": "Tap to click; single-contact movement produces anchored continuous pixel scrolling with begin/change/end/cancel phases",
+    "default": "mouse",
+    "wireNegotiatedMode": "mouse",
+    "switchReleasesNativeState": true,
+    "retiredContactTailIgnored": true,
+    "bothModesOperatorVerified": true
+  },
+  "limitations": ["Close/reopen during a held gesture still requires separate device acceptance", "No native multi-touch injection or inertial scrolling", "Primary display only", "Single contact only", "Keyboard and standalone wheel records not implemented"]
+}

@@ -6,6 +6,7 @@ export function createMacOsInputBridge({invoke} = {}) {
     // avoiding WKWebView CSS-pixel / Retina scaling differences.
     move: (x, y, modifiers = 0) => invoke('nearcast_macos_input_move', {x, y, modifiers}),
     button: (button, down, x = 0, y = 0, modifiers = 0) => invoke('nearcast_macos_input_button', {button, down, x, y, modifiers}),
+    scroll: (x, y, deltaX, deltaY, phase, modifiers = 0) => invoke('nearcast_macos_input_scroll', {x, y, deltaX, deltaY, phase, modifiers}),
     reset: () => invoke('nearcast_macos_input_reset'),
   };
 }

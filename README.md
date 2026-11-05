@@ -14,7 +14,7 @@ $env:HTTPS_PROXY="http://127.0.0.1:7897"
 $env:CARGO_HTTP_PROXY="http://127.0.0.1:7897"
 
 # 验证 JavaScript 协议和发送端流程
-node --test tests
+npm test
 
 # 检查 Tauri Rust 后端
 cargo check --manifest-path src-tauri/Cargo.toml
@@ -23,6 +23,23 @@ cargo check --manifest-path src-tauri/Cargo.toml
 cargo build --release --manifest-path src-tauri/Cargo.toml
 .\src-tauri\target\release\nearcast_desktop_tx.exe
 ```
+
+macOS 本地调试请构建并打开 `.app`：
+
+```sh
+npm run build:macos
+open "src-tauri/target/debug/bundle/macos/NearCast Desktop TX.app"
+```
+
+`build:macos` 优先选择钥匙串中唯一的 Apple Development 证书（没有开发证书时选择 Developer ID Application），也可通过 `APPLE_SIGNING_IDENTITY` 明确指定。脚本拒绝使用 ad-hoc 签名进行权限联调，并在应用仍运行时拒绝覆盖 `.app`。配置中的 `signingIdentity: "-"` 仅供无证书的 CI 生成构建产物；ad-hoc 代码身份随构建变化，不能保证保留旧版本的录屏与辅助功能授权。正式权限联调使用稳定的 Apple 签名身份。参见 [Apple 代码身份说明](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)。首次启动请允许本地网络访问；可在“系统设置 → 隐私与安全 → 本地网络”检查 NearCast Desktop TX。
+
+从旧 ad-hoc 包切换到稳定签名后，旧授权可能仍绑定原来的代码哈希，单纯关闭再开启系统开关不会更新该身份。本机系统日志会报告 `Failed to match existing code requirement`。仅重置当前应用对应的 `Accessibility` / `ScreenCapture` 授权，再由用户重新确认；不要清空其他应用的授权或修改 TCC 数据库。
+
+WKWebView 需要至少一个媒体用途声明才暴露 `navigator.mediaDevices`。`Info.plist` 包含 `NSMicrophoneUsageDescription` 以启用此接口；屏幕分享仍传入 `audio:false`，不申请或采集麦克风音频。
+
+macOS 界面顶部提供“本地网络”“录屏与系统录音”“辅助功能”三个权限开关入口。点击任一入口会打开对应的系统设置页面，由用户确认授权或关闭；回到应用后自动重新检测，也可点击“刷新状态”。录屏和辅助功能读取系统授权状态；本地网络显示实际组播访问检测结果“网络可用”，检测失败显示“待确认”，不把离线或网络异常误判为用户拒绝。修改本地网络权限后返回配对页会重新扫描。首次配置录屏或辅助功能时会触发对应系统授权提示，授权后如系统要求重启，请重新打开 `.app`。Windows 隐藏此面板。
+
+部分 macOS 版本的本地网络链接会打开“隐私与安全”总页，此时再选择“本地网络”；新版系统可能将“辅助功能”权限显示为“设备控制和数据访问”。
 
 启动后输入接收端显示的 4 位配对码，点击“连接”，待接收端确认后点击“开始分享屏幕”。浏览器会弹出系统屏幕选择器；点击“停止分享”会停止媒体轨道但保留连接，点击“断开连接”会关闭 WebRTC/WebSocket 并清理 Touchback 状态。
 
@@ -36,11 +53,13 @@ Touchback 使用 WebCast control DataChannel 上的 canonical AXTP STREAM：16-b
 
 Windows 原生桥提供 Touch（最多 10 contacts）及 Mouse（单 contact）的独立输入路径，按实际初始化结果协商能力。Mouse 仅执行接收端生成的明确鼠标记录；发送端不把零按钮 Touch DOWN 猜成左键，不实现接收端手势策略。当前 RX 的 Mouse producer 和 AXTP 共享 Mouse 字段约定仍需补齐，原生输入测试通过不代表端到端 Mouse 已验证，详见 [Windows Mouse 适配说明](docs/superpowers/specs/2026-11-05-windows-native-mouse-adapter.md)。macOS 13+ 保留现有 CoreGraphics Mouse 路径，尚未实现独立键码/滚轮注入。反向控制时请分享主屏幕；窗口/副屏需要后续加入捕获区域映射。macOS 首次使用反向控制需要在“系统设置 → 隐私与安全性 → 辅助功能”允许 NearCast Desktop TX。AirPlay 仍仅展示，不授权 Touchback。
 
+macOS 投屏页提供“反控操作方式”：默认“鼠标”将单点接触转换成左键点击和拖拽，可选中文字、移动窗口或文件；“触控式滚动”在轻点松开时点击，在滑动超过少量距离后产生系统平滑滚动，可滚动网页和列表。滚动模式不会在接触开始时按住鼠标，因此滑动不会选中文字；需要拖拽物体时请切回“鼠标”。这是 Mac 本机的单点操作映射，协议协商仍为 Mouse，不提供 Windows 式原生多点 Touch 注入，也不模拟惯性。选项在本次应用运行期间跨连接保留，重启默认恢复鼠标。切换模式会释放鼠标或结束滚动，并忽略上一接触的尾部记录；新接触从 DOWN 开始。断开、reset 和权限失效同样执行清理。
+
 连接页先显示“本机输入已初始化，等待接收端开启反控”；BIND 只建立协议绑定，收到有效 receiver-owned input.openStream 请求并生成结果后才显示“反控已就绪”。接收端需开启 Touchback gate；手动配对和从发现列表选择接收端均可建立已认证的 WebCast 控制通道。
 
 手动输入配对码时，已认证的 WebCast control channel 也会绑定 Touchback，不再要求先从扫描列表选择设备。接收端在发送端原生输入初始化完成前发出的 BIND/BATCH 会暂存并按顺序处理；AirPlay 或未打开的非 WebCast channel 仍不会授权反控。
 
-真实联调时可在投屏页展开“反控收包诊断”，或执行 `globalThis.__nearcastTouchbackDiagnostics()`。`controlChannelReady`、`nativeReady`、`bindingReady` 分别表示通道、本机初始化、BIND 已完成；`control.streamState`、`control.stream` 显示协商状态和 stream/epoch/模式；`control.recentControl` 保留最近 32 条控制消息的允许字段及处理结果，二进制收帧单独计数；`injectionCount` / `lastInjectionStatus` / `lastInjectionFailure` 表示实际注入及错误。诊断不保留配对码或 bindingToken。`receiverEnabled` 仍为 null，接收端本地 gate 和 effectiveEnabled 应通过接收端状态查询核对。
+真实联调时可在投屏页展开“反控收包诊断”，或执行 `globalThis.__nearcastTouchbackDiagnostics()`。`controlChannelReady`、`nativeReady`、`bindingReady` 分别表示通道、本机初始化、BIND 已完成；`control.streamState`、`control.stream` 显示协商状态和 stream/epoch/模式；`control.recentControl` 保留最近 32 条控制消息的允许字段及处理结果，二进制收帧单独计数；`injectionCount` / `lastInjectionStatus` / `lastInjectionFailure` 表示实际注入及错误。Mac 额外显示 `macosInput.interactionMode`、`activeContacts` 和 `buttons`，可核对本机操作方式及释放状态。诊断不保留配对码或 bindingToken。`receiverEnabled` 仍为 null，接收端本地 gate 和 effectiveEnabled 应通过接收端状态查询核对。
 
 WebSocket 地址默认为 `wss://cast.nearhub.us`，也可以通过 Tauri 页面 URL 的 `?ws=` 参数覆盖，例如 `?ws=wss%3A%2F%2Flocalhost%3A8888`。
 
