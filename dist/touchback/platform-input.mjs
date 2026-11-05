@@ -1,5 +1,4 @@
-import {createTauriNativeBridge} from './tauri-native-bridge.mjs';
-import {createWindowsPointerInjectionSink} from './windows-pointer-injection.mjs';
+import {WindowsInputSink} from './windows-input.mjs';
 import {MacOsInputSink, MACOS_INPUT_STATUS} from './macos-input.mjs';
 import {createMacOsInputBridge} from './macos-native-bridge.mjs';
 
@@ -15,7 +14,7 @@ export function createPlatformInputSink(platformInfo = {}, {invoke, viewport} = 
   const control = platformInfo.inputControl || (platformInfo.touchback ? (os === 'windows' ? 'windows-pointer' : os === 'macos' ? 'macos-mouse' : 'none') : 'none');
   if (typeof invoke !== 'function') return UnsupportedSink;
   if (platformInfo.touchback !== true) return UnsupportedSink;
-  if (control === 'windows-pointer' && os === 'windows') return createWindowsPointerInjectionSink(createTauriNativeBridge({invoke, viewport}));
+  if (control === 'windows-pointer' && os === 'windows') return new WindowsInputSink({invoke, viewport});
   if (control === 'macos-mouse' && os === 'macos') return new MacOsInputSink({native: createMacOsInputBridge({invoke, viewport})});
   return UnsupportedSink;
 }

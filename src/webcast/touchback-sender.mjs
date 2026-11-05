@@ -20,7 +20,24 @@ export class WebCastTouchbackSender {
           this.generation++;
           this.resetPointer();
         }
-        if (result?.status === 'active' && this.authorized) this.onStatus(PointerInjectionStatus.ACCEPTED);
+        if (result?.status === 'active' && this.authorized) {
+          if (typeof this.pointer.setMode === 'function') {
+            const generation = this.generation;
+            this._resetBarrier = Promise.resolve(this._resetBarrier).then(status => {
+              if (generation !== this.generation) return PointerInjectionStatus.INVALID_STATE;
+              return status === PointerInjectionStatus.ACCEPTED ? this.pointer.setMode(frame.acceptedMode) : status;
+            }).then(status => {
+              if (generation !== this.generation) return status;
+              if (status !== PointerInjectionStatus.ACCEPTED) {
+                this.authorized = false;
+                this._lastInjectionStatus = status;
+                this._lastInjectionFailure = this.pointer.snapshot?.().lastFailure ?? {kind:'native_error',error:'Native mode activation failed'};
+              }
+              this.onStatus(status);
+              return status;
+            });
+          } else this.onStatus(PointerInjectionStatus.ACCEPTED);
+        }
         onControlFrame?.(frame, result);
       },
       onTouchback: frame => this.applyFrame(frame),
@@ -53,6 +70,7 @@ export class WebCastTouchbackSender {
       this.onStatus(status === PointerInjectionStatus.ACCEPTED ? 'native_ready' : status);
       this._nativeReady = status === PointerInjectionStatus.ACCEPTED;
       this.authorized = status === PointerInjectionStatus.ACCEPTED;
+      if (this.authorized && Array.isArray(this.pointer.supportedModes)) this.receiver.supportedModes = [...this.pointer.supportedModes];
       return this.authorized;
     };
     const status = this.pointer.initialize();
@@ -118,9 +136,9 @@ export class WebCastTouchbackSender {
   _applyFrameNow(frame, generation) {
     const records = frame?.records ?? [];
     if (records.length > 0 && typeof this.pointer.applyBatch === 'function') {
-      return Promise.resolve(this._resetBarrier).then(() => {
+      return Promise.resolve(this._resetBarrier).then(barrierStatus => {
         if (!this.authorized || generation !== this.generation) return {status: 'stale'};
-        const result = this.pointer.applyBatch(records);
+        const result = barrierStatus === PointerInjectionStatus.ACCEPTED ? this.pointer.applyBatch(records) : barrierStatus;
         const finish = status => { this._lastInjectionStatus = status; if (status !== PointerInjectionStatus.ACCEPTED) { this._lastInjectionFailure = this.pointer.snapshot?.().lastFailure ?? {kind: 'unknown'}; this.authorized = false; this.resetPointer(); this.onStatus(status); return {status}; } this._injectionCount += records.length; return {status: 'applied'}; };
         return result && typeof result.then === 'function' ? result.then(finish) : finish(result);
       });

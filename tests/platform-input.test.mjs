@@ -23,7 +23,7 @@ test('Windows keeps Pointer Injection and maps coordinates to its viewport', asy
   assert.equal(await sink.initialize(), 'accepted');
   assert.equal(await sink.apply({contactId: 1, phase: 0, x: 65535, y: 65535, buttons: 1, modifiers: 0}), 'accepted');
   assert.equal(calls[0][0], 'nearcast_pointer_initialize');
-  assert.deepEqual(calls[1], ['nearcast_pointer_inject', {contactId: 1, phase: 0, x: 1919, y: 1079, buttons: 1, modifiers: 0}]);
+  assert.deepEqual(calls.find(([command]) => command === 'nearcast_pointer_inject'), ['nearcast_pointer_inject', {contactId: 1, phase: 0, x: 1919, y: 1079, buttons: 1, modifiers: 0}]);
 });
 
 test('unsupported or contradictory platform capabilities cannot invoke input commands', async () => {

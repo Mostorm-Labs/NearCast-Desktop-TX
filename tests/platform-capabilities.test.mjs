@@ -22,7 +22,7 @@ test('normalizes Windows 10/11 capabilities from the native command', () => {
   assert.equal(info.screenCapture, true);
   assert.equal(info.touchback, true);
   assert.match(platformSummary(info), /Windows 10\/11/);
-  assert.match(touchbackSummary(info), /Windows Pointer Injection/);
+  assert.match(touchbackSummary(info), /Windows Touch \/ Mouse/);
 });
 
 test('normalizes macOS 13+ capabilities and calls out Screen Recording permission', () => {

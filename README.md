@@ -34,7 +34,7 @@ Touchback 使用 WebCast control DataChannel 上的 canonical AXTP STREAM：16-b
 
 接收端拥有 `input.openStream` 请求。发送端先接受 BIND，再校验 request 的 runtimeInstanceId、完整 target generation 和 canvas/geometry token，根据 preferred/required 与本机能力选择模式，生成 acceptedMode、revision 和协商上限后回复同 id/method 的 result。相同 commandId/参数在 5 分钟缓存窗口内重放同一结果；冲突参数会被拒绝。切换/重开遵循 RESET（新 epoch）→ closeStream → openStream，close 保留 BIND，并拒绝旧 epoch 输入。
 
-Windows 原生桥提供 Touch（最多 10 contacts）；macOS 13+ 原生桥提供现有 CoreGraphics Mouse 路径（单 contact）。Windows Mouse required 请求明确返回 NOT_SUPPORTED；preferred 可在对端声明支持 Touch 时明确回退到 Touch，本次协议修复没有新增 Windows 鼠标注入。macOS 原生桥尚未实现独立键码/滚轮注入。反向控制时请分享主屏幕；窗口/副屏需要后续加入捕获区域映射。macOS 首次使用反向控制需要在“系统设置 → 隐私与安全性 → 辅助功能”允许 NearCast Desktop TX。AirPlay 仍仅展示，不授权 Touchback。
+Windows 原生桥提供 Touch（最多 10 contacts）及 Mouse（单 contact）的独立输入路径，按实际初始化结果协商能力。Mouse 仅执行接收端生成的明确鼠标记录；发送端不把零按钮 Touch DOWN 猜成左键，不实现接收端手势策略。当前 RX 的 Mouse producer 和 AXTP 共享 Mouse 字段约定仍需补齐，原生输入测试通过不代表端到端 Mouse 已验证，详见 [Windows Mouse 适配说明](docs/superpowers/specs/2026-11-05-windows-native-mouse-adapter.md)。macOS 13+ 保留现有 CoreGraphics Mouse 路径，尚未实现独立键码/滚轮注入。反向控制时请分享主屏幕；窗口/副屏需要后续加入捕获区域映射。macOS 首次使用反向控制需要在“系统设置 → 隐私与安全性 → 辅助功能”允许 NearCast Desktop TX。AirPlay 仍仅展示，不授权 Touchback。
 
 连接页先显示“本机输入已初始化，等待接收端开启反控”；BIND 只建立协议绑定，收到有效 receiver-owned input.openStream 请求并生成结果后才显示“反控已就绪”。接收端需开启 Touchback gate；手动配对和从发现列表选择接收端均可建立已认证的 WebCast 控制通道。
 

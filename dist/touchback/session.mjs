@@ -15,6 +15,7 @@ export class TouchbackSession {
     this.wireVersion = null;
     this.resetPending = false;
     this.activeContacts = new Map();
+    this.inputMode = 'touch';
   }
 
   accept(control) {
@@ -74,7 +75,8 @@ export class TouchbackSession {
     }
     const contacts = new Map(this.activeContacts);
     for (const record of frame.records) {
-      if (record.phase === TouchbackPhase.DOWN || record.phase === TouchbackPhase.MOVE) contacts.set(record.contactId, record);
+      if (record.phase === TouchbackPhase.DOWN || record.phase === TouchbackPhase.MOVE && (this.inputMode !== 'mouse' || contacts.has(record.contactId))) contacts.set(record.contactId, record);
+      else if (record.phase === TouchbackPhase.MOVE) continue; // Mouse hover owns no contact slot.
       else contacts.delete(record.contactId);
       if (contacts.size > (this.limits.maxContacts ?? Infinity)) {
         this.resetPending = true; this.activeContacts.clear(); return {status: 'reset_required'};

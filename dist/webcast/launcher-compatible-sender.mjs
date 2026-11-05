@@ -257,6 +257,7 @@ export class LauncherCompatibleWebCastSender {
         maxContacts: Math.min(
           p.maxContacts ?? this.localLimits.maxContacts,
           this.localLimits.maxContacts,
+          acceptedMode === 'mouse' ? 1 : this.localLimits.maxContacts,
         ),
         revision: String(++this.revision),
       };
@@ -266,6 +267,7 @@ export class LauncherCompatibleWebCastSender {
         maxContacts: result.maxContacts,
       };
       this.session.resetPending = false;
+      this.session.inputMode = acceptedMode;
       this.session.nextSequence = 0;
       this.stream = {
         ...result,

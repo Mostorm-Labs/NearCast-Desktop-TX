@@ -114,7 +114,7 @@ test('uses the platform batch path for a multi-contact Touchback frame', async (
     initialize: () => 'accepted',
     applyBatch: records => { calls.push(records); return 'accepted'; },
     apply: () => { throw new Error('single-record fallback should not run'); },
-    reset() {}, snapshot: () => ({})
+    reset: () => 'accepted', snapshot: () => ({})
   }});
   await sender.attachControlChannel({readyState: 'open'}, {authorized: true});
   assert.deepEqual(await sender.applyFrame({records: [{contactId: 42, phase: 0, x: 1, y: 2}, {contactId: 65535, phase: 0, x: 3, y: 4}]}), {status: 'applied'});
