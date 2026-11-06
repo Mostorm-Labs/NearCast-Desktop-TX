@@ -110,6 +110,24 @@ fn thumbnail_on_worker(target_id: &str) -> Vec<u8> {
         .unwrap()
         .unwrap()
 }
+fn owned_circle_has_color(source: HWND, overlay: HWND, point: POINT, color: u32) -> bool {
+    unsafe {
+        SetWindowDisplayAffinity(overlay, WDA_NONE).unwrap();
+    }
+    pump(source);
+    let mut found = false;
+    unsafe {
+        let dc = GetDC(None);
+        for y in point.y - 3..=point.y + 3 {
+            for x in point.x - 3..=point.x + 3 {
+                found |= GetPixel(dc, x, y).0 == color;
+            }
+        }
+        let _ = ReleaseDC(None, dc);
+        SetWindowDisplayAffinity(overlay, WDA_EXCLUDEFROMCAPTURE).unwrap();
+    }
+    found
+}
 fn pump(hwnd: HWND) {
     let until = Instant::now() + Duration::from_millis(120);
     while Instant::now() < until {
@@ -340,6 +358,112 @@ fn native_window_pixels_geometry_border_and_cleanup_are_bound_to_one_target() {
         10,
     );
     assert_eq!(prepared["status"], "ready", "{prepared}");
+    let mark = crate::touch_feedback::Point {
+        contact_id: 99,
+        x: 300,
+        y: 250,
+        phase: 0,
+        submitted: false,
+        expires_in_ms: None,
+    };
+    assert!(crate::capture_indicator::touch_scene(
+        &started.capture_id,
+        &revision,
+        "owned-capture-input",
+        1,
+        vec![mark]
+    )
+    .unwrap());
+
+    pump(hwnd);
+    assert_eq!(
+        crate::capture_indicator::status(&started.capture_id)
+            .unwrap()
+            .touch_points,
+        1
+    );
+    let radius =
+        (unsafe { windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd) } as i32 / 4).clamp(24, 48);
+    let stroke = POINT {
+        x: 300 + radius - 2,
+        y: 250,
+    };
+    assert_eq!(
+        unsafe { WindowFromPoint(stroke) },
+        hwnd,
+        "circle stroke must not intercept reverse input"
+    );
+    // Affinity scrubs screen readback. Remove it only on this owned test
+    // overlay for the color assertion; always restore it before WGC checks.
+    let mut after = None;
+    let overlay = loop {
+        let found =
+            unsafe { FindWindowExW(None, after, w!("STATIC"), w!("NearCast sharing outline")) }
+                .unwrap();
+        let mut pid = 0;
+        unsafe {
+            GetWindowThreadProcessId(found, Some(&mut pid));
+        }
+        if pid == std::process::id() {
+            break found;
+        }
+        after = Some(found);
+    };
+    assert!(
+        owned_circle_has_color(hwnd, overlay, stroke, 0x0030c0ff),
+        "received Touch circle must be visibly amber"
+    );
+    let green = crate::touch_feedback::Point {
+        contact_id: 99,
+        x: 300,
+        y: 250,
+        phase: 0,
+        submitted: true,
+        expires_in_ms: None,
+    };
+    crate::capture_indicator::touch_scene(
+        &started.capture_id,
+        &revision,
+        "owned-capture-input",
+        2,
+        vec![green.clone()],
+    )
+    .unwrap();
+    pump(hwnd);
+    assert!(
+        owned_circle_has_color(hwnd, overlay, stroke, 0x0066e676),
+        "submitted circle must be visibly green"
+    );
+    let terminal = crate::touch_feedback::Point {
+        phase: 2,
+        expires_in_ms: Some(700),
+        ..green
+    };
+    crate::capture_indicator::touch_scene(
+        &started.capture_id,
+        &revision,
+        "owned-capture-input",
+        3,
+        vec![terminal],
+    )
+    .unwrap();
+    pump(hwnd);
+    assert_eq!(
+        crate::capture_indicator::status(&started.capture_id)
+            .unwrap()
+            .touch_points,
+        1
+    );
+    for _ in 0..6 {
+        pump(hwnd);
+    }
+    assert_eq!(
+        crate::capture_indicator::status(&started.capture_id)
+            .unwrap()
+            .touch_points,
+        0,
+        "terminal pulse must expire without another message"
+    );
     native_capture::indicator(
         &started.capture_id,
         &revision,
@@ -705,6 +829,52 @@ fn owned_monitor_capture_fixtures() {
             10,
         );
         assert_eq!(prepared["status"], "ready", "{prepared}");
+        let cx = r.x + r.width / 4;
+        let cy = r.y + r.height / 4;
+        let mark = crate::touch_feedback::Point {
+            contact_id: 1,
+            x: cx,
+            y: cy,
+            phase: 0,
+            submitted: false,
+            expires_in_ms: None,
+        };
+        crate::capture_indicator::touch_scene(
+            &started.capture_id,
+            &ready.revision,
+            "owned-monitor-input",
+            1,
+            vec![mark],
+        )
+        .unwrap();
+        pump(hwnd);
+        assert_eq!(
+            crate::capture_indicator::status(&started.capture_id)
+                .unwrap()
+                .touch_points,
+            1
+        );
+        assert_eq!(
+            unsafe { WindowFromPoint(POINT { x: cx + 22, y: cy }) },
+            hwnd,
+            "monitor circle cannot intercept input"
+        );
+        unsafe {
+            let _ = InvalidateRect(Some(hwnd), None, true);
+        }
+        pump(hwnd);
+        let image = native_capture::frame(&started.capture_id).unwrap();
+        let n = u32::from_be_bytes(image[..4].try_into().unwrap()) as usize;
+        assert!(
+            image.len() > 4 + n,
+            "owned repaint must yield pixels for the exclusion check"
+        );
+        let offset = 4 + n + (((cy - r.y) * r.width + (cx - r.x + 22)) as usize) * 4;
+        assert_eq!(
+            &image[offset..offset + 3],
+            &[0x33, 0x22, 0x11],
+            "Touch circle leaked into monitor capture"
+        );
         let before = TOUCH_DOWN.load(Ordering::SeqCst);
         for phase in [0, 2] {
             assert_eq!(unsafe { WindowFromPoint(point) }, hwnd);

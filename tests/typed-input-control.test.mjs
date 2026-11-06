@@ -117,3 +117,13 @@ test('a Mouse sample on a Touch-only stream is rejected before native submission
   const trace=p.sender.controlDiagnostics();assert.equal(trace.receivedMouseSamples,1);assert.equal(trace.receivedTouchSamples,0);
   assert.equal(trace.lastReceivedInput.inputType,'mouse');assert.equal(trace.lastReceivedInput.typeByte,2);
 });
+
+
+test('authenticated Touch feedback reaches the UI observer and is cleared on source/channel loss',async t=>{
+  const events=[];const p=await peer({onTouchFeedback:event=>events.push(event)});t.after(()=>p.sender.fence());
+  await p.handshake();await p.bind();await p.sender.setCaptureTrack(p.track);await p.sender.setEnabled(true);
+  const opened=await p.sender.engine.open(openRequest(p.source().data.sourceBindingId),{sessionId:p.sender.server.sessionId});
+  await p.sender.handleControlMessage({data:encodeInputFrame({streamId:opened.streamId,seqId:1,cursor:1,inputType:'touch',records:[{contactId:77,phase:0,x:65535,y:0}]})});
+  assert.deepEqual(events.filter(e=>e.stage!=='clear').map(e=>e.stage),['received','submitted']);assert.equal(events.find(e=>e.stage==='received').records[0].x,1919);
+  await p.sender.fence();assert.equal(events.at(-1).stage,'clear');
+});

@@ -9,7 +9,7 @@ export const openRequest=sourceBindingId=>({controlVersion:1,runtimeInstanceId:p
 export async function peer(options={}){
   const actions=[],sent=[];
   const provider={probe:async()=>({inputTypes:['touch'],maxDataBytes:4096,touch:{maxContacts:10},geometry,nativeReady:true}),prepare:async()=>({status:'ready'}),apply:async(action)=>{actions.push(action);return{status:'submitted'};},releaseOwned:async()=>({status:'released'}),...options.provider};
-  const sender=new WebCastTouchbackSender({provider,engineOptions:options.engineOptions,onStatus:options.onStatus});
+  const sender=new WebCastTouchbackSender({provider,engineOptions:options.engineOptions,onStatus:options.onStatus,onTouchFeedback:options.onTouchFeedback});
   const channel={readyState:'open',ordered:true,send:value=>sent.push(value),close(){this.readyState='closed';void sender.fence('channel closed');}};
   const mediaIdentity={roomId:'room-1',userId:'sender-1',hostUserId:'receiver-1'};
   await sender.attachControlChannel(channel,{authorized:true,mediaIdentity});

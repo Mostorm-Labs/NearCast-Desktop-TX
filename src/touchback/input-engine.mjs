@@ -22,14 +22,21 @@ const timeout=(promise,ms,code='TIMEOUT')=>new Promise((resolve,reject)=>{
 });
 
 export class InputEngine{
-  constructor({provider,initialStreamId=1,operationTimeoutMs=3000,cleanupTimeoutMs=3000,maxQueuedSamples=64,maxQueuedRecords=2048,maxQueuedBytes=65536,maxQueueAgeMs=250,now=()=>performance.now(),onState=()=>{}}={}){
-    Object.assign(this,{provider,initialStreamId,operationTimeoutMs,cleanupTimeoutMs,maxQueuedSamples,maxQueuedRecords,maxQueuedBytes,maxQueueAgeMs,now,onState});
+  constructor({provider,initialStreamId=1,operationTimeoutMs=3000,cleanupTimeoutMs=3000,maxQueuedSamples=64,maxQueuedRecords=2048,maxQueuedBytes=65536,maxQueueAgeMs=250,now=()=>performance.now(),onState=()=>{},onTouchFeedback=()=>{}}={}){
+    Object.assign(this,{provider,initialStreamId,operationTimeoutMs,cleanupTimeoutMs,maxQueuedSamples,maxQueuedRecords,maxQueuedBytes,maxQueueAgeMs,now,onState,onTouchFeedback});
     this.state='closed';this.generation=0;this.bindingToken=0;this.binding=null;this.owner=null;this.stream=null;this.input=new InputState();this.ingress=new InputState();
     this.nextIds=new Map();this.commands=new Map();this.closedIds=new Map();this.queue=[];this.pumping=false;
     this.nativeTail=Promise.resolve();this.cleanupActual=null;this.lastError=null;
     this.stats={receivedSamples:0,validatedSamples:0,submittedSamples:0,submittedRecords:0,coalescedSamples:0,discardedSamples:0,failedSamples:0,queuePeak:0,lastNativeMs:0,lastNativeExecutionMs:0,lastQueueWaitMs:0,queueWaitPeakMs:0,cleanupMs:0};
   }
   notify(){try{this.onState(this.snapshot());}catch{/* Observability never owns input lifecycle. */}}
+  touchFeedback(stage,sample){
+    try{
+      if(stage==='clear')this.onTouchFeedback({stage});
+      else if(sample?.inputType==='touch')this.onTouchFeedback({stage,streamId:sample.streamId,seqId:sample.seqId,ownerId:this.owner?.ownerId,
+        geometry:structuredClone(this.mapper.descriptor),records:this.mapper.map(sample).records});
+    }catch{/* Visual feedback is bounded observability, never input authority. */}
+  }
   snapshot(){return{state:this.state,streamId:this.stream?.streamId??this.owner?.streamId??this.lastClosedId??null,generation:this.generation,
     contractFingerprint:INPUT_CONTRACT.fingerprint,acceptedInputTypes:[...(this.stream?.acceptedInputTypes??[])],outputPolicy:'native',
     geometryRevision:this.binding?.geometry?.revision??null,receivedSeqId:this.ingress.seqId,submittedSeqId:this.input.seqId,queueLength:this.queue.length,touchContacts:this.input.contacts.size,
@@ -135,7 +142,7 @@ export class InputEngine{
     if(this.queue.length-(replace?1:0)>=this.maxQueuedSamples||queuedRecords+records>this.maxQueuedRecords||queuedBytes+sample.dataBytes>this.maxQueuedBytes){
       const error=new InputError('RESOURCE_EXHAUSTED','Input queue budget');return this.fault(error).catch(()=>{}).then(()=>{throw error;});
     }
-    this.ingress=candidate;
+    this.ingress=candidate;this.touchFeedback('received',sample);
     return new Promise((resolve,reject)=>{
       if(replace){this.queue.pop();tail.resolve({status:'coalesced'});this.stats.coalescedSamples++;}
       this.queue.push({sample:structuredClone(sample),candidate,records,generation:this.generation,queuedAt:this.now(),resolve,reject});
@@ -156,15 +163,15 @@ export class InputEngine{
         this.stats.lastNativeExecutionMs=result?.nativeDurationMs??0;
         if(item.generation!==this.generation||this.owner!==owner){item.resolve({status:'stale'});continue;}
         requireInput(result?.status==='submitted','UNAVAILABLE',result?.error??'Native submission unconfirmed');
-        this.input=item.candidate;this.stats.submittedSamples++;this.stats.submittedRecords+=item.records;item.resolve({status:'submitted'});this.notify();
+        this.touchFeedback('submitted',item.sample);this.input=item.candidate;this.stats.submittedSamples++;this.stats.submittedRecords+=item.records;item.resolve({status:'submitted'});this.notify();
       }catch(error){this.stats.failedSamples++;await this.fault(error).catch(()=>{});item.reject(error);}
     }}finally{this.pumping=false;}
   }
   async fault(error){this.lastError={code:error.code??'INVALID_ARGUMENT',message:String(error.message??error)};return this.close('fault');}
   async close(reason='requested'){
-    if(!this.owner)return{streamId:this.lastClosedId??0,closed:true,alreadyClosed:true,revision:String(this.generation)};
+    if(!this.owner){this.touchFeedback('clear');return{streamId:this.lastClosedId??0,closed:true,alreadyClosed:true,revision:String(this.generation)};}
     if(!['closing','cleanup_blocked'].includes(this.state)){
-      this.generation++;this.state='closing';for(const item of this.queue.splice(0))item.resolve({status:'stale'});this.notify();
+      this.touchFeedback('clear');this.generation++;this.state='closing';for(const item of this.queue.splice(0))item.resolve({status:'stale'});this.notify();
     }
     const owner=this.owner,started=this.now();
     if(!this.cleanupActual){

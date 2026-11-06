@@ -160,6 +160,7 @@ try {
         const bytes=new Uint8Array(4+meta.length+320*240*4);new DataView(bytes.buffer).setUint32(0,meta.length);bytes.set(meta,4);for(let i=4+meta.length;i<bytes.length;i+=4){const top=i<4+meta.length+320*120*4;bytes.set(top?[80,state.nativeFrameId%255,180,255]:[180,state.nativeFrameId%255,80,255],i);}return bytes.buffer;
       }
       if(command==='nearcast_capture_stop'){if(state.nativeGeometry?.captureId===args.captureId){state.nativeGeometry=null;state.borderActive=false;state.nativeOwner=null;}return null;}
+      if(command==='nearcast_capture_touch_feedback'){state.touchFeedback=args;return{updated:true};}
       if(command==='nearcast_capture_indicator'){
         if(args.active&&(!state.nativeOwner||state.nativeOwner.nativeId!==`capture:${args.captureId}`||state.nativeOwner.ownerId!==args.ownerId))throw new Error('unowned green request');
         state.borderActive=args.active;return null;
@@ -232,6 +233,8 @@ try {
   assert.equal(await page.evaluate(() => testReceiver.error), undefined);
   assert.equal(await page.locator('#preview-wrap').isVisible(), true);
   if(nativeMode){
+    assert.equal(await page.locator('#touch-feedback-enabled').count(),1,'Windows native input exposes the circle switch');
+    assert.equal(await page.locator('#touch-feedback-enabled').isChecked(),true);
     const colors=await page.evaluate(()=>{const video=document.querySelector('#preview'),canvas=document.createElement('canvas');canvas.width=video.videoWidth;canvas.height=video.videoHeight;const ctx=canvas.getContext('2d');ctx.drawImage(video,0,0);return[...ctx.getImageData(100,40,1,1).data,...ctx.getImageData(100,200,1,1).data];});
     assert.ok(colors[0]>colors[2]+60&&colors[4]<colors[6]-60,'native BGRA must be GPU-swizzled to upright RGB');
   }
@@ -265,6 +268,11 @@ try {
     };await testReceiver.sendSample(1,0,65535,0);});
     await page.waitForFunction(()=>testReceiver.lastNativeAction?.records[0].x===419);
     assert.equal(await page.evaluate(()=>testReceiver.lastNativeAction.records[0].y),100);
+    await page.waitForFunction(()=>testReceiver.touchFeedback?.points.some(p=>p.x===419&&p.y===100&&p.submitted)).catch(async error=>{console.log(JSON.stringify(await page.evaluate(()=>({feedback:testReceiver.touchFeedback,diagnostics:__nearcastTouchbackDiagnostics()})),null,2));throw error;});
+    const injected=await page.evaluate(()=>testReceiver.nativeApplyCalls);
+    await page.locator('#touch-feedback-enabled').uncheck();await page.waitForFunction(()=>testReceiver.touchFeedback?.points.length===0);
+    assert.equal(await page.evaluate(()=>testReceiver.nativeApplyCalls),injected,'circle visibility cannot inject input');
+    await page.locator('#touch-feedback-enabled').check();
     await page.evaluate(()=>testReceiver.sendSample(2,2,65535,0));
     const oldId=await page.evaluate(()=>testReceiver.inputStreamId);
     await page.evaluate(()=>{testReceiver.nativeGeometry={...testReceiver.nativeGeometry,revision:'window-moved',region:{...testReceiver.nativeGeometry.region,x:500}};});

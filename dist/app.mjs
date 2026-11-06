@@ -9,6 +9,7 @@ import {normalizeVideoQuality} from './webcast/video-quality.mjs';
 import {MacOsPermissions} from './macos-permissions.mjs';
 import {NativeCaptureMediaDevices} from './capture/native-capture.mjs';
 import {CaptureTargetPreviews} from './capture/target-previews.mjs';
+import {TouchFeedback} from './touchback/touch-feedback.mjs';
 
 const tauri = globalThis.__TAURI__ ?? {};
 const invoke = tauri.core?.invoke ?? (async () => false);
@@ -54,6 +55,9 @@ const refreshPermissionsButton = document.querySelector('#refresh-permissions');
 const permissionsError = document.querySelector('#permissions-error');
 const permissions = new MacOsPermissions({invoke});
 const inputEnabled = document.querySelector('#input-enabled');
+const touchFeedbackToggle=document.querySelector('#touch-feedback-enabled');
+const touchFeedback=new TouchFeedback({invoke,enabled:false});
+touchFeedbackToggle.addEventListener('change',()=>touchFeedback.setEnabled(touchFeedbackToggle.checked));
 const inputState = document.querySelector('#input-state');
 const inputReconnect = document.querySelector('#input-reconnect');
 const inputCleanup = document.querySelector('#input-cleanup');
@@ -78,7 +82,7 @@ let controlGeneration = 0;
 let capturePending = false;
 let nativeCapture = null;
 let videoQuality = normalizeVideoQuality({resolution: videoResolution.value, bitrateMode: videoBitrateMode.value, bitrateKbps: videoBitrate.value});
-globalThis.__nearcastTouchbackDiagnostics = () => touchback ? {...touchback.diagnostics(), control: touchback.controlDiagnostics(),capture:nativeCapture?.diagnostics()??null} : null;
+globalThis.__nearcastTouchbackDiagnostics = () => touchback ? {...touchback.diagnostics(), control: touchback.controlDiagnostics(),capture:nativeCapture?.diagnostics()??null,touchFeedback:touchFeedback.diagnostics()} : null;
 const controlDiagnostics = document.querySelector('#touchback-diagnostics');
 const renderControlDiagnostics = () => {
   if (controlDiagnostics) controlDiagnostics.textContent = JSON.stringify(globalThis.__nearcastTouchbackDiagnostics(), null, 2);
@@ -149,6 +153,7 @@ digits.forEach((input, index) => {
 
 const buildTouchback = () => new WebCastTouchbackSender({
   provider: createPlatformInputAdapter({}, {invoke}),
+  onTouchFeedback:event=>touchFeedback.observe(event),
   onStatus: (_status, state) => {
     void nativeCapture?.setInputState(state);
     const reasons = {LOCAL_INPUT_DISABLED:'反控未启用', APP_NOT_READY:'等待接收端建立反控会话', TARGET_UNBOUND:'等待接收端绑定投屏来源', CAPTURE_UNAVAILABLE:'请先分享屏幕或窗口', CAPTURE_MUTED:'采集已暂停', NATIVE_CLEANUP_PENDING:'等待释放上一次输入', NATIVE_PERMISSION_UNAVAILABLE:'本机输入不可用，请检查系统权限', NATIVE_DOMAIN_BUSY:'本机输入正由其他会话使用', NATIVE_GEOMETRY_UNAVAILABLE:'无法确认屏幕映射，请选择单一主屏幕和原始分辨率', TARGET_CONTRACT_MISMATCH:'接收端反控协议版本不匹配', INPUT_SESSION_FAULT:'反控连接异常，可重建连接'};
@@ -451,6 +456,8 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
 setView('idle');
 platformReady = loadPlatformInfo(invoke).then(info => {
   platformInfo = info;
+  document.querySelector('#touch-feedback-settings').hidden=!(info.os==='windows'&&info.nativeCapture);
+  touchFeedback.setEnabled(info.os==='windows'&&info.nativeCapture&&touchFeedbackToggle.checked);
   if (info.os === 'windows' && info.nativeCapture) {
     document.querySelector('#capture-help').textContent = '红框表示正在分享，绿框表示反控已就绪；分享窗口时请保持该窗口处于前台。';
     nativeCapture = new NativeCaptureMediaDevices({invoke, chooseTarget:chooseCaptureTarget,

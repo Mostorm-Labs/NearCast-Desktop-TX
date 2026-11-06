@@ -59,6 +59,10 @@
       <section class="macos-interaction" aria-label="反向控制">
         <label><input id="input-enabled" type="checkbox"> 允许接收端反控本机</label>
         <p id="input-state" aria-live="polite">反控未启用</p>
+        <div id="touch-feedback-settings" hidden>
+          <label><input id="touch-feedback-enabled" type="checkbox" checked> 显示触控位置</label>
+          <p class="quality-help">黄圈：收到 Touch · 绿圈：已提交本机注入。抬起后短暂保留，仅本机显示。</p>
+        </div>
         <p id="capture-help" class="quality-help">反控需要双方启用，请在分享前确认目标范围。</p>
         <button id="input-reconnect" class="refresh" type="button" disabled>重建反控连接</button>
         <button id="input-cleanup" class="refresh" type="button" hidden>重试释放输入</button>

@@ -11,13 +11,14 @@ const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='ob
 // Product/media association belongs here. Standard framing/session and native
 // execution remain separate owners; no transport callback injects OS input.
 export class WebCastTouchbackSender{
-  constructor({provider,nativeBridge,onStatus=()=>{},engineOptions={}}={}){
-    this.provider=provider??nativeBridge;this.onStatus=onStatus;this.engineOptions=engineOptions;
+  constructor({provider,nativeBridge,onStatus=()=>{},onTouchFeedback=()=>{},engineOptions={}}={}){
+    this.provider=provider??nativeBridge;this.onStatus=onStatus;this.onTouchFeedback=onTouchFeedback;this.engineOptions=engineOptions;
     this.engine=null;this.server=null;this.channel=null;this.generation=0;this.refreshVersion=0;
     this.enabled=false;this.track=null;this.target=null;this.identity=null;this.source=null;this.sourceKey=null;
     this.retiring=new Set();this.lastProbe=null;this.reason='LOCAL_INPUT_DISABLED';this.detail=null;this.wireStateKey=null;
     this.stats={textReceived:0,binaryReceived:0,recentControl:[],lastOpenRequest:null,receivedTouchSamples:0,receivedMouseSamples:0,lastReceivedInput:null};
   }
+  feedback(event){try{this.onTouchFeedback(event);}catch{/* Feedback cannot own a session. */}}
   status(){const snapshot=this.diagnostics();this.onStatus(this.engine?.state==='active'?'accepted':this.server?.ready?'session_ready':'waiting',{...snapshot,nativeOwnerId:this.engine?.owner?.ownerId??null});}
   capability(){
     const caps=this.lastProbe??{inputTypes:[],maxDataBytes:4096};
@@ -34,7 +35,7 @@ export class WebCastTouchbackSender{
       geometryRevision:source?.geometry.revision??null,available:Boolean(source),disabledReason:source?null:this.reason,inputCapability:this.capability()}}));
   }
   makeEngine(generation){
-    const engine=new InputEngine({...this.engineOptions,provider:this.provider,onState:snapshot=>{
+    const engine=new InputEngine({...this.engineOptions,provider:this.provider,onTouchFeedback:event=>{if(this.engine===engine&&generation===this.generation)this.feedback(event);},onState:snapshot=>{
       const retired=this.retiring.has(engine);if(snapshot.state==='closed')this.retiring.delete(engine);
       if(this.engine!==engine||generation!==this.generation){if(retired&&snapshot.state==='closed')void this.refreshSource();return;}
       const key=[snapshot.state,snapshot.streamId,snapshot.cleanupPending].join(':');
@@ -105,7 +106,7 @@ export class WebCastTouchbackSender{
     return this.refreshSource().then(()=>({status:'target_bound'}));
   }
   invalidateSource(reason){
-    this.refreshVersion++;this.source=null;this.sourceKey=null;this.reason=reason;this.sendSource();
+    this.feedback({stage:'clear'});this.refreshVersion++;this.source=null;this.sourceKey=null;this.reason=reason;this.sendSource();
     const cleanup=this.engine?this.engine.bindSource(null).catch(failure=>{if(failure.code!=='CANCELED'){this.detail=String(failure.message??failure);this.status();}}):Promise.resolve();
     this.status();return cleanup;
   }
@@ -156,7 +157,7 @@ export class WebCastTouchbackSender{
     await this.refreshSource();return results.every(Boolean);
   }
   fence(reason='session ended'){
-    this.generation++;this.refreshVersion++;clearInterval(this.tickTimer);clearInterval(this.probeTimer);
+    this.feedback({stage:'clear'});this.generation++;this.refreshVersion++;clearInterval(this.tickTimer);clearInterval(this.probeTimer);
     this.server?.dispose();this.server=null;this.channel=null;this.identity=null;this.target=null;this.source=null;this.sourceKey=null;this.wireStateKey=null;
     const closing=this.retire(this.engine,reason);this.status();return closing.finally(()=>this.status());
   }

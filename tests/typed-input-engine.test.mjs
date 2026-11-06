@@ -85,10 +85,11 @@ test('late prepare cannot activate after timeout and its resource is released be
 });
 
 test('partial native result is never reported as a submitted sample and triggers owned cleanup',async()=>{
-  const {engine,calls}=await fixture({apply:async()=>({status:'partial',submittedActions:1,error:'native failure'})});
+  const feedback=[];const {engine,calls}=await fixture({apply:async()=>({status:'partial',submittedActions:1,error:'native failure'})},{onTouchFeedback:event=>feedback.push(event)});
   await engine.open(touch(),{sessionId:'AUTH-SID'});
   await assert.rejects(engine.acceptFrame(Buffer.from(corpus.cases[0].frames[0].hex,'hex')),/native failure/);
   assert.equal(engine.snapshot().submittedSamples,0);assert.equal(engine.snapshot().state,'closed');
+  assert.equal(feedback.some(event=>event.stage==='received'),true);assert.equal(feedback.some(event=>event.stage==='submitted'),false);
   assert.equal(calls.filter(([name])=>name==='releaseOwned').length,1);
 });
 
@@ -201,4 +202,25 @@ test('Mouse modifier changes and button transitions remain ordered barriers betw
   assert.ok((await Promise.all(pending)).every(result=>!result.error));
   assert.deepEqual(calls.filter(([name])=>name==='apply').map(([,action])=>[action.eventKind,action.buttons,action.modifiers]),[[0,0,0],[0,0,0],[0,0,1],[1,1,1],[0,1,1],[1,0,1]]);
   assert.equal(engine.snapshot().mouseButtons,0);
+});
+
+
+test('Touch feedback reports received physical points before native completion and clears on close',async t=>{
+  const events=[];let finish;
+  const {engine}=await fixture({apply:()=>new Promise(resolve=>{finish=resolve;})},{onTouchFeedback:event=>events.push(event)});
+  await engine.open(touch({commandId:'feedback'}),{sessionId:'AUTH-SID'});
+  const pending=engine.accept({inputType:'touch',streamId:7,seqId:1,cursor:1n,dataBytes:8,records:[{contactId:41,phase:0,x:65535,y:0}]});
+  pending.catch(()=>{});t.after(async()=>{await delay(0);finish?.({status:'submitted'});await pending.catch(()=>{});await engine.close();});
+  assert.equal(events[0]?.stage,'received');assert.equal(events[0].records[0].x,1919);assert.equal(events[0].records[0].y,0);
+  assert.equal(events.some(event=>event.stage==='submitted'),false);
+  await delay(0);finish({status:'submitted'});await pending;
+  assert.equal(events.at(-1).stage,'submitted');assert.equal(events.at(-1).seqId,1);
+  await engine.close();assert.equal(events.at(-1).stage,'clear');
+});
+
+test('a broken Touch visualization observer cannot change native input or cleanup',async()=>{
+  const {engine,calls}=await fixture({}, {onTouchFeedback(){throw new Error('overlay unavailable');}});
+  await engine.open(touch({commandId:'feedback-fails'}),{sessionId:'AUTH-SID'});
+  await engine.accept({inputType:'touch',streamId:7,seqId:1,cursor:1n,dataBytes:8,records:[{contactId:1,phase:0,x:0,y:0}]});
+  await engine.close();assert.equal(calls.filter(([method])=>method==='apply').length,1);assert.equal(engine.snapshot().state,'closed');
 });
