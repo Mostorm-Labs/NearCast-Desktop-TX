@@ -59,7 +59,7 @@
       <section class="macos-interaction" aria-label="反向控制">
         <label><input id="input-enabled" type="checkbox"> 允许接收端反控本机</label>
         <p id="input-state" aria-live="polite">反控未启用</p>
-        <p class="quality-help">使用原生输入。反控需要双方启用，并分享单一主屏幕；分辨率请选择 Auto 或屏幕原始分辨率。</p>
+        <p id="capture-help" class="quality-help">反控需要双方启用，请在分享前确认目标范围。</p>
         <button id="input-reconnect" class="refresh" type="button" disabled>重建反控连接</button>
         <button id="input-cleanup" class="refresh" type="button" hidden>重试释放输入</button>
       </section>
@@ -87,6 +87,16 @@
 
     <footer>Launcher-compatible WebCast · Native Touch / Mouse input</footer>
   </main>
+  <dialog id="capture-picker" class="capture-picker" aria-labelledby="capture-picker-title">
+    <form method="dialog">
+      <h2 id="capture-picker-title">选择分享范围</h2>
+      <p>选择一个屏幕或窗口。分享窗口时，反控仅在该窗口处于前台且目标可见时启用。</p>
+      <div id="capture-kind-tabs" class="capture-kind-tabs" role="tablist" aria-label="分享类型"></div>
+      <div id="capture-target" class="capture-target-list" role="radiogroup" aria-label="屏幕或窗口"></div>
+      <p id="capture-picker-error" class="error" hidden></p>
+      <div class="capture-picker-actions"><button class="button secondary" value="cancel">取消</button><button id="capture-picker-confirm" class="button primary" value="share" disabled>开始分享</button></div>
+    </form>
+  </dialog>
   <script type="module" src="./app.mjs"></script>
 </body>
 </html>

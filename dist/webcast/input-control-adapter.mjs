@@ -1,7 +1,7 @@
 import {AxtpServer} from '../touchback/axtp-session.mjs';
 import {InputEngine,InputError} from '../touchback/input-engine.mjs';
 import {decodeInputPayload} from '../touchback/typed-codec.mjs';
-import {INPUT_CONTRACT} from '../touchback/axtp-input-contract.mjs';
+import {INPUT_CONTRACT,INPUT_WIRE} from '../touchback/axtp-input-contract.mjs';
 import {SESSION_CONTRACT} from '../touchback/axtp-session-contract.mjs';
 import {proveCaptureGeometry} from '../touchback/capture-geometry.mjs';
 const text=value=>typeof value==='string'&&value.length>0&&value.length<=128;
@@ -16,9 +16,9 @@ export class WebCastTouchbackSender{
     this.engine=null;this.server=null;this.channel=null;this.generation=0;this.refreshVersion=0;
     this.enabled=false;this.track=null;this.target=null;this.identity=null;this.source=null;this.sourceKey=null;
     this.retiring=new Set();this.lastProbe=null;this.reason='LOCAL_INPUT_DISABLED';this.detail=null;this.wireStateKey=null;
-    this.stats={textReceived:0,binaryReceived:0,recentControl:[]};
+    this.stats={textReceived:0,binaryReceived:0,recentControl:[],lastOpenRequest:null,receivedTouchSamples:0,receivedMouseSamples:0,lastReceivedInput:null};
   }
-  status(){const snapshot=this.diagnostics();this.onStatus(this.engine?.state==='active'?'accepted':this.server?.ready?'session_ready':'waiting',snapshot);}
+  status(){const snapshot=this.diagnostics();this.onStatus(this.engine?.state==='active'?'accepted':this.server?.ready?'session_ready':'waiting',{...snapshot,nativeOwnerId:this.engine?.owner?.ownerId??null});}
   capability(){
     const caps=this.lastProbe??{inputTypes:[],maxDataBytes:4096};
     const result={capability:'input.stream',direction:'receiver_to_source',reliability:'ordered_reliable',profiles:['AXTP-TYPED-INPUT-V1'],formats:['input-sample-v1'],inputTypes:[...(caps.inputTypes??[])],maxDataBytes:Math.min(caps.maxDataBytes??4096,4096)};
@@ -67,7 +67,11 @@ export class WebCastTouchbackSender{
       onStream:frame=>{
         if(!this.source||!this.enabled||this.track?.readyState!=='live'||this.track.muted){this.invalidateSource('CAPTURE_UNAVAILABLE');return;}
         proveCaptureGeometry(this.track.getSettings(),this.lastProbe?.geometry);
-        const sample=decodeInputPayload(frame.payload,{frameBytes:frame.frameBytes,maxDataBytes:this.engine.stream?.maxDataBytes??4096});return this.engine.accept(sample);
+        const sample=decodeInputPayload(frame.payload,{frameBytes:frame.frameBytes,maxDataBytes:this.engine.stream?.maxDataBytes??4096});
+        this.stats[sample.inputType==='touch'?'receivedTouchSamples':'receivedMouseSamples']++;
+        this.stats.lastReceivedInput={streamId:sample.streamId,seqId:sample.seqId,cursor:sample.cursor,inputType:sample.inputType,typeByte:INPUT_WIRE.inputTypes[sample.inputType],
+          ...(sample.inputType==='touch'?{recordCount:sample.records.length,records:sample.records.slice(0,10).map(record=>({...record}))}:{eventKind:sample.eventKind})};
+        return this.engine.accept(sample);
       },
     });
     this.server=server;this.tickTimer=setInterval(()=>{if(this.server===server)server.tick();},250);this.tickTimer.unref?.();
@@ -77,6 +81,7 @@ export class WebCastTouchbackSender{
   requestFromReceiver(method,params,context){
     this.record(method,'received');
     if(method==='input.openStream'){
+      this.stats.lastOpenRequest={format:params.format===INPUT_WIRE.format?params.format:null,inputTypes:Array.isArray(params.inputTypes)?params.inputTypes.filter(type=>['touch','mouse'].includes(type)).slice(0,2):[]};
       if(!this.enabled||!this.source)throw new InputError('PERMISSION_DENIED','Local input source unavailable');
       return this.engine.open(params,context);
     }
@@ -101,9 +106,10 @@ export class WebCastTouchbackSender{
   }
   invalidateSource(reason){
     this.refreshVersion++;this.source=null;this.sourceKey=null;this.reason=reason;this.sendSource();
-    if(this.engine)void this.engine.bindSource(null).catch(failure=>{this.detail=String(failure.message??failure);this.status();});
-    this.status();
+    const cleanup=this.engine?this.engine.bindSource(null).catch(failure=>{if(failure.code!=='CANCELED'){this.detail=String(failure.message??failure);this.status();}}):Promise.resolve();
+    this.status();return cleanup;
   }
+  async captureGeometryChanged(){await this.invalidateSource('CAPTURE_GEOMETRY_CHANGED');await this.refreshSource();}
   async refreshSource(){
     if(!this.server||!this.identity)return;
     const version=++this.refreshVersion,generation=this.generation,engine=this.engine;
@@ -152,13 +158,13 @@ export class WebCastTouchbackSender{
   fence(reason='session ended'){
     this.generation++;this.refreshVersion++;clearInterval(this.tickTimer);clearInterval(this.probeTimer);
     this.server?.dispose();this.server=null;this.channel=null;this.identity=null;this.target=null;this.source=null;this.sourceKey=null;this.wireStateKey=null;
-    return this.retire(this.engine,reason);
+    const closing=this.retire(this.engine,reason);this.status();return closing.finally(()=>this.status());
   }
   diagnostics(){
     const state=this.engine?.snapshot()??{};
     return{controlChannelReady:this.channel?.readyState==='open',appReady:this.server?.ready===true,nativeReady:this.lastProbe?.nativeReady===true,
       sourceReady:Boolean(this.source),localEnabled:this.enabled,receiverEnabled:null,nativeInputTypes:[...(this.lastProbe?.inputTypes??[])],
-      disabledReason:this.source?null:this.reason,detail:this.detail,...state,cleanupPending:Boolean(state.cleanupPending||this.retiring.size),injectionCount:state.submittedRecords??0};
+      disabledReason:this.source?null:this.reason,detail:this.detail,...state,cleanupPending:Boolean(state.cleanupPending||this.retiring.size),injectionCount:state.submittedRecords??0,nativeInput:this.provider.snapshot?.()??null};
   }
   controlDiagnostics(){return structuredClone({...this.stats,...this.diagnostics()});}
   snapshot(){return this.diagnostics();}

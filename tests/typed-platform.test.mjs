@@ -6,6 +6,6 @@ test('all platforms obtain actual typed capabilities from the guarded native pro
     const calls=[];const capabilities={inputTypes:os==='windows'?['touch']:os==='macos'?['mouse']:[],nativeReady:os!=='linux'};
     const provider=createPlatformInputAdapter({os},{invoke:async command=>{calls.push(command);return capabilities;}});
     assert.deepEqual(await provider.probe(),capabilities);assert.deepEqual(calls,['nearcast_input_probe']);
-    assert.deepEqual(provider.snapshot(),{owners:0,activeContacts:0});
+    assert.deepEqual(provider.snapshot(),{owners:0,activeContacts:0,lastSubmission:null});
   }
 });

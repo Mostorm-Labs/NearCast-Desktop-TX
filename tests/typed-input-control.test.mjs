@@ -22,6 +22,10 @@ test('production peer opens typed input, submits full samples without ACK, and r
   const streamId=response.d.result.streamId,count=p.sent.length;
   await p.sender.handleControlMessage({data:encodeInputFrame({streamId,seqId:1,cursor:1,inputType:'touch',records:[{contactId:65535,phase:0,x:65535,y:0}]})});
   assert.equal(p.actions.length,1);assert.equal(p.actions[0].records[0].x,1919);assert.equal(p.sent.length,count);
+  const trace=p.sender.controlDiagnostics();assert.deepEqual(trace.lastOpenRequest.inputTypes,['touch']);
+  assert.equal(trace.receivedTouchSamples,1);assert.equal(trace.receivedMouseSamples,0);
+  assert.equal(trace.lastReceivedInput.inputType,'touch');assert.equal(trace.lastReceivedInput.typeByte,1);
+  assert.equal(trace.lastReceivedInput.records[0].contactId,65535);assert.equal(p.actions[0].inputType,'touch');
   p.rpc(7,{id:2,method:'input.closeStream',params:{controlVersion:1,runtimeInstanceId:request.runtimeInstanceId,target:request.target,streamKind:'touchback',streamId,reason:'peerClosed',commandId:'close-1'}});await turn();await turn();
   assert.equal(p.messages().find(message=>message.d.id===2).d.result.closed,true);
   p.rpc(7,{id:3,method:'stream.getState',params:{streamId}});await turn();
@@ -94,4 +98,22 @@ test('capture mute releases held ownership without waiting for another network s
   assert.equal(p.sender.source,null);assert.equal(releases,1);assert.equal(p.sender.engine.state,'closed');
   track.muted=false;track.dispatchEvent(new Event('unmute'));await turn();await turn();
   assert.equal(p.source().data.available,true);assert.notEqual(p.source().data.sourceBindingId,old);
+});
+
+test('session fencing publishes unavailable immediately so the border cannot retain active UI state',async t=>{
+  const states=[];const p=await peer({onStatus:(_status,state)=>states.push(state)});t.after(()=>p.sender.fence());
+  await p.handshake();await p.bind();await p.sender.setCaptureTrack(p.track);await p.sender.setEnabled(true);
+  await p.sender.engine.open(openRequest(p.source().data.sourceBindingId),{sessionId:p.sender.server.sessionId});
+  assert.equal(states.at(-1).sourceReady,true);const closing=p.sender.fence('connection lost');
+  assert.equal(states.at(-1).sourceReady,false);assert.equal(states.at(-1).controlChannelReady,false);await closing;
+});
+
+
+test('a Mouse sample on a Touch-only stream is rejected before native submission without conversion',async t=>{
+  const p=await peer();t.after(()=>p.sender.fence());await p.handshake();await p.bind();await p.sender.setCaptureTrack(p.track);await p.sender.setEnabled(true);
+  const opened=await p.sender.engine.open(openRequest(p.source().data.sourceBindingId),{sessionId:p.sender.server.sessionId});
+  await p.sender.handleControlMessage({data:encodeInputFrame({streamId:opened.streamId,seqId:1,cursor:1,inputType:'mouse',eventKind:0,buttons:0,modifiers:0,x:100,y:100})});
+  assert.equal(p.actions.length,0);assert.match(p.sender.diagnostics().lastError.message,/Unaccepted input type/);
+  const trace=p.sender.controlDiagnostics();assert.equal(trace.receivedMouseSamples,1);assert.equal(trace.receivedTouchSamples,0);
+  assert.equal(trace.lastReceivedInput.inputType,'mouse');assert.equal(trace.lastReceivedInput.typeByte,2);
 });

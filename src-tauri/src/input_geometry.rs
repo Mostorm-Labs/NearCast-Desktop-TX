@@ -23,6 +23,9 @@ pub struct Display {
 pub struct Geometry {
     pub revision: String,
     pub displays: Vec<Display>,
+    #[cfg(windows)]
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub capture:Option<crate::native_capture::Info>,
 }
 impl Display {
     pub fn contains(&self, x: f64, y: f64) -> bool {
@@ -39,9 +42,20 @@ pub fn snapshot() -> Result<Geometry, String> {
     displays.sort_by(|a, b| a.native_id.cmp(&b.native_id));
     let bytes = serde_json::to_vec(&displays).map_err(|error| error.to_string())?;
     let revision = format!("{:x}", Sha256::digest(bytes));
+    #[cfg(windows)]
+    {let capture=crate::native_capture::snapshot();let revision=capture.as_ref().map(|c|c.revision.clone()).unwrap_or(revision);return Ok(Geometry{revision,displays,capture});}
+    #[cfg(not(windows))]
     Ok(Geometry { revision, displays })
 }
 pub fn current(revision: &str, native_id: &str) -> Result<Display, String> {
+    #[cfg(windows)]
+    {
+        if native_id.starts_with("capture:") {
+            let capture=crate::native_capture::current(native_id,revision)?;
+            return Ok(Display{native_id:capture.native_id,primary:false,units:capture.units.into(),rotation:0,region:capture.region,capture_width:capture.capture_width,capture_height:capture.capture_height});
+        }
+        if crate::native_capture::snapshot().is_some(){return Err("capture_source_replaced".into());}
+    }
     let geometry = snapshot()?;
     if geometry.revision != revision || geometry.displays.len() != 1 {
         return Err("input_geometry_changed_or_unproven".into());

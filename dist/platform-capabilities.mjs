@@ -7,6 +7,7 @@ export function normalizePlatformInfo(value = {}) {
     os,
     webview: String(value.webview || (os === 'windows' ? 'WebView2' : os === 'macos' ? 'WKWebView' : 'unknown')),
     screenCapture: value.screenCapture !== false,
+    nativeCapture:value.nativeCapture===true,
     screenCapturePermission: value.screenCapturePermission === 'required' ? 'required' : 'not_required',
     touchback: value.touchback === true,
     inputControl: value.touchback === true ? (['windows-pointer', 'macos-mouse', 'none'].includes(value.inputControl) ? value.inputControl : os === 'macos' ? 'macos-mouse' : os === 'windows' ? 'windows-pointer' : 'none') : 'none',
@@ -24,7 +25,7 @@ export function platformSummary(info) {
 export function touchbackSummary(info) {
   const value = normalizePlatformInfo(info);
   if (value.inputControl === 'macos-mouse') return '反控：macOS Native Mouse；不转换 Touch；请分享原始分辨率的单一主屏幕，并允许“辅助功能”';
-  if (value.inputControl === 'windows-pointer') return '反控：Windows Native Touch；请分享原始分辨率的单一主屏幕';
+  if (value.inputControl === 'windows-pointer') return value.nativeCapture ? '反控：Windows Native Touch；红框表示分享中，绿框表示反控已就绪' : '反控：Windows Native Touch；系统选屏仅支持原始分辨率的单一主屏幕';
   return 'Touchback：当前平台不支持反向控制';
 }
 

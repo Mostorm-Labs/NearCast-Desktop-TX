@@ -6,9 +6,22 @@ mod discovery;
 mod pinned_tls;
 mod trust;
 mod input_geometry;
+#[cfg(any(windows,test))]
+mod capture_target;
+#[cfg(any(windows,test))]
+mod capture_thumbnail;
+mod native_capture;
+#[cfg(windows)]
+mod capture_indicator;
+#[cfg(all(test,windows))]
+mod capture_native_tests;
+#[cfg(test)]
+mod capture_target_tests;
 mod input_native;
 #[cfg(all(test,windows))]
 mod input_native_tests;
+#[cfg(all(test,windows))]
+mod input_dispatch_tests;
 mod macos_permissions;
 #[cfg(target_os = "macos")]
 mod macos_input;
@@ -239,7 +252,7 @@ async fn nearcast_macos_permission_settings(permission: macos_permissions::Permi
 #[tauri::command]
 fn nearcast_platform_info() -> serde_json::Value {
     #[cfg(target_os = "windows")]
-    { return serde_json::json!({"os":"windows","webview":"WebView2","screenCapture":true,"screenCapturePermission":"not_required","touchback":true,"inputControl":"windows-pointer","multiTouch":true,"accessibilityPermission":"not_required"}); }
+    { return serde_json::json!({"os":"windows","webview":"WebView2","screenCapture":true,"nativeCapture":native_capture::supported(),"screenCapturePermission":"not_required","touchback":true,"inputControl":"windows-pointer","multiTouch":true,"accessibilityPermission":"not_required"}); }
     #[cfg(target_os = "macos")]
     { return serde_json::json!({"os":"macos","webview":"WKWebView","screenCapture":true,"screenCapturePermission":"required","touchback":true,"inputControl":"macos-mouse","multiTouch":false,"accessibilityPermission":"required"}); }
     #[cfg(target_os = "linux")]
@@ -248,21 +261,92 @@ fn nearcast_platform_info() -> serde_json::Value {
     { serde_json::json!({"os":"unknown","webview":"unknown","screenCapture":false,"screenCapturePermission":"required","touchback":false,"inputControl":"none","multiTouch":false,"accessibilityPermission":"not_required"}) }
 }
 
+// Keep blocking Win32 input and geometry calls off the WebView/UI thread.
+// Owner/lease serialization remains inside input_native and the JS engine.
+#[cfg(windows)]
+async fn native_input_task(task: impl FnOnce() -> serde_json::Value + Send + 'static) -> Result<serde_json::Value,String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let started=std::time::Instant::now();
+        let mut result=task();
+        result["nativeDurationMs"]=serde_json::json!(started.elapsed().as_secs_f64()*1000.0);
+        result
+    }).await.map_err(|error|error.to_string())
+}
+#[cfg(windows)]
+#[tauri::command]
+async fn nearcast_input_probe()->Result<serde_json::Value,String>{native_input_task(input_native::probe).await}
+#[cfg(windows)]
+#[tauri::command]
+async fn nearcast_input_prepare(owner_id:String,source_binding_id:String,geometry_revision:String,native_id:String,input_types:Vec<String>,max_contacts:u32)->Result<serde_json::Value,String>{native_input_task(move||input_native::prepare(owner_id,source_binding_id,geometry_revision,native_id,input_types,max_contacts)).await}
+#[cfg(windows)]
+#[tauri::command]
+async fn nearcast_input_apply(owner_id:String,lease_id:String,geometry_revision:String,action:input_native::Action)->Result<serde_json::Value,String>{native_input_task(move||input_native::apply(owner_id,lease_id,geometry_revision,action)).await}
+#[cfg(windows)]
+#[tauri::command]
+async fn nearcast_input_release(owner_id:String,lease_id:Option<String>)->Result<serde_json::Value,String>{native_input_task(move||input_native::release(owner_id,lease_id)).await}
+
+#[cfg(not(windows))]
 #[tauri::command]
 fn nearcast_input_probe()->serde_json::Value{input_native::probe()}
+#[cfg(not(windows))]
 #[tauri::command]
 fn nearcast_input_prepare(owner_id:String,source_binding_id:String,geometry_revision:String,native_id:String,input_types:Vec<String>,max_contacts:u32)->serde_json::Value{input_native::prepare(owner_id,source_binding_id,geometry_revision,native_id,input_types,max_contacts)}
+#[cfg(not(windows))]
 #[tauri::command]
 fn nearcast_input_apply(owner_id:String,lease_id:String,geometry_revision:String,action:input_native::Action)->serde_json::Value{input_native::apply(owner_id,lease_id,geometry_revision,action)}
+#[cfg(not(windows))]
 #[tauri::command]
 fn nearcast_input_release(owner_id:String,lease_id:Option<String>)->serde_json::Value{input_native::release(owner_id,lease_id)}
+
+#[tauri::command]
+async fn nearcast_capture_targets()->Result<serde_json::Value,String>{
+    #[cfg(windows)]
+    {return tauri::async_runtime::spawn_blocking(||capture_target::list().and_then(|targets|serde_json::to_value(targets).map_err(|e|e.to_string()))).await.map_err(|e|e.to_string())?;}
+    #[cfg(not(windows))]
+    Err("native_capture_not_supported".into())
+}
+#[tauri::command]
+async fn nearcast_capture_thumbnail(target_id:String)->Result<tauri::ipc::Response,String>{
+    #[cfg(windows)]
+    {return tauri::async_runtime::spawn_blocking(move||native_capture::thumbnail(&target_id).map(tauri::ipc::Response::new)).await.map_err(|e|e.to_string())?;}
+    #[cfg(not(windows))]
+    {let _=target_id;Err("native_capture_not_supported".into())}
+}
+#[tauri::command]
+async fn nearcast_capture_start(target_id:String)->Result<serde_json::Value,String>{
+    #[cfg(windows)]
+    {return tauri::async_runtime::spawn_blocking(move||native_capture::start(&target_id).and_then(|info|serde_json::to_value(info).map_err(|e|e.to_string()))).await.map_err(|e|e.to_string())?;}
+    #[cfg(not(windows))]
+    {let _=target_id;Err("native_capture_not_supported".into())}
+}
+#[tauri::command]
+async fn nearcast_capture_frame(capture_id:String)->Result<tauri::ipc::Response,String>{
+    #[cfg(windows)]
+    {return tauri::async_runtime::spawn_blocking(move||native_capture::frame(&capture_id).map(tauri::ipc::Response::new)).await.map_err(|e|e.to_string())?;}
+    #[cfg(not(windows))]
+    {let _=capture_id;Err("native_capture_not_supported".into())}
+}
+#[tauri::command]
+async fn nearcast_capture_stop(capture_id:String)->Result<(),String>{
+    #[cfg(windows)]
+    {return tauri::async_runtime::spawn_blocking(move||native_capture::stop(&capture_id)).await.map_err(|e|e.to_string())?;}
+    #[cfg(not(windows))]
+    {let _=capture_id;Ok(())}
+}
+#[tauri::command]
+async fn nearcast_capture_indicator(capture_id:String,geometry_revision:String,active:bool,owner_id:Option<String>,sequence:u32)->Result<(),String>{
+    #[cfg(windows)]
+    {return tauri::async_runtime::spawn_blocking(move||native_capture::indicator(&capture_id,&geometry_revision,active,owner_id.as_deref(),sequence)).await.map_err(|e|e.to_string())?;}
+    #[cfg(not(windows))]
+    {let _=(capture_id,geometry_revision,active,owner_id,sequence);Err("native_capture_not_supported".into())}
+}
 
 pub fn run() {
     tauri::Builder::default()
         .manage(MdnsState(Mutex::new(None)))
         .manage(TrustState::default())
         .on_window_event(|_, event| {
-            if matches!(event,tauri::WindowEvent::CloseRequested{..}|tauri::WindowEvent::Destroyed){input_native::shutdown();}
+            if matches!(event,tauri::WindowEvent::CloseRequested{..}|tauri::WindowEvent::Destroyed){input_native::shutdown();native_capture::shutdown();}
             #[cfg(target_os = "macos")]
             if matches!(event, tauri::WindowEvent::Destroyed) { let _ = macos_input::reset(); }
             #[cfg(windows)]
@@ -272,7 +356,13 @@ pub fn run() {
             #[cfg(not(target_os = "macos"))]
             let _ = event;
         })
-        .invoke_handler(tauri::generate_handler![nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info])
-        .run(tauri::generate_context!())
-        .expect("error while running NearCast Desktop TX");
+        .invoke_handler(tauri::generate_handler![nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_capture_targets, nearcast_capture_thumbnail, nearcast_capture_start, nearcast_capture_frame, nearcast_capture_stop, nearcast_capture_indicator, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info])
+        .build(tauri::generate_context!())
+        .expect("error while building NearCast Desktop TX")
+        .run(|_, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                input_native::shutdown();
+                native_capture::shutdown_runtime();
+            }
+        });
 }

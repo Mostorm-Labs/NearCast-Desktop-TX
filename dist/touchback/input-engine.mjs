@@ -7,6 +7,13 @@ import {integer} from './frame-codec.mjs';
 const text=value=>typeof value==='string'&&value.length>0&&value.length<=128;
 const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))):item);
 const same=(a,b)=>canonical(a)===canonical(b);
+// Only an unsubmitted motion snapshot can be superseded. Lifecycle frames
+// remain barriers, and wire validation happens before any queue reduction.
+function supersedesMotion(previous,next){
+  if(previous?.streamId!==next.streamId||previous.inputType!==next.inputType)return false;
+  if(previous.inputType==='touch')return previous.records.every(record=>record.phase===1)&&previous.records.every(record=>next.records.some(value=>value.contactId===record.contactId));
+  return previous.eventKind===0&&next.eventKind===0&&previous.buttons===next.buttons&&previous.modifiers===next.modifiers;
+}
 export class InputError extends Error{constructor(code,message=code,details){super(`${code}: ${message}`);this.code=code;this.details=details;}}
 const requireInput=(condition,code,message)=>{if(!condition)throw new InputError(code,message);};
 const timeout=(promise,ms,code='TIMEOUT')=>new Promise((resolve,reject)=>{
@@ -17,15 +24,15 @@ const timeout=(promise,ms,code='TIMEOUT')=>new Promise((resolve,reject)=>{
 export class InputEngine{
   constructor({provider,initialStreamId=1,operationTimeoutMs=3000,cleanupTimeoutMs=3000,maxQueuedSamples=64,maxQueuedRecords=2048,maxQueuedBytes=65536,maxQueueAgeMs=250,now=()=>performance.now(),onState=()=>{}}={}){
     Object.assign(this,{provider,initialStreamId,operationTimeoutMs,cleanupTimeoutMs,maxQueuedSamples,maxQueuedRecords,maxQueuedBytes,maxQueueAgeMs,now,onState});
-    this.state='closed';this.generation=0;this.bindingToken=0;this.binding=null;this.owner=null;this.stream=null;this.input=new InputState();
+    this.state='closed';this.generation=0;this.bindingToken=0;this.binding=null;this.owner=null;this.stream=null;this.input=new InputState();this.ingress=new InputState();
     this.nextIds=new Map();this.commands=new Map();this.closedIds=new Map();this.queue=[];this.pumping=false;
     this.nativeTail=Promise.resolve();this.cleanupActual=null;this.lastError=null;
-    this.stats={receivedSamples:0,validatedSamples:0,submittedSamples:0,submittedRecords:0,discardedSamples:0,failedSamples:0,queuePeak:0,lastNativeMs:0,cleanupMs:0};
+    this.stats={receivedSamples:0,validatedSamples:0,submittedSamples:0,submittedRecords:0,coalescedSamples:0,discardedSamples:0,failedSamples:0,queuePeak:0,lastNativeMs:0,lastNativeExecutionMs:0,lastQueueWaitMs:0,queueWaitPeakMs:0,cleanupMs:0};
   }
   notify(){try{this.onState(this.snapshot());}catch{/* Observability never owns input lifecycle. */}}
   snapshot(){return{state:this.state,streamId:this.stream?.streamId??this.owner?.streamId??this.lastClosedId??null,generation:this.generation,
     contractFingerprint:INPUT_CONTRACT.fingerprint,acceptedInputTypes:[...(this.stream?.acceptedInputTypes??[])],outputPolicy:'native',
-    geometryRevision:this.binding?.geometry?.revision??null,queueLength:this.queue.length,touchContacts:this.input.contacts.size,
+    geometryRevision:this.binding?.geometry?.revision??null,receivedSeqId:this.ingress.seqId,submittedSeqId:this.input.seqId,queueLength:this.queue.length,touchContacts:this.input.contacts.size,
     mouseButtons:this.input.buttons,mouseModifiers:this.input.modifiers,scrollActive:Boolean(this.input.scroll),cleanupPending:['closing','cleanup_blocked'].includes(this.state),
     lastError:this.lastError,...this.stats};}
   enqueueNative(task){const result=this.nativeTail.then(task,task);this.nativeTail=result.then(()=>{},()=>{});return result;}
@@ -98,7 +105,7 @@ export class InputEngine{
         const prepared=await timeout(this.enqueueNative(()=>this.provider.prepare(owner,result)),this.operationTimeoutMs);
         requireInput(this.owner===owner&&generation===this.generation&&this.state==='opening','CANCELED','Stale prepare completion');
         requireInput(prepared?.status==='ready','UNAVAILABLE',prepared?.error??'Native prepare rejected');
-        this.mapper=geometry;this.stream={...result,streamId:nextId,revision:String(generation)};this.input=new InputState();this.state='active';
+        this.mapper=geometry;this.stream={...result,streamId:nextId,revision:String(generation)};this.input=new InputState();this.ingress=new InputState();this.state='active';
         entry.result=structuredClone(this.stream);this.notify();return structuredClone(this.stream);
       }catch(error){
         if(this.owner===owner&&this.state==='opening')await this.fault(error).catch(()=>{});
@@ -119,13 +126,19 @@ export class InputEngine{
   accept(sample){
     this.stats.receivedSamples++;
     if(this.state!=='active'||sample.streamId!==this.stream?.streamId){this.stats.discardedSamples++;return Promise.resolve({status:'discarded'});}
+    let candidate;
+    try{candidate=this.ingress.candidate(sample,this.stream);this.stats.validatedSamples++;}
+    catch(error){this.stats.failedSamples++;return this.fault(error).catch(()=>{}).then(()=>{throw error;});}
     const records=sample.inputType==='touch'?sample.records.length:1;
-    const queuedRecords=this.queue.reduce((sum,item)=>sum+item.records,0),queuedBytes=this.queue.reduce((sum,item)=>sum+item.sample.dataBytes,0);
-    if(this.queue.length>=this.maxQueuedSamples||queuedRecords+records>this.maxQueuedRecords||queuedBytes+sample.dataBytes>this.maxQueuedBytes){
+    const tail=this.queue.at(-1),replace=tail?.generation===this.generation&&supersedesMotion(tail.sample,sample);
+    const queuedRecords=this.queue.reduce((sum,item)=>sum+item.records,0)-(replace?tail.records:0),queuedBytes=this.queue.reduce((sum,item)=>sum+item.sample.dataBytes,0)-(replace?tail.sample.dataBytes:0);
+    if(this.queue.length-(replace?1:0)>=this.maxQueuedSamples||queuedRecords+records>this.maxQueuedRecords||queuedBytes+sample.dataBytes>this.maxQueuedBytes){
       const error=new InputError('RESOURCE_EXHAUSTED','Input queue budget');return this.fault(error).catch(()=>{}).then(()=>{throw error;});
     }
+    this.ingress=candidate;
     return new Promise((resolve,reject)=>{
-      this.queue.push({sample:structuredClone(sample),records,generation:this.generation,queuedAt:this.now(),resolve,reject});
+      if(replace){this.queue.pop();tail.resolve({status:'coalesced'});this.stats.coalescedSamples++;}
+      this.queue.push({sample:structuredClone(sample),candidate,records,generation:this.generation,queuedAt:this.now(),resolve,reject});
       this.stats.queuePeak=Math.max(this.stats.queuePeak,this.queue.length);this.pump();
     });
   }
@@ -135,14 +148,15 @@ export class InputEngine{
       const item=this.queue.shift(),owner=this.owner;
       if(item.generation!==this.generation||this.state!=='active'){item.resolve({status:'stale'});continue;}
       try{
-        requireInput(this.now()-item.queuedAt<=this.maxQueueAgeMs,'TIMEOUT','Input queue age');
-        const candidate=this.input.candidate(item.sample,this.stream);this.stats.validatedSamples++;
+        this.stats.lastQueueWaitMs=this.now()-item.queuedAt;this.stats.queueWaitPeakMs=Math.max(this.stats.queueWaitPeakMs,this.stats.lastQueueWaitMs);
+        requireInput(this.stats.lastQueueWaitMs<=this.maxQueueAgeMs,'TIMEOUT','Input queue age');
         const action=this.mapper.map(item.sample),started=this.now();
         const result=await timeout(this.enqueueNative(()=>this.provider.apply(action,owner)),this.operationTimeoutMs);
         this.stats.lastNativeMs=this.now()-started;
+        this.stats.lastNativeExecutionMs=result?.nativeDurationMs??0;
         if(item.generation!==this.generation||this.owner!==owner){item.resolve({status:'stale'});continue;}
         requireInput(result?.status==='submitted','UNAVAILABLE',result?.error??'Native submission unconfirmed');
-        this.input=candidate;this.stats.submittedSamples++;this.stats.submittedRecords+=item.records;item.resolve({status:'submitted'});this.notify();
+        this.input=item.candidate;this.stats.submittedSamples++;this.stats.submittedRecords+=item.records;item.resolve({status:'submitted'});this.notify();
       }catch(error){this.stats.failedSamples++;await this.fault(error).catch(()=>{});item.reject(error);}
     }}finally{this.pumping=false;}
   }
@@ -162,7 +176,7 @@ export class InputEngine{
         if(result?.status==='released'){
           this.lastClosedId=owner.streamId;this.closedIds.set(`${owner.sessionId}:${owner.streamId}`,owner.binding);
           while(this.closedIds.size>4096)this.closedIds.delete(this.closedIds.keys().next().value);
-          this.owner=null;this.stream=null;this.input=new InputState();this.state='closed';
+          this.owner=null;this.stream=null;this.input=new InputState();this.ingress=new InputState();this.state='closed';
         }else{this.state='cleanup_blocked';this.lastError={code:'UNAVAILABLE',message:result?.error??'Native cleanup unconfirmed'};}
         this.notify();
       },error=>{if(this.owner===owner){this.state='cleanup_blocked';this.lastError={code:'UNAVAILABLE',message:String(error.message??error)};this.notify();}}).finally(()=>{if(this.cleanupActual===actual)this.cleanupActual=null;});

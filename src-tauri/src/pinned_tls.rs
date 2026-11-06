@@ -120,10 +120,18 @@ mod tests {
             let (stream, _) = listener.accept().unwrap();
             stream.set_read_timeout(Some(std::time::Duration::from_secs(3))).unwrap();
             let mut tls = StreamOwned::new(ServerConnection::new(Arc::new(config)).unwrap(), stream);
-            let mut request = [0; 2048];
-            if let Ok(size) = tls.read(&mut request) {
-                count.store(size, Ordering::SeqCst);
-                if size > 0 { let _ = tls.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"); }
+            // post() writes headers and body as separate TLS records. Dropping
+            // a Windows socket with unread request bytes can reset the response.
+            let mut request = Vec::new(); let mut byte = [0; 1];
+            while !request.ends_with(b"\r\n\r\n") && request.len() < 2048 {
+                if tls.read_exact(&mut byte).is_err() { return; }
+                request.push(byte[0]); count.store(request.len(), Ordering::SeqCst);
+            }
+            let mut body = [0; 2]; // These fixtures POST exactly {}.
+            if request.ends_with(b"\r\n\r\n") && tls.read_exact(&mut body).is_ok() {
+                count.fetch_add(body.len(), Ordering::SeqCst);
+                let _ = tls.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}");
+                tls.conn.send_close_notify(); let _ = tls.flush();
             }
         });
         (url, bytes, worker)

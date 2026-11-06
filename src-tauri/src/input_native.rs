@@ -115,6 +115,60 @@ fn cleanup(owner: &mut Owner) -> Result<(), String> {
     owner.blocked = false;
     Ok(())
 }
+#[cfg(windows)]
+pub fn is_owned() -> bool {
+    OWNER.lock().map(|owner| owner.is_some()).unwrap_or(true)
+}
+#[cfg(windows)]
+pub fn capture_ready(native_id: &str, revision: &str, owner_id: &str) -> bool {
+    OWNER
+        .lock()
+        .map(|owner| {
+            owner.as_ref().is_some_and(|owner| {
+                owner.id == owner_id
+                    && owner.native_id == native_id
+                    && owner.revision == revision
+                    && !owner.blocked
+            })
+        })
+        .unwrap_or(false)
+}
+#[cfg(windows)]
+pub fn release_capture(native_id: &str) -> Result<(), String> {
+    let mut guard = OWNER.lock().map_err(|_| "native_owner_lock_poisoned")?;
+    if let Some(owner) = guard.as_mut() {
+        if owner.native_id == native_id {
+            if let Err(error) = cleanup(owner) {
+                owner.blocked = true;
+                return Err(error);
+            }
+            *guard = None;
+        }
+    }
+    Ok(())
+}
+#[cfg(windows)]
+pub fn release_stale_capture(
+    native_id: &str,
+    revision: &str,
+    input_ready: bool,
+) -> Result<(), String> {
+    let mut guard = OWNER.lock().map_err(|_| "native_owner_lock_poisoned")?;
+    if let Some(owner) = guard.as_mut() {
+        if owner.native_id == native_id && (!input_ready || owner.revision != revision) {
+            // Watcher ticks do not bypass explicit retry after failed cleanup.
+            if owner.blocked {
+                return Err("native_cleanup_pending".into());
+            }
+            if let Err(error) = cleanup(owner) {
+                owner.blocked = true;
+                return Err(error);
+            }
+            *guard = None;
+        }
+    }
+    Ok(())
+}
 pub fn prepare(
     owner_id: String,
     source_binding_id: String,
@@ -226,6 +280,25 @@ pub fn apply(
         Ok(display) => display,
         Err(error) => return failure("rejected", error),
     };
+    #[cfg(windows)]
+    if owner.native_id.starts_with("capture:") {
+        let safe = match &action {
+            Action::Touch { records } => records.iter().all(|record| {
+                crate::native_capture::hit_target(&owner.native_id, record.x, record.y)
+            }),
+            Action::Mouse {
+                event_kind, x, y, ..
+            } => {
+                *event_kind == 3
+                    || *event_kind == 4
+                    || crate::native_capture::hit_target(&owner.native_id, *x as i32, *y as i32)
+            }
+        };
+        if !safe {
+            owner.blocked = true;
+            return failure("rejected", "capture_window_occluded_or_target_changed");
+        }
+    }
     match action {
         Action::Touch { records } => apply_touch(owner, &display, records),
         Action::Mouse {
@@ -333,7 +406,7 @@ fn apply_touch(owner: &mut Owner, display: &Display, records: Vec<TouchRecord>) 
         owner.possible_touch = records;
         return json!({"status":if submitted>0{"partial"}else{"unknown"},"submittedActions":submitted,"error":error});
     }
-    json!({"status":"submitted","submittedActions":submitted+1,"submittedRecords":records.len()})
+    json!({"status":"submitted","submittedActions":submitted+1,"submittedRecords":records.len(),"inputType":"touch","nativeApi":"InjectTouchInput","pointerType":"PT_TOUCH"})
 }
 #[cfg(not(windows))]
 fn apply_touch(_owner: &mut Owner, _display: &Display, _records: Vec<TouchRecord>) -> Value {

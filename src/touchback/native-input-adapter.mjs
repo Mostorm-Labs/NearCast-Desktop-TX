@@ -3,7 +3,7 @@ import {check,integer} from './frame-codec.mjs';
 // This adapter receives validated native actions, never network bytes. Native
 // leases and ID pools stay local and are never included in product descriptors.
 export class NativeInputAdapter{
-  constructor({invoke}={}){if(typeof invoke!=='function')throw new TypeError('Tauri invoke required');this.invoke=invoke;this.owners=new Map();}
+  constructor({invoke}={}){if(typeof invoke!=='function')throw new TypeError('Tauri invoke required');this.invoke=invoke;this.owners=new Map();this.lastSubmission=null;}
   async probe(){
     const result=await this.invoke('nearcast_input_probe');
     check(result&&Array.isArray(result.inputTypes)&&result.inputTypes.every(type=>['touch','mouse'].includes(type)),'Invalid native capability result');
@@ -19,7 +19,8 @@ export class NativeInputAdapter{
     }catch(error){return{status:'rejected',error:String(error?.message??error)};}
   }
   async apply(action,context){
-    const owner=this.owners.get(context.ownerId);if(!owner)return{status:'rejected',error:'Native owner not prepared'};
+    this.lastSubmission={inputType:action.inputType,nativeInputType:null,nativeApi:null,pointerType:null,status:'pending'};
+    const owner=this.owners.get(context.ownerId);if(!owner){this.lastSubmission.status='rejected';return{status:'rejected',error:'Native owner not prepared'};}
     let nativeAction=structuredClone(action),next;
     try{
       if(action.inputType==='touch'){
@@ -40,9 +41,11 @@ export class NativeInputAdapter{
         for(const record of action.records)if(record.phase>=2)next.delete(record.contactId);
       }
       const result=await this.invoke('nearcast_input_apply',{ownerId:context.ownerId,leaseId:owner.leaseId,geometryRevision:context.geometry.revision,action:nativeAction});
+      this.lastSubmission={inputType:action.inputType,nativeInputType:result?.inputType??null,nativeApi:result?.nativeApi??null,pointerType:result?.pointerType??null,status:result?.status??'unknown',
+        ...(action.inputType==='touch'?{records:nativeAction.records.slice(0,10).map(record=>({...record}))}:{eventKind:action.eventKind})};
       if(result?.status==='submitted'){if(next)owner.slots=next;return result;}
       return{status:['partial','unknown','rejected'].includes(result?.status)?result.status:'unknown',submittedActions:result?.submittedActions??0,error:result?.error??'Native submission unconfirmed'};
-    }catch(error){return{status:'unknown',error:String(error?.message??error)};}
+    }catch(error){this.lastSubmission.status='unknown';return{status:'unknown',error:String(error?.message??error)};}
   }
   async releaseOwned(context,reason){
     const owner=this.owners.get(context.ownerId);
@@ -54,6 +57,6 @@ export class NativeInputAdapter{
       return{status:'blocked',error:result?.error??'Native cleanup unconfirmed'};
     }catch(error){return{status:'blocked',error:String(error?.message??error)};}
   }
-  snapshot(){return{owners:this.owners.size,activeContacts:[...this.owners.values()].reduce((sum,owner)=>sum+owner.slots.size,0)};}
+  snapshot(){return{owners:this.owners.size,activeContacts:[...this.owners.values()].reduce((sum,owner)=>sum+owner.slots.size,0),lastSubmission:structuredClone(this.lastSubmission)};}
   owns(ownerId){return this.owners.has(ownerId);}
 }

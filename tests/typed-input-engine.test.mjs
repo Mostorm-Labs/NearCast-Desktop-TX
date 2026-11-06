@@ -102,7 +102,7 @@ test('idempotent open never reports active when native readiness has been withdr
 test('queue overflow fences pending work and releases after the sole in-flight native call',async()=>{
   let finish;const {engine,calls}=await fixture({apply:()=>new Promise(resolve=>{finish=resolve;})},{maxQueuedSamples:1});
   await engine.open(touch(),{sessionId:'AUTH-SID'});
-  const sample=seqId=>({streamId:7,seqId,cursor:seqId,inputType:'touch',dataBytes:8,records:[{contactId:1,phase:seqId===1?0:1,x:1,y:2}]});
+  const sample=seqId=>({streamId:7,seqId,cursor:seqId,inputType:'touch',dataBytes:8,records:[{contactId:1,phase:seqId===2?2:0,x:1,y:2}]});
   const first=engine.accept(sample(1));while(!finish)await delay(0);
   const queued=engine.accept(sample(2));const overflow=engine.accept(sample(3));
   assert.equal(engine.state,'closing');finish({status:'submitted'});
@@ -126,4 +126,79 @@ test('revoked source remains unauthorized after blocked cleanup and an explicit 
   await assert.rejects(engine.bindSource(null),/UNAVAILABLE/);assert.equal(engine.binding,null);
   release=true;await engine.close('explicit retry');
   await assert.rejects(engine.open({...params,commandId:'old-source'},{sessionId:'AUTH-SID'}),/PERMISSION_DENIED/);
+});
+
+
+test('slow native submission coalesces queued Touch motion into the latest complete sample and preserves Up',async t=>{
+  let now=0;const finishes=[];
+  const {engine,calls,provider}=await fixture({apply:()=>new Promise(resolve=>finishes.push(resolve))},{now:()=>now});
+  t.after(async()=>{provider.apply=async()=>({status:'submitted'});for(const finish of finishes.splice(0))finish({status:'submitted'});await engine.close('test cleanup');});
+  await engine.open(touch(),{sessionId:'AUTH-SID'});
+  const pending=[],sample=(seqId,phase)=>({streamId:7,seqId,cursor:seqId,inputType:'touch',dataBytes:8,records:[{contactId:1,phase,x:seqId,y:20}]});
+  pending.push(engine.accept(sample(1,0)));while(!finishes.length)await delay(0);
+  for(let seq=2;seq<=52;seq++){now=(seq-1)*4;pending.push(engine.accept(sample(seq,seq===52?2:1)).catch(error=>({error})));}
+  assert.equal(engine.snapshot().queueLength,1,'fresh motion/terminal snapshots must replace old pending motion, not build a delayed backlog');
+  now=210;finishes.shift()({status:'submitted'});while(!finishes.length)await delay(0);
+  now+=172;finishes.shift()({status:'submitted'});const results=await Promise.all(pending);
+  assert.ok(results.every(result=>!result.error));assert.equal(engine.state,'active');assert.equal(engine.snapshot().touchContacts,0);
+  assert.equal(engine.snapshot().coalescedSamples,50);assert.equal(engine.snapshot().receivedSamples,52);assert.equal(engine.snapshot().validatedSamples,52);
+  assert.equal(engine.snapshot().submittedSamples,2);assert.equal(engine.streamState(7,'AUTH-SID').lastSeqId,52);
+  assert.deepEqual(calls.filter(([name])=>name==='apply').map(([,action])=>action.records[0].phase),[0,2]);
+});
+
+test('every wire sequence is validated before queued motion can be coalesced',async t=>{
+  let finish;const {engine,provider}=await fixture({apply:()=>new Promise(resolve=>{finish=resolve;})});
+  t.after(async()=>{provider.apply=async()=>({status:'submitted'});finish?.({status:'submitted'});await engine.close('test cleanup');});
+  await engine.open(touch(),{sessionId:'AUTH-SID'});
+  const sample=(seqId,phase)=>({streamId:7,seqId,cursor:seqId,inputType:'touch',dataBytes:8,records:[{contactId:1,phase,x:seqId,y:20}]});
+  const first=engine.accept(sample(1,0));while(!finish)await delay(0);
+  const move=engine.accept(sample(2,1));const gap=engine.accept(sample(4,1)).catch(error=>error);
+  assert.equal(engine.state,'closing','a sequence gap must be fenced on arrival, including while the native call is in flight');
+  finish({status:'submitted'});await first;await move;assert.match((await gap).message,/sequence/i);assert.equal(engine.state,'closed');
+});
+
+test('Touch down, up and cancel barriers survive a burst of coalescible motion',async t=>{
+  const finishes=[];const {engine,calls,provider}=await fixture({apply:()=>new Promise(resolve=>finishes.push(resolve))});
+  t.after(async()=>{provider.apply=async()=>({status:'submitted'});for(const finish of finishes.splice(0))finish({status:'submitted'});await engine.close('test cleanup');});
+  await engine.open(touch(),{sessionId:'AUTH-SID'});
+  const phases=[0,1,2,0,1,1,1,1,3],pending=[];
+  for(const [i,phase]of phases.entries()){pending.push(engine.accept({streamId:7,seqId:i+1,cursor:i+1,inputType:'touch',dataBytes:8,records:[{contactId:1,phase,x:i,y:10}]}).catch(error=>({error})));if(!i)while(!finishes.length)await delay(0);}
+  assert.equal(engine.snapshot().queueLength,3);
+  for(let i=0;i<4;i++){while(!finishes.length)await delay(0);finishes.shift()({status:'submitted'});await delay(0);}
+  assert.ok((await Promise.all(pending)).every(result=>!result.error));
+  assert.deepEqual(calls.filter(([name])=>name==='apply').map(([,action])=>action.records[0].phase),[0,2,0,3]);
+  assert.equal(engine.state,'active');assert.equal(engine.snapshot().touchContacts,0);
+});
+
+
+test('full multi-contact snapshots keep additions and terminal contacts while reducing pure motion',async t=>{
+  const finishes=[];const {engine,calls,provider}=await fixture({apply:()=>new Promise(resolve=>finishes.push(resolve))});
+  t.after(async()=>{provider.apply=async()=>({status:'submitted'});for(const finish of finishes.splice(0))finish({status:'submitted'});await engine.close('test cleanup');});
+  await engine.open(touch(),{sessionId:'AUTH-SID'});
+  const rows=[[[1,0]],[[1,1]],[[1,1]],[[1,1],[2,0]],[[1,2],[2,1]],[[2,1]],[[2,1]],[[2,2]]],pending=[];
+  for(const [i,row]of rows.entries()){
+    pending.push(engine.accept({streamId:7,seqId:i+1,cursor:i+1,inputType:'touch',dataBytes:1+7*row.length,records:row.map(([contactId,phase])=>({contactId,phase,x:i,y:10}))}).catch(error=>({error})));
+    if(!i)while(!finishes.length)await delay(0);
+  }
+  assert.equal(engine.snapshot().queueLength,3);
+  for(let i=0;i<4;i++){while(!finishes.length)await delay(0);finishes.shift()({status:'submitted'});await delay(0);}
+  assert.ok((await Promise.all(pending)).every(result=>!result.error));
+  assert.deepEqual(calls.filter(([name])=>name==='apply').map(([,action])=>action.records.map(r=>[r.contactId,r.phase])),[[[1,0]],[[1,1],[2,0]],[[1,2],[2,1]],[[2,2]]]);
+  assert.equal(engine.snapshot().touchContacts,0);assert.equal(engine.streamState(7,'AUTH-SID').lastSeqId,8);
+});
+
+test('Mouse modifier changes and button transitions remain ordered barriers between motion samples',async t=>{
+  const finishes=[];const {engine,calls,provider}=await fixture({apply:()=>new Promise(resolve=>finishes.push(resolve))});
+  t.after(async()=>{provider.apply=async()=>({status:'submitted'});for(const finish of finishes.splice(0))finish({status:'submitted'});await engine.close('test cleanup');});
+  await engine.open(request(),{sessionId:'AUTH-SID'});
+  const rows=[[0,0,0],[0,0,0],[0,0,0],[0,0,1],[1,1,1],[0,1,1],[0,1,1],[1,0,1]],pending=[];
+  for(const [i,[eventKind,buttons,modifiers]]of rows.entries()){
+    pending.push(engine.accept({streamId:7,seqId:i+1,cursor:i+1,inputType:'mouse',dataBytes:12,eventKind,buttons,modifiers,x:i,y:10}).catch(error=>({error})));
+    if(!i)while(!finishes.length)await delay(0);
+  }
+  assert.equal(engine.snapshot().queueLength,5);
+  for(let i=0;i<6;i++){while(!finishes.length)await delay(0);finishes.shift()({status:'submitted'});await delay(0);}
+  assert.ok((await Promise.all(pending)).every(result=>!result.error));
+  assert.deepEqual(calls.filter(([name])=>name==='apply').map(([,action])=>[action.eventKind,action.buttons,action.modifiers]),[[0,0,0],[0,0,0],[0,0,1],[1,1,1],[0,1,1],[1,0,1]]);
+  assert.equal(engine.snapshot().mouseButtons,0);
 });
