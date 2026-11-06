@@ -156,8 +156,9 @@ try {
       if(command==='nearcast_capture_frame'){
         await new Promise(resolve=>setTimeout(resolve,35));const geometry=state.nativeGeometry;
         if(!geometry||geometry.captureId!==args.captureId)throw new Error('capture retired');
-        const meta=new TextEncoder().encode(JSON.stringify({captureId:geometry.captureId,frameId:++state.nativeFrameId,pixelFormat:'BGRA8',width:320,height:240,geometry}));
-        const bytes=new Uint8Array(4+meta.length+320*240*4);new DataView(bytes.buffer).setUint32(0,meta.length);bytes.set(meta,4);for(let i=4+meta.length;i<bytes.length;i+=4){const top=i<4+meta.length+320*120*4;bytes.set(top?[80,state.nativeFrameId%255,180,255]:[180,state.nativeFrameId%255,80,255],i);}return bytes.buffer;
+        const width=geometry.captureWidth,height=geometry.captureHeight;
+        const meta=new TextEncoder().encode(JSON.stringify({captureId:geometry.captureId,frameId:++state.nativeFrameId,pixelFormat:'BGRA8',width,height,geometry}));
+        const bytes=new Uint8Array(4+meta.length+width*height*4);new DataView(bytes.buffer).setUint32(0,meta.length);bytes.set(meta,4);for(let i=4+meta.length;i<bytes.length;i+=4){const top=i<4+meta.length+width*height*2;bytes.set(top?[80,state.nativeFrameId%255,180,255]:[180,state.nativeFrameId%255,80,255],i);}return bytes.buffer;
       }
       if(command==='nearcast_capture_stop'){if(state.nativeGeometry?.captureId===args.captureId){state.nativeGeometry=null;state.borderActive=false;state.nativeOwner=null;}return null;}
       if(command==='nearcast_capture_touch_feedback'){state.touchFeedback=args;return{updated:true};}
@@ -281,6 +282,14 @@ try {
     await page.evaluate(()=>testReceiver.sendSample(1,0,0,0));
     await page.waitForFunction(()=>testReceiver.lastNativeAction?.records[0].x===500);
     await page.evaluate(()=>testReceiver.sendSample(2,2,0,0));
+    const movedId=await page.evaluate(()=>testReceiver.inputStreamId);
+    await page.evaluate(()=>{testReceiver.nativeGeometry={...testReceiver.nativeGeometry,revision:'window-resized',captureWidth:400,captureHeight:200,region:{...testReceiver.nativeGeometry.region,width:400,height:200}};});
+    await page.waitForFunction(old=>testReceiver.inputStreamId>old&&testReceiver.borderActive||testReceiver.error,movedId);
+    await page.waitForFunction(()=>document.querySelector('#preview').videoWidth===400&&document.querySelector('#preview').videoHeight===200);
+    assert.equal(await page.evaluate(()=>testReceiver.error),undefined);
+    await page.evaluate(()=>testReceiver.sendSample(1,0,65535,65535));
+    await page.waitForFunction(()=>testReceiver.lastNativeAction?.records[0].x===899&&testReceiver.lastNativeAction?.records[0].y===299);
+    await page.evaluate(()=>testReceiver.sendSample(2,2,65535,65535));
     await page.evaluate(()=>{testReceiver.nativeGeometry={...testReceiver.nativeGeometry,inputReady:false,disabledReason:'capture_window_not_foreground'};});
     await page.waitForFunction(()=>!__nearcastTouchbackDiagnostics().sourceReady&&!testReceiver.borderActive);
     const paused=await page.evaluate(()=>testReceiver.frames);await page.waitForFunction(before=>testReceiver.frames>before+2,paused);

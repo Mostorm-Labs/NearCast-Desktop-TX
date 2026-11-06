@@ -3,6 +3,18 @@ import assert from 'node:assert/strict';
 import {peer,openRequest,product,turn,geometry} from './helpers/typed-peer.mjs';
 import {encodeInputFrame} from '../src/touchback/typed-codec.mjs';
 
+test('temporary native window readiness loss keeps its precise reason and can recover on the same session',async t=>{
+  let capture={captureId:'native',nativeId:'capture:native',revision:'window-1',kind:'window',units:'physical-pixels',rotation:0,region:{x:100,y:100,width:800,height:600},captureWidth:800,captureHeight:600,inputReady:true,disabledReason:null};
+  const p=await peer({provider:{probe:async()=>({inputTypes:['touch'],maxDataBytes:4096,touch:{maxContacts:10},nativeReady:true,geometry:{revision:capture.revision,capture}})}});t.after(()=>p.sender.fence());
+  p.track.getSettings=()=>({displaySurface:'window',width:800,height:600,nearcastCaptureId:capture.captureId,nearcastCaptureRevision:capture.revision});
+  await p.handshake();await p.bind();await p.sender.setCaptureTrack(p.track);await p.sender.setEnabled(true);
+  for(const [nativeReason,reason] of [['capture_window_not_foreground','CAPTURE_WINDOW_NOT_FOREGROUND'],['capture_window_minimized_or_hidden','CAPTURE_WINDOW_MINIMIZED'],['capture_waiting_for_frame','CAPTURE_GEOMETRY_CHANGED']]){
+    capture={...capture,inputReady:false,disabledReason:nativeReason};await p.sender.captureGeometryChanged();
+    assert.equal(p.source().data.disabledReason,reason);assert.equal(p.sender.server.ready,true);assert.equal(p.sender.channel.readyState,'open');
+    capture={...capture,revision:capture.revision+'r',inputReady:true,disabledReason:null};await p.sender.captureGeometryChanged();assert.equal(p.source().data.available,true);
+  }
+});
+
 test('source association requires local authorization, APP_READY, authenticated target and proven capture',async t=>{
   const p=await peer();t.after(()=>p.sender.fence());
   await p.handshake();await p.bind();await p.sender.setCaptureTrack(p.track);

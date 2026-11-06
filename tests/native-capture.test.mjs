@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {decodeCaptureFrame,fitCaptureSize,NativeCaptureMediaDevices} from '../src/capture/native-capture.mjs';
+import {proveCaptureGeometry} from '../src/touchback/capture-geometry.mjs';
 const geometry={captureId:'capture-1',nativeId:'capture:capture-1',kind:'monitor',revision:'r1',units:'physical-pixels',rotation:0,region:{x:-1920,y:0,width:1920,height:1080},captureWidth:1920,captureHeight:1080,inputReady:true,disabledReason:null};
 function packet(meta={},pixels=new Uint8Array(16)){
   const metadata=new TextEncoder().encode(JSON.stringify({captureId:'capture-1',frameId:1,pixelFormat:'BGRA8',width:2,height:2,geometry:{...geometry,captureWidth:2,captureHeight:2},...meta}));
@@ -17,6 +18,21 @@ test('quality sizing preserves the captured aspect ratio without stretching a wi
   assert.deepEqual(fitCaptureSize(1920,1080,{width:{ideal:1280},height:{ideal:720}}),{width:1280,height:720});
   assert.deepEqual(fitCaptureSize(800,600,{width:{ideal:1920},height:{ideal:1080}}),{width:800,height:600});
   assert.deepEqual(fitCaptureSize(2000,1000,{width:{ideal:1280},height:{ideal:720}}),{width:1280,height:640});
+});
+
+test('window resize publishes the rendered dimensions even while browser track settings lag',async()=>{
+  const resized={...geometry,kind:'window',revision:'resized',captureWidth:400,captureHeight:400,region:{x:100,y:100,width:400,height:400}};
+  const observations=[];let reads=0;
+  const canvas={width:800,height:600,captureStream:()=>({getVideoTracks:()=>[{getSettings:()=>({width:800,height:600,aspectRatio:4/3}),stop(){},requestFrame(){}}]})};
+  const devices=new NativeCaptureMediaDevices({chooseTarget:async()=> 'target-1',createCanvas:()=>({canvas,draw(_frame,size){Object.assign(canvas,size);},close(){}}),
+    onGeometryChange:(capture,track)=>observations.push({settings:track.getSettings(),capture}),
+    invoke:async(method)=>{if(method==='nearcast_capture_start')return{...geometry,kind:'window',captureWidth:800,captureHeight:600};if(method==='nearcast_capture_frame'){if(++reads===1)return packet({width:400,height:400,geometry:resized},new Uint8Array(400*400*4));return new Promise(()=>{});}}});
+  try{
+    await devices.getDisplayMedia({video:true});await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(observations.length,1);const {settings,capture}=observations[0];
+    assert.equal(settings.width,400);assert.equal(settings.height,400);assert.equal(settings.aspectRatio,1);
+    assert.equal(proveCaptureGeometry(settings,{revision:capture.revision,capture}).proven,true);
+  }finally{await devices.stop();}
 });
 
 test('late native capture start after cancellation is released and cannot publish a stream',async()=>{

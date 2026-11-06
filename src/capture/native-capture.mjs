@@ -60,7 +60,9 @@ export class NativeCaptureMediaDevices{
     try{renderer=this.createCanvas();Object.assign(renderer.canvas,fitCaptureSize(started.captureWidth,started.captureHeight,video));stream=renderer.canvas.captureStream(0);}catch(failure){await this.invoke('nearcast_capture_stop',{captureId:started.captureId});throw failure;}
     const track=stream.getVideoTracks()[0],getSettings=track.getSettings.bind(track),stop=track.stop.bind(track);
     const capture={id:started.captureId,generation,renderer,stream,track,stop,geometry:started,frames:0,sampledPixelHash:null,sampledPixelChanges:0,lastFrameId:null,nativeCapture:null,startedAt:this.now(),stateKey:null};this.current=capture;
-    track.getSettings=()=>({...getSettings(),displaySurface:capture.geometry.kind,nearcastCaptureId:capture.id,nearcastCaptureRevision:capture.geometry.revision});
+    // Canvas-track settings lag a resize until Chromium consumes the next frame.
+    // We own this renderer: its output size is the frame actually requested.
+    track.getSettings=()=>({...getSettings(),width:renderer.canvas.width,height:renderer.canvas.height,aspectRatio:renderer.canvas.width/renderer.canvas.height,displaySurface:capture.geometry.kind,nearcastCaptureId:capture.id,nearcastCaptureRevision:capture.geometry.revision});
     track.stop=()=>{if(this.current===capture)void this.stop().catch(failure=>this.onStatus({error:String(failure.message??failure)}));else stop();};
     void this.pump(capture,video);return stream;
     });
@@ -72,7 +74,7 @@ export class NativeCaptureMediaDevices{
         const bytes=await this.invoke('nearcast_capture_frame',{captureId:capture.id});
         if(this.current!==capture||capture.generation!==this.generation)return;
         const frame=decodeCaptureFrame(bytes,capture.id),stateKey=[frame.geometry.revision,frame.geometry.inputReady,frame.geometry.disabledReason].join(':');capture.indicator=frame.indicator;capture.nativeCapture=frame.nativeCapture??null;
-        if(stateKey!==capture.stateKey){capture.stateKey=stateKey;capture.geometry=frame.geometry;this.onGeometryChange(frame.geometry,capture.track);}
+        const changed=stateKey!==capture.stateKey;if(changed){capture.stateKey=stateKey;capture.geometry=frame.geometry;}
         if(/closed|removed/.test(frame.geometry.disabledReason??''))throw new Error(frame.geometry.disabledReason);
         if(frame.pixels.length){
           const hash=sampledPixelHash(frame.pixels);
@@ -82,6 +84,7 @@ export class NativeCaptureMediaDevices{
         }else if(capture.frames&&this.now()-capture.lastRequestAt>=250){
           capture.track.requestFrame?.();capture.lastRequestAt=this.now();
         }
+        if(changed)this.onGeometryChange(frame.geometry,capture.track);
         this.onStatus({geometry:capture.geometry,frames:capture.frames,fps:capture.frames*1000/Math.max(1,this.now()-capture.startedAt)});
       }
     }catch(failure){
