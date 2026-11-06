@@ -17,6 +17,10 @@ mod capture_indicator;
 #[cfg(all(test,windows))]
 mod capture_native_tests;
 #[cfg(test)]
+mod capture_outline_tests;
+#[cfg(test)]
+mod capture_chrome_tests;
+#[cfg(test)]
 mod capture_target_tests;
 mod input_native;
 #[cfg(all(test,windows))]

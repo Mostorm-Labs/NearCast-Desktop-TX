@@ -232,11 +232,16 @@ pub fn start(id: &str) -> Result<(), String> {
                         &capture.revision,
                         capture.input_ready,
                     );
-                    let visible = !capture.disabled_reason.as_deref().is_some_and(|reason| {
-                        reason.contains("closed")
-                            || reason.contains("removed")
-                            || reason.contains("minimized")
-                    });
+                    // On a size mismatch Info retains the last proven pixel
+                    // region for diagnostics, not a current outline position.
+                    // Hide it until native bounds and capture pixels agree.
+                    let visible = capture.native_region.is_some()
+                        && matches!(
+                            capture.disabled_reason.as_deref(),
+                            None | Some(
+                                "capture_window_not_foreground" | "capture_waiting_for_frame"
+                            )
+                        );
                     let desired = worker_desired
                         .lock()
                         .map_err(|_| "capture_indicator_poisoned")?;
@@ -249,7 +254,14 @@ pub fn start(id: &str) -> Result<(), String> {
                             &desired.owner_id,
                         );
                     let padding = if capture.kind == "window" { 3 } else { 0 };
-                    let region = &capture.region;
+                    let region = capture
+                        .native_region
+                        .unwrap_or(crate::capture_target::Rect {
+                            x: 0,
+                            y: 0,
+                            width: 0,
+                            height: 0,
+                        });
                     let bounds = (
                         region.x as i32 - padding,
                         region.y as i32 - padding,

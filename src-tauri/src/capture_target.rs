@@ -43,6 +43,14 @@ mod platform {
         Monitor { handle: isize, name: String },
         Window { handle: isize, pid: u32 },
     }
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct CaptureLayout {
+        dpi: u32,
+        maximized: bool,
+        client_insets: [i32; 4],
+        frame_style: u32,
+    }
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct Choice {
@@ -164,6 +172,36 @@ mod platform {
                     }
                 }
             }
+        }
+        pub fn capture_layout(&self) -> Result<Option<CaptureLayout>, String> {
+            let Self::Window { handle, .. } = self else {
+                return Ok(None);
+            };
+            let _dpi = DpiGuard::new()?;
+            self.bounds(None)?; // Revalidate the selected HWND/PID and visibility.
+            let hwnd = HWND(*handle as *mut _);
+            let mut outer = RECT::default();
+            let mut client = RECT::default();
+            let mut origin = windows::Win32::Foundation::POINT::default();
+            unsafe {
+                GetWindowRect(hwnd, &mut outer).map_err(|e| e.to_string())?;
+                GetClientRect(hwnd, &mut client).map_err(|e| e.to_string())?;
+                if !ClientToScreen(hwnd, &mut origin).as_bool() {
+                    return Err("capture_client_geometry_unavailable".into());
+                }
+            }
+            Ok(Some(CaptureLayout {
+                dpi: unsafe { GetDpiForWindow(hwnd) },
+                maximized: unsafe { IsZoomed(hwnd) }.as_bool(),
+                client_insets: [
+                    origin.x - outer.left,
+                    origin.y - outer.top,
+                    outer.right - origin.x - client.right,
+                    outer.bottom - origin.y - client.bottom,
+                ],
+                frame_style: unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32
+                    & (WS_CAPTION | WS_THICKFRAME | WS_BORDER).0,
+            }))
         }
         pub fn input_ready(&self) -> bool {
             match self {

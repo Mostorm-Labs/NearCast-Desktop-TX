@@ -82,6 +82,8 @@ mod platform {
         pub capture_height: u32,
         pub input_ready: bool,
         pub disabled_reason: Option<String>,
+        #[serde(skip)]
+        pub native_region: Option<Rect>,
     }
     struct Observed {
         size: (i32, i32),
@@ -89,6 +91,8 @@ mod platform {
         rect: Rect,
         last_frame: Option<Instant>,
         closed: Arc<AtomicBool>,
+        layout: Option<capture_target::CaptureLayout>,
+        capture_generation: u64,
     }
     enum Request {
         Frame(SyncSender<Result<Vec<u8>, String>>),
@@ -142,6 +146,9 @@ mod platform {
         if reason.is_none() && !target.input_ready() {
             reason = Some("capture_window_not_foreground".into());
         }
+        if reason.is_none() && target.capture_layout().ok().as_ref() != Some(&observed.layout) {
+            reason = Some("capture_window_geometry_changed".into());
+        }
         if reason.is_none()
             && (observed.last_frame.is_none() || observed.frame_size != Some(observed.size))
         {
@@ -149,7 +156,7 @@ mod platform {
         }
         let revision = format!(
             "{:x}",
-            Sha256::digest(format!("{id}:{:?}:{:?}", rect, observed.size).as_bytes())
+            Sha256::digest(format!("{id}:{:?}:{:?}:{}:{:?}", rect, observed.size, observed.capture_generation, observed.layout).as_bytes())
         );
         Info {
             capture_id: id.into(),
@@ -168,6 +175,7 @@ mod platform {
             capture_height: observed.size.1.max(0) as u32,
             input_ready: reason.is_none(),
             disabled_reason: reason,
+            native_region: if observed.closed.load(Ordering::Acquire) { None } else { target.bounds(None).ok() },
         }
     }
     pub fn snapshot() -> Option<Info> {
@@ -264,6 +272,8 @@ mod platform {
             rect,
             last_frame: None,
             closed: Arc::new(AtomicBool::new(false)),
+            layout: target.capture_layout()?,
+            capture_generation: 1,
         }));
         let (tx, rx) = mpsc::sync_channel(2);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
@@ -290,6 +300,7 @@ mod platform {
                     }
                     if ready_tx.send(Ok(())).is_ok() {
                         let mut sequence = 0u64;
+                        let mut pending_layout = None;
                         while let Ok(request) = rx.recv_timeout(Duration::from_secs(10)) {
                             match request {
                                 Request::Stop(done) => {
@@ -298,7 +309,33 @@ mod platform {
                                     return;
                                 }
                                 Request::Frame(reply) => {
-                                    let result = capture.read().and_then(|pixels| {
+                                    let result = (|| {
+                                        let pixels = if let Ok(layout) = worker_target.capture_layout() {
+                                            let changed = {
+                                                let mut obs = worker_observed.lock().map_err(|_| "capture_observation_poisoned")?;
+                                                let changed = obs.layout != layout;
+                                                if changed { obs.frame_size = None; }
+                                                changed
+                                            };
+                                            if changed && pending_layout.as_ref() != Some(&layout) {
+                                                // Return the invalid source before expensive WGC
+                                                // reconstruction so JS can fence queued old input.
+                                                pending_layout = Some(layout);
+                                                Vec::new()
+                                            } else {
+                                                if changed {
+                                                    crate::input_native::release_stale_capture(&format!("capture:{worker_id}"), "", false)?;
+                                                    capture.restart(&worker_target)?;
+                                                    let mut obs = worker_observed.lock().map_err(|_| "capture_observation_poisoned")?;
+                                                    obs.layout = layout;
+                                                    obs.capture_generation += 1;
+                                                    obs.size = (capture.size.Width, capture.size.Height);
+                                                    obs.frame_size = None;
+                                                }
+                                                pending_layout = None;
+                                                capture.read()?
+                                            }
+                                        } else { capture.read()? };
                                         let geometry = {
                                             let mut obs = worker_observed.lock().map_err(|_| "capture_observation_poisoned")?;
                                             obs.size = (capture.size.Width, capture.size.Height);
@@ -311,10 +348,17 @@ mod platform {
                                             info(&worker_id, &worker_target, &obs)
                                         };
                                         let (width,height) = if pixels.is_empty() {(0,0)} else {(capture.size.Width,capture.size.Height)};
+                                        let mut diagnostics = capture.last_readback.clone().unwrap_or_else(|| serde_json::json!({}));
+                                        diagnostics["nativeRegion"] = serde_json::to_value(geometry.native_region).map_err(text_error)?;
+                                        {
+                                            let obs = worker_observed.lock().map_err(|_| "capture_observation_poisoned")?;
+                                            diagnostics["captureGeneration"] = serde_json::json!(obs.capture_generation);
+                                            diagnostics["captureLayout"] = serde_json::to_value(&obs.layout).map_err(text_error)?;
+                                        }
                                         let metadata = serde_json::to_vec(&serde_json::json!({
                                             "captureId":worker_id, "pixelFormat":"BGRA8", "frameId":sequence,
                                             "width":width, "height":height, "geometry":geometry,
-                                            "nativeCapture":capture.last_readback.as_ref(),
+                                            "nativeCapture":diagnostics,
                                             "indicator":crate::capture_indicator::status(&worker_id)
                                         })).map_err(text_error)?;
                                         let mut packet = Vec::with_capacity(4 + metadata.len() + pixels.len());
@@ -322,7 +366,7 @@ mod platform {
                                         packet.extend_from_slice(&metadata);
                                         packet.extend_from_slice(&pixels);
                                         Ok(packet)
-                                    });
+                                    })();
                                     let failed = result.is_err();
                                     let _ = reply.send(result);
                                     if failed {
@@ -434,6 +478,15 @@ mod platform {
         last_readback: Option<serde_json::Value>,
     }
     impl GpuCapture {
+        fn restart(&mut self, target: &Target) -> Result<(), String> {
+            // Recreating only the frame pool retains WGC's original non-client
+            // crop. Chrome changes that crop on maximize/restore. Release the
+            // old session before creating a fresh item, pool and session.
+            self.session.Close().map_err(text_error)?;
+            self.pool.Close().map_err(text_error)?;
+            *self = Self::new(target, self.closed.clone())?;
+            Ok(())
+        }
         fn new(target: &Target, closed: Arc<AtomicBool>) -> Result<Self, String> {
             if !GraphicsCaptureSession::IsSupported().map_err(text_error)? {
                 return Err("windows_graphics_capture_not_supported".into());
