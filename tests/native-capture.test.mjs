@@ -20,6 +20,25 @@ test('quality sizing preserves the captured aspect ratio without stretching a wi
   assert.deepEqual(fitCaptureSize(2000,1000,{width:{ideal:1280},height:{ideal:720}}),{width:1280,height:640});
 });
 
+test('native video capture can reuse a browser display-audio track without capturing a microphone', async () => {
+  const calls = [];
+  const video = {kind:'video',getSettings:()=>({width:2,height:2}),stop(){this.stopped=true;}};
+  const audio = {kind:'audio',stop(){this.stopped=true;}};
+  const nativeStream = {getVideoTracks:()=>[video],getTracks(){return [video,...(this.audio?[this.audio]:[])];},addTrack(track){this.audio=track;},getAudioTracks(){return this.audio?[this.audio]:[];}};
+  const displayAudio = {getTracks:()=>[audio],getVideoTracks:()=>[video],getAudioTracks:()=>[audio]};
+  const devices = new NativeCaptureMediaDevices({
+    chooseTarget:async()=> 'target-1',
+    displayMediaDevices:{getDisplayMedia:async constraints=>{calls.push(constraints);return displayAudio;}},
+    createCanvas:()=>({canvas:{captureStream:()=>nativeStream},close(){}}),
+    invoke:async method=>{if(method==='nearcast_capture_start')return geometry;if(method==='nearcast_capture_frame')return new Promise(()=>{});}
+  });
+  await devices.getDisplayMedia({video:true,audio:true});
+  assert.deepEqual(calls,[{video:true,audio:true}]);
+  assert.deepEqual(nativeStream.getAudioTracks(),[audio]);
+  await devices.stop();
+  assert.equal(audio.stopped,true);
+});
+
 test('window resize publishes the rendered dimensions even while browser track settings lag',async()=>{
   const resized={...geometry,kind:'window',revision:'resized',captureWidth:400,captureHeight:400,region:{x:100,y:100,width:400,height:400}};
   const observations=[];let reads=0;

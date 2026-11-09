@@ -19,8 +19,18 @@ impl Rect {
             && (y as i64) < self.y as i64 + self.height as i64
     }
 }
-pub fn capture_rect(width: i32, height: i32, visible: Rect, window: Rect) -> Result<Rect, String> {
-    [visible, window]
+pub fn capture_rect(
+    width: i32,
+    height: i32,
+    client: Rect,
+    visible: Rect,
+    window: Rect,
+) -> Result<Rect, String> {
+    // GraphicsCaptureItem for a window normally exposes the client/content
+    // surface. Prefer that origin whenever the returned pixels match it;
+    // falling back to the extended frame and outer bounds preserves support
+    // for WGC versions that include non-client pixels.
+    [client, visible, window]
         .into_iter()
         .find(|r| r.valid() && r.width == width && r.height == height)
         .ok_or("capture_window_pixels_do_not_match_native_bounds".into())
@@ -157,6 +167,20 @@ mod platform {
                     }
                     let mut window = RECT::default();
                     unsafe { GetWindowRect(hwnd, &mut window) }.map_err(|e| e.to_string())?;
+                    let mut client = RECT::default();
+                    let mut client_origin = windows::Win32::Foundation::POINT::default();
+                    unsafe {
+                        GetClientRect(hwnd, &mut client).map_err(|e| e.to_string())?;
+                        if !ClientToScreen(hwnd, &mut client_origin).as_bool() {
+                            return Err("capture_client_geometry_unavailable".into());
+                        }
+                    }
+                    let client = Rect {
+                        x: client_origin.x,
+                        y: client_origin.y,
+                        width: client.right - client.left,
+                        height: client.bottom - client.top,
+                    };
                     let mut visible = window;
                     let _ = unsafe {
                         DwmGetWindowAttribute(
@@ -167,7 +191,7 @@ mod platform {
                         )
                     };
                     match size {
-                        Some((w, h)) => capture_rect(w, h, rect(visible), rect(window)),
+                        Some((w, h)) => capture_rect(w, h, client, rect(visible), rect(window)),
                         None => Ok(rect(visible)),
                     }
                 }

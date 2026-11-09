@@ -2,6 +2,12 @@ use crate::capture_target::{capture_rect, Rect};
 
 #[test]
 fn window_mapping_uses_the_bounds_that_match_actual_capture_pixels() {
+    let client = Rect {
+        x: 100,
+        y: 120,
+        width: 800,
+        height: 600,
+    };
     let window = Rect {
         x: 92,
         y: 92,
@@ -14,9 +20,19 @@ fn window_mapping_uses_the_bounds_that_match_actual_capture_pixels() {
         width: 800,
         height: 631,
     };
-    assert_eq!(capture_rect(800, 631, visible, window).unwrap(), visible);
-    assert_eq!(capture_rect(816, 639, visible, window).unwrap(), window);
-    assert!(capture_rect(800, 600, visible, window).is_err());
+    assert_eq!(
+        capture_rect(800, 600, client, visible, window).unwrap(),
+        client
+    );
+    assert_eq!(
+        capture_rect(800, 631, client, visible, window).unwrap(),
+        visible
+    );
+    assert_eq!(
+        capture_rect(816, 639, client, visible, window).unwrap(),
+        window
+    );
+    assert!(capture_rect(800, 599, client, visible, window).is_err());
 }
 
 #[test]

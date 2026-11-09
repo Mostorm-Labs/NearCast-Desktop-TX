@@ -44,11 +44,10 @@ function sampledPixelHash(pixels){
 }
 
 export class NativeCaptureMediaDevices{
-  constructor({invoke,chooseTarget,onGeometryChange=()=>{},onStatus=()=>{},createCanvas=createCaptureCanvas,now=()=>performance.now()}={}){
-    Object.assign(this,{invoke,chooseTarget,onGeometryChange,onStatus,createCanvas,now});this.generation=0;this.current=null;this.indicatorKey=null;this.indicatorSequence=0;this.stopBarrier=Promise.resolve();this.acquisition=Promise.resolve();
+  constructor({invoke,chooseTarget,onGeometryChange=()=>{},onStatus=()=>{},createCanvas=createCaptureCanvas,displayMediaDevices=globalThis.navigator?.mediaDevices,now=()=>performance.now()}={}){
+    Object.assign(this,{invoke,chooseTarget,onGeometryChange,onStatus,createCanvas,displayMediaDevices,now});this.generation=0;this.current=null;this.indicatorKey=null;this.indicatorSequence=0;this.stopBarrier=Promise.resolve();this.acquisition=Promise.resolve();
   }
   async getDisplayMedia({video=true,audio=false}={}){
-    if(audio)throw new Error('Native display audio is not implemented');
     await this.stop();const generation=++this.generation,targetId=await this.chooseTarget();
     if(generation!==this.generation)throw new Error('Capture selection cancelled');
     if(!targetId)throw new DOMException('Screen capture cancelled','NotAllowedError');
@@ -59,11 +58,24 @@ export class NativeCaptureMediaDevices{
     let renderer,stream;
     try{renderer=this.createCanvas();Object.assign(renderer.canvas,fitCaptureSize(started.captureWidth,started.captureHeight,video));stream=renderer.canvas.captureStream(0);}catch(failure){await this.invoke('nearcast_capture_stop',{captureId:started.captureId});throw failure;}
     const track=stream.getVideoTracks()[0],getSettings=track.getSettings.bind(track),stop=track.stop.bind(track);
-    const capture={id:started.captureId,generation,renderer,stream,track,stop,geometry:started,frames:0,sampledPixelHash:null,sampledPixelChanges:0,lastFrameId:null,nativeCapture:null,startedAt:this.now(),stateKey:null};this.current=capture;
+    const capture={id:started.captureId,generation,renderer,stream,track,stop,audioTracks:[],geometry:started,frames:0,sampledPixelHash:null,sampledPixelChanges:0,lastFrameId:null,nativeCapture:null,startedAt:this.now(),stateKey:null};this.current=capture;
     // Canvas-track settings lag a resize until Chromium consumes the next frame.
     // We own this renderer: its output size is the frame actually requested.
     track.getSettings=()=>({...getSettings(),width:renderer.canvas.width,height:renderer.canvas.height,aspectRatio:renderer.canvas.width/renderer.canvas.height,displaySurface:capture.geometry.kind,nearcastCaptureId:capture.id,nearcastCaptureRevision:capture.geometry.revision});
     track.stop=()=>{if(this.current===capture)void this.stop().catch(failure=>this.onStatus({error:String(failure.message??failure)}));else stop();};
+    if(audio){
+      try{
+        if(!this.displayMediaDevices?.getDisplayMedia)throw new Error('Native display audio requires WebView display capture');
+        const displayStream=await this.displayMediaDevices.getDisplayMedia({video:true,audio:true});
+        const audioTracks=displayStream.getAudioTracks?.()??[];
+        for(const displayTrack of displayStream.getVideoTracks?.()??[])if(displayTrack!==track)displayTrack.stop?.();
+        if(audioTracks.length){
+          if(typeof stream.addTrack!=='function')throw new Error('Native display audio stream cannot attach an audio track');
+          stream.addTrack(audioTracks[0]);capture.audioTracks=[audioTracks[0]];
+          for(const extra of audioTracks.slice(1))extra.stop?.();
+        }else for(const displayTrack of displayStream.getTracks?.()??[])displayTrack.stop?.();
+      }catch(failure){await this.stop();throw failure;}
+    }
     void this.pump(capture,video);return stream;
     });
     this.acquisition=acquire.then(()=>{},()=>{});return acquire;
@@ -103,6 +115,6 @@ export class NativeCaptureMediaDevices{
   diagnostics(){const capture=this.current;if(!capture)return null;const {kind,revision,region,inputReady,disabledReason}=capture.geometry;return{kind,revision,region:{...region},inputReady,disabledReason,output:{width:capture.renderer.canvas.width,height:capture.renderer.canvas.height},frames:capture.frames,lastFrameId:capture.lastFrameId,sampledPixelHash:capture.sampledPixelHash,sampledPixelChanges:capture.sampledPixelChanges,nativeCapture:capture.nativeCapture?{...capture.nativeCapture}:null,indicator:capture.indicator};}
   async stop(){
     this.generation++;this.chooseTarget.cancel?.();const capture=this.current;this.current=null;this.indicatorKey=null;if(!capture)return this.stopBarrier;
-    capture.stop();capture.renderer.close();const stopping=this.invoke('nearcast_capture_stop',{captureId:capture.id});this.stopBarrier=stopping.then(()=>{},()=>{});return stopping;
+    capture.stop();for(const track of capture.audioTracks)track.stop?.();capture.renderer.close();const stopping=this.invoke('nearcast_capture_stop',{captureId:capture.id});this.stopBarrier=stopping.then(()=>{},()=>{});return stopping;
   }
 }

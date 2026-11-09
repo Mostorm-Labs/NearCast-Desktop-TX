@@ -345,7 +345,7 @@ shareButton.addEventListener('click', async () => {
   if (capturePending) return;
   capturePending = true; shareButton.disabled = true;
   setError(castError, null);
-  try { client.videoQuality = videoQuality; await client.startScreenShare({video: true, audio: false}); }
+  try { client.videoQuality = videoQuality; await client.startScreenShare({video: true, audio: true}); }
   catch (error) { setError(castError, screenCaptureError(error, platformInfo)); }
   finally { capturePending = false; shareButton.disabled = !['connected', 'sharing'].includes(currentStatus); }
 });
@@ -460,7 +460,7 @@ platformReady = loadPlatformInfo(invoke).then(info => {
   touchFeedback.setEnabled(info.os==='windows'&&info.nativeCapture&&touchFeedbackToggle.checked);
   if (info.os === 'windows' && info.nativeCapture) {
     document.querySelector('#capture-help').textContent = '红框表示正在分享，绿框表示反控已就绪；分享窗口时请保持该窗口处于前台。';
-    nativeCapture = new NativeCaptureMediaDevices({invoke, chooseTarget:chooseCaptureTarget,
+    nativeCapture = new NativeCaptureMediaDevices({invoke, chooseTarget:chooseCaptureTarget, displayMediaDevices:navigator.mediaDevices,
       onGeometryChange: (_geometry, track) => { if (touchback.track === track) void touchback.captureGeometryChanged(); },
       onStatus: state => { if (state.error) setError(castError, new Error(state.error)); },
     });

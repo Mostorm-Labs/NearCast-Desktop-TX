@@ -35,7 +35,7 @@ open "src-tauri/target/debug/bundle/macos/NearCast Desktop TX.app"
 
 从旧 ad-hoc 包切换到稳定签名后，旧授权可能仍绑定原来的代码哈希，单纯关闭再开启系统开关不会更新该身份。本机系统日志会报告 `Failed to match existing code requirement`。仅重置当前应用对应的 `Accessibility` / `ScreenCapture` 授权，再由用户重新确认；不要清空其他应用的授权或修改 TCC 数据库。
 
-WKWebView 需要至少一个媒体用途声明才暴露 `navigator.mediaDevices`。`Info.plist` 包含 `NSMicrophoneUsageDescription` 以启用此接口；屏幕分享仍传入 `audio:false`，不申请或采集麦克风音频。
+WKWebView 需要至少一个媒体用途声明才暴露 `navigator.mediaDevices`。`Info.plist` 包含媒体用途说明以启用此接口；屏幕分享请求显示/系统音频，但不申请或采集麦克风音频。Windows 原生视频采集会额外使用 WebView 显示采集拿到音频轨道，并立即丢弃其临时视频轨道。
 
 macOS 界面顶部提供“本地网络”“录屏与系统录音”“辅助功能”三个权限开关入口。点击任一入口会打开对应的系统设置页面，由用户确认授权或关闭；回到应用后自动重新检测，也可点击“刷新状态”。录屏和辅助功能读取系统授权状态；本地网络显示实际组播访问检测结果“网络可用”，检测失败显示“待确认”，不把离线或网络异常误判为用户拒绝。修改本地网络权限后返回配对页会重新扫描。首次配置录屏或辅助功能时会触发对应系统授权提示，授权后如系统要求重启，请重新打开 `.app`。Windows 隐藏此面板。
 

@@ -43,6 +43,12 @@ function streamFixture() {
   return {track, stream: {getTracks: () => [track], getVideoTracks: () => [track]}};
 }
 
+function audioStreamFixture() {
+  const video = {kind: 'video', contentHint: '', appliedConstraints: [], async applyConstraints(value) { this.appliedConstraints.push(value); }, stopped: false, stop() { this.stopped = true; }};
+  const audio = {kind: 'audio', stopped: false, stop() { this.stopped = true; }};
+  return {video, audio, stream: {getTracks: () => [video, audio], getVideoTracks: () => [video], getAudioTracks: () => [audio]}};
+}
+
 test('applies selected capture resolution and fixed video bitrate to the sender', async () => {
   FakeSocket.instances.length = 0; FakePeerConnection.instances.length = 0;
   const fixture = streamFixture();
@@ -65,6 +71,30 @@ test('applies selected capture resolution and fixed video bitrate to the sender'
   assert.equal(fixture.track.contentHint, 'detail');
   assert.deepEqual(fixture.track.appliedConstraints.at(-1), {width: {ideal: 1920}, height: {ideal: 1080}});
   await client.stop();
+});
+
+test('requests display audio and attaches one Opus sender when the picker returns audio', async () => {
+  FakeSocket.instances.length = 0; FakePeerConnection.instances.length = 0;
+  const fixture = audioStreamFixture();
+  const captures = [];
+  const videoSender = {track: fixture.video, getParameters: () => ({encodings: [{}]}), async setParameters() {}, async replaceTrack(track) { this.track = track; }};
+  const audioSender = {track: fixture.audio, async replaceTrack(track) { this.track = track; }};
+  class AudioPeer extends FakePeerConnection {
+    addTrack(track, stream) { this.tracks.push({track, stream}); return track.kind === 'video' ? videoSender : audioSender; }
+    getTransceivers() { return [{sender: videoSender, setCodecPreferences() {}}, {sender: audioSender, setCodecPreferences() {}}]; }
+  }
+  const client = new LauncherWebCastClient({WebSocketImpl: FakeSocket, RTCPeerConnectionImpl: AudioPeer,
+    mediaDevices: {getDisplayMedia: async constraints => { captures.push(constraints); return fixture.stream; }}});
+  const connecting = client.connect('1234'); const socket = FakeSocket.instances.at(-1); socket.open(); await connecting;
+  await socket.receive({type: 'joined'}); await wait();
+  await client.startScreenShare({audio: true});
+  assert.equal(captures[0].audio, true);
+  assert.equal(client.pc.tracks.filter(({track}) => track.kind === 'audio').length, 1);
+  assert.equal(audioSender.track, fixture.audio);
+  await client.stopStream();
+  assert.equal(fixture.video.stopped, true);
+  assert.equal(fixture.audio.stopped, true);
+  assert.equal(audioSender.track, null);
 });
 
 test('leaves bitrate adaptive when dynamic mode is selected', async () => {
