@@ -14,7 +14,7 @@ export class WebCastTouchbackSender{
   constructor({provider,nativeBridge,onStatus=()=>{},onTouchFeedback=()=>{},engineOptions={}}={}){
     this.provider=provider??nativeBridge;this.onStatus=onStatus;this.onTouchFeedback=onTouchFeedback;this.engineOptions=engineOptions;
     this.engine=null;this.server=null;this.channel=null;this.generation=0;this.refreshVersion=0;
-    this.enabled=false;this.track=null;this.target=null;this.identity=null;this.source=null;this.sourceKey=null;
+    this.enabled=false;this.track=null;this.captureSeen=false;this.target=null;this.identity=null;this.source=null;this.sourceKey=null;
     this.retiring=new Set();this.lastProbe=null;this.reason='LOCAL_INPUT_DISABLED';this.detail=null;this.wireStateKey=null;
     this.stats={textReceived:0,binaryReceived:0,recentControl:[],lastOpenRequest:null,receivedTouchSamples:0,receivedMouseSamples:0,lastReceivedInput:null};
   }
@@ -118,7 +118,7 @@ export class WebCastTouchbackSender{
       const probe=await this.provider.probe();if(version!==this.refreshVersion||generation!==this.generation)return;
       this.lastProbe=probe;
       let reason=!this.enabled?'LOCAL_INPUT_DISABLED':!this.server?.ready?'APP_NOT_READY':!this.target?'TARGET_UNBOUND':
-        !this.track||this.track.readyState!=='live'?'CAPTURE_UNAVAILABLE':this.track.muted?'CAPTURE_MUTED':
+        !this.track||this.track.readyState!=='live'?(this.captureSeen?'CAPTURE_CHANGED':'CAPTURE_UNAVAILABLE'):this.track.muted?'CAPTURE_MUTED':
         this.retiring.size>0||probe.cleanupBlocked?'NATIVE_CLEANUP_PENDING':probe.nativeReady===false?'NATIVE_PERMISSION_UNAVAILABLE':null;
       if(!reason&&probe.ownerBusy&&!this.provider.owns?.(engine.owner?.ownerId)&&engine.state!=='opening')reason='NATIVE_DOMAIN_BUSY';
       let geometry;
@@ -151,13 +151,16 @@ export class WebCastTouchbackSender{
       this.track.removeEventListener?.('mute',this.trackAvailability);
       this.track.removeEventListener?.('unmute',this.trackAvailability);
     }
+    // Retain the local opt-in while the user stops and reselects a source on
+    // this control session. CAPTURE_UNAVAILABLE revokes the paired RX's intent.
+    if(this.track||track)this.captureSeen=true;
     this.track=track??null;this.captureGeneration=(this.captureGeneration??0)+1;
-    this.trackChanged=()=>{if(this.track===track){this.captureGeneration++;this.invalidateSource('CAPTURE_UNAVAILABLE');void this.setCaptureTrack(null);}};
+    this.trackChanged=()=>{if(this.track===track)void this.setCaptureTrack(null);};
     this.trackAvailability=()=>{if(this.track===track){this.invalidateSource(track.muted?'CAPTURE_MUTED':'CAPTURE_CHANGED');void this.refreshSource();}};
     track?.addEventListener?.('ended',this.trackChanged,{once:true});
     track?.addEventListener?.('mute',this.trackAvailability);
     track?.addEventListener?.('unmute',this.trackAvailability);
-    this.invalidateSource('CAPTURE_CHANGED');await this.refreshSource();
+    await this.invalidateSource(this.enabled?(this.captureSeen?'CAPTURE_CHANGED':'CAPTURE_UNAVAILABLE'):'LOCAL_INPUT_DISABLED');await this.refreshSource();
   }
   async retryCleanup(){
     const engines=new Set([...this.retiring,...(this.engine&&['closing','cleanup_blocked'].includes(this.engine.state)?[this.engine]:[])]);
@@ -166,7 +169,7 @@ export class WebCastTouchbackSender{
   }
   fence(reason='session ended'){
     this.feedback({stage:'clear'});this.generation++;this.refreshVersion++;clearInterval(this.tickTimer);clearInterval(this.probeTimer);
-    this.server?.dispose();this.server=null;this.channel=null;this.identity=null;this.target=null;this.source=null;this.sourceKey=null;this.wireStateKey=null;
+    this.server?.dispose();this.server=null;this.channel=null;this.identity=null;this.target=null;this.source=null;this.sourceKey=null;this.wireStateKey=null;this.captureSeen=false;
     const closing=this.retire(this.engine,reason);this.status();return closing.finally(()=>this.status());
   }
   diagnostics(){

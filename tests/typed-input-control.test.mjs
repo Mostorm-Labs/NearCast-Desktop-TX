@@ -3,6 +3,64 @@ import assert from 'node:assert/strict';
 import {peer,openRequest,product,turn,geometry} from './helpers/typed-peer.mjs';
 import {encodeInputFrame} from '../src/touchback/typed-codec.mjs';
 
+test('stopping and reselecting monitors preserves resumable source state and opens fresh Touch coordinates',async t=>{
+  let capture=null,releases=0;
+  const p=await peer({provider:{probe:async()=>({inputTypes:['touch'],touch:{maxContacts:10},maxDataBytes:4096,nativeReady:true,
+    geometry:{revision:capture?.revision??'no-capture',displays:[{},{}],...(capture?{capture}:{})}}),releaseOwned:async()=>{releases++;return{status:'released'};}}});
+  t.after(()=>p.sender.fence());await p.handshake();await p.bind();await p.sender.setEnabled(true);
+  assert.equal(p.source().data.disabledReason,'CAPTURE_UNAVAILABLE','initial absence is distinct from a previously shared source');
+  const select=async(id,x)=>{
+    const width=x<0?2560:1920,height=x<0?1440:1080;
+    capture={captureId:id,nativeId:`capture:${id}`,kind:'monitor',revision:`revision-${id}`,units:'physical-pixels',rotation:0,
+      region:{x,y:0,width,height},captureWidth:width,captureHeight:height,inputReady:true,disabledReason:null};
+    const track=Object.assign(new EventTarget(),{readyState:'live',muted:false,getSettings:()=>({displaySurface:'monitor',width:1920,height:1080,nearcastCaptureId:id,nearcastCaptureRevision:`revision-${id}`})});
+    await p.sender.setCaptureTrack(track);return track;
+  };
+  let track=await select('main-1',0),lastStream=0,lastBinding=null;
+  for(const [nextId,nextX] of [['left-1',-2560],['main-2',0]]){
+    const source=p.source().data;assert.equal(source.available,true);assert.notEqual(source.sourceBindingId,lastBinding);lastBinding=source.sourceBindingId;
+    const opened=await p.sender.engine.open({...openRequest(source.sourceBindingId),commandId:`open-${nextId}`},{sessionId:p.sender.server.sessionId});
+    assert.ok(opened.streamId>lastStream);lastStream=opened.streamId;
+    await p.sender.handleControlMessage({data:encodeInputFrame({streamId:opened.streamId,seqId:1,cursor:1,inputType:'touch',records:[{contactId:1,phase:0,x:65535,y:65535}]})});
+    await turn();await turn();assert.deepEqual([p.actions.at(-1).records[0].x,p.actions.at(-1).records[0].y],
+      capture.region.x<0?[-1,1439]:[1919,1079],'physical endpoints must follow the new monitor, including scaled video');
+    const first=p.sent.length,retired=track;capture=null;
+    if(nextId==='main-2'){track.readyState='ended';track.dispatchEvent(new Event('ended'));await turn();await turn();}
+    else await p.sender.setCaptureTrack(null);
+    const unavailable=p.sent.slice(first).filter(x=>typeof x==='string').map(JSON.parse).filter(m=>m.action==='nearcast-input-source'&&!m.data.available);
+    assert.ok(unavailable.length>0);
+    assert.deepEqual([...new Set(unavailable.map(m=>m.data.disabledReason))],['CAPTURE_CHANGED'],
+      'all stop/reselection messages must use the recoverable reason supported by the paired RX');
+    assert.equal(p.sender.diagnostics().localEnabled,true);assert.equal(p.sender.engine.state,'closed');assert.equal(p.channel.readyState,'open');
+    track=await select(nextId,nextX);retired.dispatchEvent(new Event('ended'));await turn();
+    assert.equal(p.sender.track,track);assert.equal(p.source().data.available,true);
+  }
+  const source=p.source().data;const final=await p.sender.engine.open({...openRequest(source.sourceBindingId),commandId:'final-main'}, {sessionId:p.sender.server.sessionId});
+  assert.ok(final.streamId>lastStream);assert.ok(releases>=2);
+  await p.sender.setCaptureTrack(null);await p.sender.setEnabled(false);await select('left-off',-1920);
+  assert.equal(p.source().data.available,false);assert.equal(p.source().data.disabledReason,'LOCAL_INPUT_DISABLED');assert.equal(p.sender.engine.state,'closed');
+});
+
+test('capture reselection waits for cleanup and its resumable history cannot cross control sessions',async t=>{
+  let release;const p=await peer({provider:{releaseOwned:()=>new Promise(resolve=>{release=resolve;})}});
+  t.after(()=>{p.provider.releaseOwned=async()=>({status:'released'});return p.sender.fence();});
+  await p.handshake();await p.bind();await p.sender.setCaptureTrack(p.track);await p.sender.setEnabled(true);
+  await p.sender.engine.open(openRequest(p.source().data.sourceBindingId),{sessionId:p.sender.server.sessionId});
+  const stopping=p.sender.setCaptureTrack(null);await turn();
+  assert.equal(p.sender.source,null);assert.equal(p.source().data.disabledReason,'CAPTURE_CHANGED');
+  assert.equal(p.sender.diagnostics().cleanupPending,true);
+  const starting=p.sender.setCaptureTrack({...p.track});await turn();
+  assert.equal(p.sender.source,null,'new geometry cannot publish before old input cleanup');
+  release({status:'released'});await Promise.all([stopping,starting]);
+  assert.equal(p.source().data.available,true);assert.equal(p.sender.engine.state,'closed','only the receiver may request a new stream');
+  await p.sender.setCaptureTrack(null);await p.sender.fence('session ended');
+  const channel={...p.channel,send:value=>p.sent.push(value)};
+  await p.sender.attachControlChannel(channel,{authorized:true,mediaIdentity:{roomId:'room-1',userId:'sender-1',hostUserId:'receiver-1'}});
+  await p.handshake();await p.bind();
+  assert.equal(p.source().data.available,false);assert.equal(p.source().data.disabledReason,'CAPTURE_UNAVAILABLE',
+    'a new control session must not inherit the prior session capture pause');
+});
+
 test('temporary native window readiness loss keeps its precise reason and can recover on the same session',async t=>{
   let capture={captureId:'native',nativeId:'capture:native',revision:'window-1',kind:'window',units:'physical-pixels',rotation:0,region:{x:100,y:100,width:800,height:600},captureWidth:800,captureHeight:600,inputReady:true,disabledReason:null};
   const p=await peer({provider:{probe:async()=>({inputTypes:['touch'],maxDataBytes:4096,touch:{maxContacts:10},nativeReady:true,geometry:{revision:capture.revision,capture}})}});t.after(()=>p.sender.fence());

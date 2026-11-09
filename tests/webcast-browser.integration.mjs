@@ -105,6 +105,12 @@ try {
         if (message.action === 'webrtc-signal') signal(message.data.type, message.data.payload, 'datachannel');
         if (message.action === 'nearcast-input-source') {
           state.sourceMessages.push(message.data);
+          // Mirrors the paired RX cd598cd SourceMayResume contract. Ordinary
+          // capture gaps must not be advertised as permanent revocations.
+          if(!message.data.available&&state.enforceResumeReasons&&state.armInput&&
+            !['','NATIVE_GEOMETRY_UNAVAILABLE','CAPTURE_GEOMETRY_CHANGED','CAPTURE_WINDOW_NOT_FOREGROUND','CAPTURE_WINDOW_MINIMIZED','CAPTURE_CHANGED','CAPTURE_MUTED'].includes(message.data.disabledReason??'')){
+            state.armInput=false;(state.canceledInputReasons??=[]).push(message.data.disabledReason);
+          }
           if(!message.data.available){state.inputActive=false;state.lastInputBinding=null;}
           if(message.data.available&&state.armInput&&state.lastInputBinding!==message.data.sourceBindingId){
             state.lastInputBinding=message.data.sourceBindingId;const id=++state.inputRpcId;
@@ -150,11 +156,13 @@ try {
         try{await new Promise(resolve=>setTimeout(resolve,20));if(args.targetId==='window-extra-0')throw new Error('preview unavailable');return Uint8Array.from(thumbnail).buffer;}finally{state.previewActive--;}
       }
       if(command==='nearcast_capture_start'){
-        state.lastCaptureTargetId=args.targetId;const captureId=`native-${++captureNumber}`,left=args.targetId==='monitor-left';
-        state.nativeGeometry={captureId,nativeId:`capture:${captureId}`,kind:left?'monitor':'window',revision:`r${captureNumber}`,units:'physical-pixels',rotation:0,region:{x:left?-1920:100,y:left?0:100,width:left?1920:320,height:left?1080:240},captureWidth:320,captureHeight:240,inputReady:true,disabledReason:null};state.nativeFrameId=0;return state.nativeGeometry;
+        state.lastCaptureTargetId=args.targetId;const captureId=`native-${++captureNumber}`,monitor=args.targetId.startsWith('monitor-'),left=args.targetId==='monitor-left';
+        state.nativeGeometry={captureId,nativeId:`capture:${captureId}`,kind:monitor?'monitor':'window',revision:`r${captureNumber}`,units:'physical-pixels',rotation:0,region:{x:monitor?(left?-1920:0):100,y:monitor?0:100,width:monitor?1920:320,height:monitor?1080:240},captureWidth:320,captureHeight:monitor?180:240,inputReady:false,disabledReason:'capture_waiting_for_frame'};state.nativeFrameId=0;return structuredClone(state.nativeGeometry);
       }
       if(command==='nearcast_capture_frame'){
-        await new Promise(resolve=>setTimeout(resolve,35));const geometry=state.nativeGeometry;
+        await new Promise(resolve=>setTimeout(resolve,35));
+        if(state.nativeGeometry?.disabledReason==='capture_waiting_for_frame')state.nativeGeometry={...state.nativeGeometry,inputReady:true,disabledReason:null};
+        const geometry=state.nativeGeometry;
         if(!geometry||geometry.captureId!==args.captureId)throw new Error('capture retired');
         const width=geometry.captureWidth,height=geometry.captureHeight;
         const meta=new TextEncoder().encode(JSON.stringify({captureId:geometry.captureId,frameId:++state.nativeFrameId,pixelFormat:'BGRA8',width,height,geometry}));
@@ -175,7 +183,7 @@ try {
   },{nativeMode,thumbnail});
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   let pickerPointerVerified=false;
-  const share = async cancel => {
+  const share = async (cancel, targetId = 'window-1') => {
     await page.locator('#share-button').click();
     if(!nativeMode)return;
     await page.locator('#capture-picker').waitFor({state:'visible'});
@@ -204,15 +212,15 @@ try {
       await page.setViewportSize({width:960,height:640});
       pickerPointerVerified=true;
     }
-    await page.getByRole('tab',{name:/窗口/}).click();
-    await page.locator('[data-target-id="window-1"]').click();
-    await page.waitForFunction(()=>document.querySelector('[data-target-id=window-1] img')?.naturalWidth===2);
+    await page.getByRole('tab',{name:targetId.startsWith('monitor-')?/屏幕/:/窗口/}).click();
+    await page.locator(`[data-target-id="${targetId}"]`).click();
+    await page.waitForFunction(id=>document.querySelector(`[data-target-id="${id}"] img`)?.naturalWidth===2,targetId);
     assert.ok(await page.evaluate(()=>testReceiver.previewPeak<=2),'native preview requests must be bounded');
-    assert.equal(await page.locator('[data-target-id="window-1"]').getAttribute('aria-checked'),'true');
+    assert.equal(await page.locator(`[data-target-id="${targetId}"]`).getAttribute('aria-checked'),'true');
     assert.equal(await page.locator('#capture-picker-confirm').isEnabled(),true,'a real mouse click must select the capture target and enable sharing');
     if(process.env.BROWSER_SCREENSHOT)await page.screenshot({path:process.env.BROWSER_SCREENSHOT.replace(/\.png$/, '-picker.png')});
     await page.locator('#capture-picker-confirm').click();
-    await page.waitForFunction(()=>testReceiver.lastCaptureTargetId==='window-1');
+    await page.waitForFunction(id=>testReceiver.lastCaptureTargetId===id,targetId);
   };
   for (const [index, value] of [...'1234'].entries()) await page.locator('.code-digit').nth(index).fill(value);
   await page.locator('#connect-button').click();
@@ -311,6 +319,27 @@ try {
     assert.ok(drag.diagnostics.queuePeak<=3);assert.equal(drag.diagnostics.lastNativeExecutionMs,1);
     assert.ok(drag.frames>beforeDrag+5,'video must continue during sustained slow input');
     await page.evaluate(()=>{testReceiver.nativeApplyDelayMs=0;});
+    await page.evaluate(()=>{testReceiver.enforceResumeReasons=true;testReceiver.canceledInputReasons=[];});
+    for(const target of ['monitor-main','monitor-left','monitor-main']){
+      const before=await page.evaluate(()=>({streamId:testReceiver.inputStreamId,frames:testReceiver.frames,sourceCount:testReceiver.sourceMessages.length}));
+      await page.locator('#stop-share-button').click();await page.locator('#share-button').waitFor({state:'visible'});
+      await page.waitForFunction(count=>testReceiver.sourceMessages.slice(count).some(source=>!source.available),before.sourceCount);
+      assert.equal(await page.locator('#input-enabled').isChecked(),true);
+      await share(false,target);
+      await page.waitForFunction(previous=>testReceiver.inputStreamId>previous&&testReceiver.inputActive&&testReceiver.borderActive||testReceiver.canceledInputReasons.length||testReceiver.error,before.streamId);
+      assert.deepEqual(await page.evaluate(()=>testReceiver.canceledInputReasons),[],'stop/reselection must preserve native RX requested intent');
+      assert.equal(await page.evaluate(()=>testReceiver.error),undefined);
+      await page.evaluate(()=>testReceiver.sendSample(1,0,65535,65535));
+      const endpoint=target==='monitor-left'?-1:1919;
+      await page.waitForFunction(x=>testReceiver.lastNativeAction?.records[0].x===x&&testReceiver.lastNativeAction?.records[0].y===1079,endpoint,{timeout:5000}).catch(async failure=>{
+        console.log(JSON.stringify(await page.evaluate(()=>({target:testReceiver.lastCaptureTargetId,action:testReceiver.lastNativeAction,nativeOwner:testReceiver.nativeOwner,geometry:testReceiver.nativeGeometry,error:testReceiver.error,diagnostics:__nearcastTouchbackDiagnostics()})),null,2));throw failure;
+      });
+      await page.evaluate(()=>testReceiver.sendSample(2,2,65535,65535));
+      await page.waitForFunction(()=>__nearcastTouchbackDiagnostics().touchContacts===0);
+      await page.waitForFunction(previous=>testReceiver.frames>previous+2,before.frames);
+      assert.equal(await page.evaluate(()=>testReceiver.channelCount),1,'screen reselection must retain the input transport');
+      assert.equal(await page.evaluate(()=>testReceiver.receivedTracks.filter(kind=>kind==='video').length),1,'screen reselection must reuse the video sender');
+    }
   }
   assert.deepEqual(errors, []);
   await page.evaluate(() => testReceiver.sendMalformedInput());
@@ -336,7 +365,7 @@ try {
   if(nativeMode){await page.evaluate(()=>testReceiver.releaseTargetSelection());await page.waitForFunction(()=>testReceiver.targetListReturned);assert.equal(await page.locator('#capture-picker').isVisible(),false,'late target enumeration must not open a picker after leaving');}
   await page.waitForFunction(() => !document.querySelector('#code-view').hidden);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({result: 'PASS', nativeCapture:nativeMode, pickerPointerAndKeyboard:pickerPointerVerified, slowNativeMotionCoalescing:nativeMode, geometryRebinding:nativeMode, foregroundPausePreservesVideo:nativeMode, mediaSurvivedMalformedInput:true, controlChannels:await page.evaluate(()=>testReceiver.channelCount), frames: await page.evaluate(() => testReceiver.frames), ...activeVideo}, null, 2));
+  console.log(JSON.stringify({result: 'PASS', nativeCapture:nativeMode, monitorReselectionPreservesRequested:nativeMode, pickerPointerAndKeyboard:pickerPointerVerified, slowNativeMotionCoalescing:nativeMode, geometryRebinding:nativeMode, foregroundPausePreservesVideo:nativeMode, mediaSurvivedMalformedInput:true, controlChannels:await page.evaluate(()=>testReceiver.channelCount), frames: await page.evaluate(() => testReceiver.frames), ...activeVideo}, null, 2));
 } finally {
   await browser?.close();
   await new Promise(resolve => server.close(resolve));
