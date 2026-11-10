@@ -59,7 +59,10 @@ fn text(value: &str) -> bool {
 }
 
 pub fn probe() -> Value {
-    let geometry = input_geometry::snapshot().ok();
+    let geometry = input_geometry::snapshot().ok().and_then(|g|serde_json::to_value(g).ok()).map(|mut g|{
+        if let Some(binding)=crate::display_binding::snapshot(){g["browserBinding"]=binding;}
+        g
+    });
     // Keep the same lock through readiness initialization. A snapshot of
     // is_none() followed by an unlocked InitializeTouchInjection would race a
     // newly prepared owner and could erase its native contact state.
@@ -82,7 +85,7 @@ pub fn probe() -> Value {
                 ready.unwrap_or(false)
             })
             .unwrap_or(false);
-        return json!({"inputTypes":["touch"],"nativeTypes":["touch","mouse"],"maxDataBytes":4096,"touch":{"maxContacts":10},"nativeReady":ready&&!blocked,"cleanupBlocked":blocked,"ownerBusy":busy,"geometry":geometry});
+        return json!({"inputTypes":["touch"],"nativeTypes":["touch"],"maxDataBytes":4096,"touch":{"maxContacts":10},"nativeReady":ready&&!blocked,"cleanupBlocked":blocked,"ownerBusy":busy,"geometry":geometry});
     }
     #[cfg(target_os = "macos")]
     {
@@ -105,7 +108,6 @@ fn cleanup(owner: &mut Owner) -> Result<(), String> {
             crate::pointer::cancel_possible(&owner.possible_touch)?;
             owner.possible_touch.clear();
         }
-        crate::windows_mouse::reset()?;
     }
     #[cfg(target_os = "macos")]
     {
@@ -113,60 +115,6 @@ fn cleanup(owner: &mut Owner) -> Result<(), String> {
     }
     owner.mouse_buttons = 0;
     owner.blocked = false;
-    Ok(())
-}
-#[cfg(windows)]
-pub fn is_owned() -> bool {
-    OWNER.lock().map(|owner| owner.is_some()).unwrap_or(true)
-}
-#[cfg(windows)]
-pub fn capture_ready(native_id: &str, revision: &str, owner_id: &str) -> bool {
-    OWNER
-        .lock()
-        .map(|owner| {
-            owner.as_ref().is_some_and(|owner| {
-                owner.id == owner_id
-                    && owner.native_id == native_id
-                    && owner.revision == revision
-                    && !owner.blocked
-            })
-        })
-        .unwrap_or(false)
-}
-#[cfg(windows)]
-pub fn release_capture(native_id: &str) -> Result<(), String> {
-    let mut guard = OWNER.lock().map_err(|_| "native_owner_lock_poisoned")?;
-    if let Some(owner) = guard.as_mut() {
-        if owner.native_id == native_id {
-            if let Err(error) = cleanup(owner) {
-                owner.blocked = true;
-                return Err(error);
-            }
-            *guard = None;
-        }
-    }
-    Ok(())
-}
-#[cfg(windows)]
-pub fn release_stale_capture(
-    native_id: &str,
-    revision: &str,
-    input_ready: bool,
-) -> Result<(), String> {
-    let mut guard = OWNER.lock().map_err(|_| "native_owner_lock_poisoned")?;
-    if let Some(owner) = guard.as_mut() {
-        if owner.native_id == native_id && (!input_ready || owner.revision != revision) {
-            // Watcher ticks do not bypass explicit retry after failed cleanup.
-            if owner.blocked {
-                return Err("native_cleanup_pending".into());
-            }
-            if let Err(error) = cleanup(owner) {
-                owner.blocked = true;
-                return Err(error);
-            }
-            *guard = None;
-        }
-    }
     Ok(())
 }
 pub fn prepare(
@@ -193,13 +141,16 @@ pub fn prepare(
     if !supported {
         return failure("rejected", "NOT_SUPPORTED native input types");
     }
-    if let Err(error) = input_geometry::current(&geometry_revision, &native_id) {
-        return failure("rejected", error);
-    }
     let mut guard = match OWNER.lock() {
         Ok(owner) => owner,
         Err(_) => return failure("blocked", "native_owner_lock_poisoned"),
     };
+    // Revalidate under the owner lock. A concurrent binding release marks the
+    // binding retired before waiting for this lock, so it cannot finish cleanup
+    // and then leave a newly prepared owner pointing at the retired source.
+    if let Err(error) = input_geometry::current(&geometry_revision, &native_id) {
+        return failure("rejected", error);
+    }
     if let Some(owner) = guard.as_ref() {
         if owner.id == owner_id
             && owner.source_binding_id == source_binding_id
@@ -280,25 +231,6 @@ pub fn apply(
         Ok(display) => display,
         Err(error) => return failure("rejected", error),
     };
-    #[cfg(windows)]
-    if owner.native_id.starts_with("capture:") {
-        let safe = match &action {
-            Action::Touch { records } => records.iter().all(|record| {
-                crate::native_capture::hit_target(&owner.native_id, record.x, record.y)
-            }),
-            Action::Mouse {
-                event_kind, x, y, ..
-            } => {
-                *event_kind == 3
-                    || *event_kind == 4
-                    || crate::native_capture::hit_target(&owner.native_id, *x as i32, *y as i32)
-            }
-        };
-        if !safe {
-            owner.blocked = true;
-            return failure("rejected", "capture_window_occluded_or_target_changed");
-        }
-    }
     match action {
         Action::Touch { records } => apply_touch(owner, &display, records),
         Action::Mouse {
@@ -524,6 +456,14 @@ pub fn release(owner_id: String, lease_id: Option<String>) -> Value {
         }
     }
 }
+pub fn release_binding(native_id:&str)->Result<(),String>{
+    let mut guard=OWNER.lock().map_err(|_|"native_owner_lock_poisoned")?;
+    if let Some(owner)=guard.as_mut().filter(|owner|owner.native_id==native_id){
+        if let Err(error)=cleanup(owner){owner.blocked=true;return Err(error);}
+        *guard=None;
+    }
+    Ok(())
+}
 pub fn shutdown() {
     if let Ok(mut guard) = OWNER.lock() {
         if let Some(owner) = guard.as_mut() {
@@ -539,7 +479,11 @@ pub fn shutdown() {
 }
 pub fn ensure_released_for_update() -> Result<(), String> {
     shutdown();
-    if OWNER.lock().map_err(|_| "native_owner_lock_poisoned")?.is_some() {
+    if OWNER
+        .lock()
+        .map_err(|_| "native_owner_lock_poisoned")?
+        .is_some()
+    {
         Err("native_input_cleanup_pending".into())
     } else {
         Ok(())

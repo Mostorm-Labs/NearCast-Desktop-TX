@@ -46,12 +46,30 @@ fn typed_native_touch_and_owned_cleanup_reach_our_window() {
     eprintln!("typed_native_probe={probe}");
     assert_eq!(probe["nativeReady"], true);
     let geometry = input_geometry::snapshot().unwrap();
-    assert_eq!(
-        geometry.displays.len(),
-        1,
-        "fixture requires one primary display"
-    );
-    let display = &geometry.displays[0];
+    let display = geometry
+        .displays
+        .iter()
+        .find(|d| !d.primary)
+        .unwrap_or(&geometry.displays[0]);
+    let source_id = "1cc04c93-e9ce-4f91-a14c-c8d6421c4f59".to_string();
+    let challenge = crate::display_binding::begin(source_id.clone()).unwrap();
+    // This test supplies the owned native marker identity directly. Browser
+    // pixel recognition is independently covered by the Edge integration.
+    let marker = challenge["displays"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["nativeId"].as_str() == Some(display.native_id.as_str()))
+        .unwrap();
+    let binding = crate::display_binding::confirm(
+        source_id.clone(),
+        challenge["challengeId"].as_str().unwrap().into(),
+        marker["token"].as_str().unwrap().into(),
+        vec![0, 1, 2, 3],
+        display.capture_width,
+        display.capture_height,
+    )
+    .unwrap();
     let previous = unsafe { GetForegroundWindow() };
     let mut cursor = POINT::default();
     unsafe {
@@ -63,8 +81,8 @@ fn typed_native_touch_and_owned_cleanup_reach_our_window() {
             w!("BUTTON"),
             w!("NearCast typed Touch self-test"),
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-            80,
-            80,
+            display.region.x as i32 + 80,
+            display.region.y as i32 + 80,
             500,
             320,
             None,
@@ -78,10 +96,12 @@ fn typed_native_touch_and_owned_cleanup_reach_our_window() {
         hwnd: HWND,
         previous: HWND,
         cursor: POINT,
+        source_id: String,
     }
     impl Drop for Guard {
         fn drop(&mut self) {
             let _ = input_native::release("owned-touch-test".into(), None);
+            let _ = crate::display_binding::release(self.source_id.clone());
             unsafe {
                 let _ = DestroyWindow(self.hwnd);
                 let _ = SetCursorPos(self.cursor.x, self.cursor.y);
@@ -95,6 +115,7 @@ fn typed_native_touch_and_owned_cleanup_reach_our_window() {
         hwnd,
         previous,
         cursor,
+        source_id,
     };
     PREVIOUS.store(
         unsafe { SetWindowLongPtrW(hwnd, GWLP_WNDPROC, procedure as *const () as isize) },
@@ -106,13 +127,16 @@ fn typed_native_touch_and_owned_cleanup_reach_our_window() {
     }
     pump(hwnd);
     assert_eq!(unsafe { GetForegroundWindow() }, hwnd);
-    let point = POINT { x: 300, y: 230 };
+    let point = POINT {
+        x: display.region.x as i32 + 300,
+        y: display.region.y as i32 + 230,
+    };
     assert_eq!(unsafe { WindowFromPoint(point) }, hwnd);
     let prepared = input_native::prepare(
         "owned-touch-test".into(),
         "capture-test".into(),
-        geometry.revision.clone(),
-        display.native_id.clone(),
+        binding["revision"].as_str().unwrap().into(),
+        binding["nativeId"].as_str().unwrap().into(),
         vec!["touch".into()],
         10,
     );
@@ -125,7 +149,7 @@ fn typed_native_touch_and_owned_cleanup_reach_our_window() {
         let result = input_native::apply(
             "owned-touch-test".into(),
             lease.clone(),
-            geometry.revision.clone(),
+            binding["revision"].as_str().unwrap().into(),
             action,
         );
         assert_eq!(result["status"], "submitted", "{result}");

@@ -125,9 +125,7 @@ export class WebCastTouchbackSender{
       if(!reason){
         const settings=this.track.getSettings();
         try{geometry=proveCaptureGeometry(settings,probe.geometry);}catch(failure){
-          const capture=probe.geometry?.capture;
-          const transient={capture_window_not_foreground:'CAPTURE_WINDOW_NOT_FOREGROUND',capture_window_minimized_or_hidden:'CAPTURE_WINDOW_MINIMIZED',capture_waiting_for_frame:'CAPTURE_GEOMETRY_CHANGED',capture_window_geometry_changed:'CAPTURE_GEOMETRY_CHANGED',capture_window_pixels_do_not_match_native_bounds:'CAPTURE_GEOMETRY_CHANGED'};
-          reason=capture&&settings.nearcastCaptureId===capture.captureId?(transient[capture.disabledReason]??(settings.nearcastCaptureRevision!==capture.revision?'CAPTURE_GEOMETRY_CHANGED':'NATIVE_GEOMETRY_UNAVAILABLE')):'NATIVE_GEOMETRY_UNAVAILABLE';
+          reason='NATIVE_GEOMETRY_UNAVAILABLE';
           this.detail=String(failure.message??failure);
         }
       }

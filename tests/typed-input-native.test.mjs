@@ -23,6 +23,18 @@ test('browser source facts preserve single-monitor proof after video scaling but
   assert.throws(()=>proveCaptureGeometry({...settings,width:1000,height:1000},snapshot),/aspect/i);
   assert.throws(()=>proveCaptureGeometry({...settings,nearcastBrowserSource:{...settings.nearcastBrowserSource,width:1280,height:720}},snapshot),/original/i);
 });
+test('calibrated monitor identity permits secondary negative coordinates and rejects a stale layout or source',()=>{
+  const binding={sourceId:'source',bindingId:'binding',nativeId:'screen-binding:binding',layoutRevision:'layout',revision:'layout:binding',units:'physical-pixels',rotation:0,
+    region:{x:-1920,y:0,width:1920,height:1080},captureWidth:1920,captureHeight:1080,kind:'monitor'};
+  const native={revision:'layout',displays:[display,{...display,nativeId:'DISPLAY2'}],browserBinding:binding};
+  const settings={displaySurface:'monitor',width:1280,height:720,nearcastBrowserSource:{displaySurface:'monitor',width:1920,height:1080},
+    nearcastDisplayBinding:{sourceId:'source',bindingId:'binding'}};
+  const proven=proveCaptureGeometry(settings,native);
+  assert.equal(proven.region.x,-1920);assert.equal(proven.nativeId,'screen-binding:binding');
+  assert.throws(()=>proveCaptureGeometry(settings,{...native,revision:'new-layout'}),/LAYOUT_CHANGED/);
+  assert.throws(()=>proveCaptureGeometry({...settings,nearcastDisplayBinding:{sourceId:'old',bindingId:'binding'}},native),/RETIRED/);
+  assert.throws(()=>proveCaptureGeometry(settings,{...native,browserBinding:null}),/RETIRED/);
+});
 
 test('typed native adapter holds a lease, maps high wire IDs, and releases only its owner',async()=>{
   const calls=[];
@@ -51,24 +63,4 @@ test('unconfirmed native cleanup keeps lease and contact IDs until explicit rele
   assert.equal((await adapter.releaseOwned(owner,'close')).status,'blocked');
   assert.equal(adapter.snapshot().owners,1);
   released=true;await adapter.releaseOwned(owner,'retry');assert.equal(adapter.snapshot().owners,0);
-});
-
-test('native capture leases bind a scaled video to either monitor or window despite multiple displays',()=>{
-  for(const kind of ['monitor','window']){
-    const capture={captureId:'native-lease',nativeId:'capture:native-lease',kind,revision:'capture-r1',units:'physical-pixels',rotation:0,region:{x:-1920,y:100,width:800,height:600},captureWidth:800,captureHeight:600,inputReady:true};
-    const native={revision:'capture-r1',displays:[display,{...display,nativeId:'DISPLAY2'}],capture};
-    const settings={displaySurface:kind,width:400,height:300,nearcastCaptureId:'native-lease',nearcastCaptureRevision:'capture-r1'};
-    const proven=proveCaptureGeometry(settings,native);assert.equal(proven.nativeId,'capture:native-lease');assert.equal(proven.region.x,-1920);
-    assert.throws(()=>proveCaptureGeometry({...settings,nearcastCaptureId:'other'},native),/capture/i);
-    assert.throws(()=>proveCaptureGeometry({...settings,nearcastCaptureRevision:'stale'},native),/capture|revision/i);
-    assert.throws(()=>proveCaptureGeometry(settings,{...native,capture:{...capture,inputReady:false,disabledReason:'window not foreground'}}),/foreground|ready/i);
-  }
-});
-
-
-test('even H.264 output sizing preserves input proof for a non-16:9 window',()=>{
-  const capture={captureId:'odd-window',nativeId:'capture:odd-window',kind:'window',revision:'odd-r1',units:'physical-pixels',rotation:0,region:{x:100,y:100,width:2000,height:631},captureWidth:2000,captureHeight:631,inputReady:true};
-  const settings={displaySurface:'window',width:1280,height:402,nearcastCaptureId:capture.captureId,nearcastCaptureRevision:capture.revision};
-  assert.equal(proveCaptureGeometry(settings,{revision:capture.revision,displays:[display],capture}).proven,true);
-  assert.throws(()=>proveCaptureGeometry({...settings,height:720},{revision:capture.revision,displays:[display],capture}),/aspect/i);
 });

@@ -27,7 +27,7 @@ export function platformSummary(info) {
 export function touchbackSummary(info) {
   const value = normalizePlatformInfo(info);
   if (value.inputControl === 'macos-mouse') return '反控：macOS Native Mouse；不转换 Touch；请分享原始分辨率的单一主屏幕，并允许“辅助功能”';
-  if (value.inputControl === 'windows-pointer') return '反控：Windows Native Touch；当前仅支持单显示器的整个屏幕，窗口和多显示器投屏可用、反控暂不可用';
+  if (value.inputControl === 'windows-pointer') return '反控：Windows Native Touch；分享整个屏幕后自动识别主屏/副屏，窗口仅支持投屏';
   return 'Touchback：当前平台不支持反向控制';
 }
 

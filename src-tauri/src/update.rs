@@ -528,7 +528,7 @@ pub async fn install(app: AppHandle, state: &State) -> Result<Value, String> {
     update.verify(&bytes).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(|| {
         crate::input_native::ensure_released_for_update()?;
-        crate::native_capture::shutdown();
+        crate::display_binding::shutdown();
         #[cfg(windows)] crate::native_audio::shutdown();
         Ok::<_, String>(())
     })

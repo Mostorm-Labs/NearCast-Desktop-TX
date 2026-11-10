@@ -12,6 +12,10 @@ test('Tauri frontend is self-contained under dist', () => {
   }
 });
 
+test('packaged diagnostics matches its source',()=>{
+  assert.equal(fs.readFileSync('dist/diagnostics.mjs','utf8'),fs.readFileSync('src/diagnostics.mjs','utf8'));
+});
+
 test('every packaged runtime module exactly matches its source',()=>{
   for(const directory of ['touchback','webcast','capture','update'])for(const file of fs.readdirSync(path.join(root,'src',directory)).filter(file=>file.endsWith('.mjs'))){
     assert.equal(fs.readFileSync(path.join(root,'dist',directory,file),'utf8'),fs.readFileSync(path.join(root,'src',directory,file),'utf8'),`${directory}/${file}`);

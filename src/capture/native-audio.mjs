@@ -19,7 +19,7 @@ export function decodeAudioPacket(input,captureId){
 // No microphone and no connection to context.destination (local speakers).
 // WASAPI supplies fixed 48 kHz stereo; Chromium encodes the destination as Opus.
 export async function createNativeAudioTrack({captureId,invoke,AudioContextImpl=globalThis.AudioContext,
-  AudioWorkletNodeImpl=globalThis.AudioWorkletNode,workletUrl=new URL('./pcm-worklet.mjs',import.meta.url).href,startCommand='nearcast_audio_start'}={}){
+  AudioWorkletNodeImpl=globalThis.AudioWorkletNode,workletUrl=new URL('./pcm-worklet.mjs',import.meta.url).href,startCommand='nearcast_system_audio_start'}={}){
   check(typeof AudioContextImpl==='function'&&typeof AudioWorkletNodeImpl==='function','Web Audio unavailable');
   let context,node,track,nativeStarted=false,stopped=false,stopPromise;
   const stats={source:'wasapi-loopback',scope:'default-render-device',sampleRate:RATE,channels:CHANNELS,state:'starting',

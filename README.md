@@ -53,15 +53,15 @@ macOS 界面顶部提供“本地网络”“录屏与系统录音”“辅助�
 
 反控采用 `AXTP-TYPED-INPUT-V1` / `input-sample-v1`，固定开发合同为 `0.18.0-dev.feac6fa2a4b9`（尚未发布）。控制通道完成标准 CONTROL 与 Hello/Identify/Identified 握手后，接收端通过 `input.openStream` 请求输入类型集合，发送端按实际软件能力取交集。每包使用完整 Standard Frame、STREAM header、类型字节及 CRC16；不再接受旧 BIND、TouchBatch、wire epoch 或私有文本 RPC。普通输入无应用 ACK，查询和状态变更使用现有 `stream.getState` / `stream.stateChanged`。
 
-发送端投屏页提供“允许接收端反控本机”，默认关闭；接收端也需启用。默认 Native 策略保持输入类型，不把 Touch 猜成鼠标手势。当前 Windows typed 通路支持原生 Touch（最多 10 点）；既有 Windows Mouse 后端保留，但尚未接入新版 typed Mouse。macOS 目前支持基本原生 Mouse，不支持原生 Touch，不暗转 Mouse；原有手势与滚动代码留作后续明确输出策略的实现材料。
+发送端投屏页提供“允许接收端反控本机”，默认关闭；接收端也需启用。默认 Native 策略保持输入类型，不把 Touch 猜成鼠标手势。当前 Windows typed 通路支持原生 Touch（最多 10 点）；Windows Mouse 原生注入后端已移除；typed input 的 Touch 和各种 Mouse 事件解码能力保留，未支持的类型不协商、不注入。macOS 目前支持基本原生 Mouse，不支持原生 Touch，不暗转 Mouse；原有手势与滚动代码留作后续明确输出策略的实现材料。
 
-当前反控仅在单显示器、完整屏幕分享、原始来源尺寸可确认且无旋转时启用。分享窗口或存在多显示器时，视频和音频继续发送，反控明确显示不可用，不按相同分辨率猜测屏幕。浏览器选择完成后先保存原始来源尺寸，再由 WebRTC 层应用分辨率设置，输入仍映射到原始物理屏幕。macOS 仍须满足其原有屏幕坐标和辅助功能权限要求。停止、重新选择或显示布局变化时撤销旧输入绑定、释放触点，重新就绪后由接收端开流。原生 WGC 采集模块保留为独立实验实现，默认路径不调用它。架构边界见 [浏览器采集架构](docs/architecture/browser-capture.md)。
+Windows 分享整个屏幕后，会短暂显示四角随机校验标记，用所选浏览器轨道识别对应的物理屏幕，成功后标记自动消失。主屏、副屏和负坐标均使用 Rust 持有的来源绑定；同分辨率屏幕也不靠尺寸猜测。识别失败时音视频继续，可停止后重新分享；窗口仍仅投屏。视频保持原浏览器轨道，校准只读少量角落像素，不恢复 WGC 视频采集。输出分辨率可等比缩小，输入映射到原始物理坐标。macOS 保留单主屏及辅助功能权限要求。停止、重新选择或显示布局变化时撤销旧输入绑定、释放触点，重新就绪后由接收端开流；拔插屏幕或调整布局后需重新分享。目前不支持旋转屏幕。原生 WGC、缩略图、持续窗口边框及其 IPC 命令已经删除。架构边界见 [浏览器采集架构](docs/architecture/browser-capture.md)。
 
 展开“反控收包诊断”或调用 `globalThis.__nearcastTouchbackDiagnostics()`，可查看 `appReady`、`sourceReady`、`nativeReady`、软件输入类型、streamId、本地 generation、队列、清理状态和错误。`receiverEnabled` 为 null，接收端的 effectiveEnabled/lifecycleState 需在接收端查询；RPC 成功本身不证明原生输入生效。诊断不包含配对码或 native lease。详细模块边界与精确合同 SHA 见 [TI-3 handoff](docs/superpowers/handoffs/2026-11-06-tx-typed-input-ti3.md)。
 
 WebSocket 地址默认为 `wss://cast.nearhub.us`，也可以通过 Tauri 页面 URL 的 `?ws=` 参数覆盖，例如 `?ws=wss%3A%2F%2Flocalhost%3A8888`。
 
-当前默认浏览器采集不使用原生红绿边框或桌面触点提示层；分享状态由系统采集指示和发送端界面呈现。旧 WGC 选择器、窗口反控与边框相关文档保留为历史实验记录，不代表本次默认行为。
+当前默认浏览器采集不使用原生红绿边框或桌面触点提示层；分享状态由系统采集指示和发送端界面呈现。旧 WGC 选择器、窗口反控与边框相关源码已删除；旧文档仅作历史记录。
 
 ## 局域网发现与显示配对码
 
@@ -86,6 +86,10 @@ TXT HTTPS endpoint 只用于显示码，选择设备不会覆盖 Launcher 配对
 如果尚未点击分享就提示 `kicked_by_host`，该提示来自接收端结束会话，不能据此认定是 Windows 屏幕权限问题。初始控制连接失败、接收端原生 WebRTC 初始化失败等也会被旧接收端映射为这个原因；应结合接收端日志确认。
 
 ## 打包与跨平台验证
+
+Windows 仅构建 x64。日志写入 Tauri 应用日志目录，最多三个 1 MiB JSONL 文件轮转；每 30 秒采集一次数值性能指标及会话状态，不记录配对码、SDP/ICE 或音视频内容。底部“导出诊断”生成本机 JSON 报告，最多保留五份。系统声音仍为独立 WASAPI 采集，不采集麦克风；更新签名验证与 mDNS 发现保持。
+
+Release 使用速度优化等级 3、ThinLTO、单编译单元及符号裁剪。Windows updater 仅处理当前 NSIS/MSI 原始包，移除旧 ZIP 更新包兼容；macOS updater 仍保留 `.app.tar.gz` 支持。WGC、窗口缩略图、原生边框和 Windows Mouse 注入源码已删除；协议解码仍保留全部已定义输入记录。
 
 `src-tauri/tauri.conf.json` 已开启 `nsis`、`msi`、macOS `.app` 和 `.dmg` bundle；macOS 最低版本固定为 13.0。`.github/workflows/build.yml` 使用 Windows runner、macOS 15 Intel runner（部署目标 13.0）和 macOS 15 Apple Silicon runner 构建。当前开发机是 Windows，不能在本机编译或验收 macOS bundle，macOS 产物需要使用 GitHub Actions 或真实 macOS 主机。
 

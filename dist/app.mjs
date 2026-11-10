@@ -8,8 +8,8 @@ import {canAttachTouchbackChannel} from './webcast/touchback-channel-policy.mjs'
 import {normalizeVideoQuality} from './webcast/video-quality.mjs';
 import {MacOsPermissions} from './macos-permissions.mjs';
 import {BrowserCaptureMediaDevices} from './capture/browser-capture.mjs';
-import {TouchFeedback} from './touchback/touch-feedback.mjs';
 import {mountUpdates} from './update/update-ui.mjs';
+import {createDiagnostics} from './diagnostics.mjs';
 
 const tauri = globalThis.__TAURI__ ?? {};
 const invoke = tauri.core?.invoke ?? (async () => false);
@@ -57,9 +57,6 @@ const refreshPermissionsButton = document.querySelector('#refresh-permissions');
 const permissionsError = document.querySelector('#permissions-error');
 const permissions = new MacOsPermissions({invoke});
 const inputEnabled = document.querySelector('#input-enabled');
-const touchFeedbackToggle=document.querySelector('#touch-feedback-enabled');
-const touchFeedback=new TouchFeedback({invoke,enabled:false});
-touchFeedbackToggle.addEventListener('change',()=>touchFeedback.setEnabled(touchFeedbackToggle.checked));
 const inputState = document.querySelector('#input-state');
 const inputReconnect = document.querySelector('#input-reconnect');
 const inputCleanup = document.querySelector('#input-cleanup');
@@ -80,8 +77,9 @@ let controlGeneration = 0;
 let capturePending = false;
 let captureProvider = null;
 let client;
+let diagnosticLogger;
 let videoQuality = normalizeVideoQuality({resolution: videoResolution.value, bitrateMode: videoBitrateMode.value, bitrateKbps: videoBitrate.value});
-globalThis.__nearcastTouchbackDiagnostics = () => touchback ? {...touchback.diagnostics(), control: touchback.controlDiagnostics(),capture:captureProvider?.diagnostics()??null,touchFeedback:touchFeedback.diagnostics()} : null;
+globalThis.__nearcastTouchbackDiagnostics = () => touchback ? {...touchback.diagnostics(), control: touchback.controlDiagnostics(),capture:captureProvider?.diagnostics()??null} : null;
 const controlDiagnostics = document.querySelector('#touchback-diagnostics');
 const renderControlDiagnostics = () => {
   if (controlDiagnostics) controlDiagnostics.textContent = JSON.stringify({...globalThis.__nearcastTouchbackDiagnostics(),media:client?.mediaDiagnostics??null}, null, 2);
@@ -132,6 +130,7 @@ const renderTrust = state => {
 };
 const codeValue = () => digits.map(input => input.value.trim()).join('').toUpperCase();
 const setView = status => {
+  diagnosticLogger?.status(status);
   currentStatus = status;
   const connected = ['joined', 'connected', 'sharing'].includes(status);
   codeView.hidden = connected;
@@ -160,10 +159,9 @@ digits.forEach((input, index) => {
 
 const buildTouchback = () => new WebCastTouchbackSender({
   provider: createPlatformInputAdapter({}, {invoke}),
-  onTouchFeedback:event=>touchFeedback.observe(event),
   onStatus: (_status, state) => {
     const reasons = {LOCAL_INPUT_DISABLED:'反控未启用', APP_NOT_READY:'等待接收端建立反控会话', TARGET_UNBOUND:'等待接收端绑定投屏来源', CAPTURE_UNAVAILABLE:'请先分享整个屏幕', CAPTURE_CHANGED:'分享已停止，重新分享后等待接收端恢复反控', CAPTURE_GEOMETRY_CHANGED:'正在更新分享范围，反控暂时暂停', CAPTURE_MUTED:'采集已暂停', NATIVE_CLEANUP_PENDING:'等待释放上一次输入', NATIVE_PERMISSION_UNAVAILABLE:'本机输入不可用，请检查系统权限', NATIVE_DOMAIN_BUSY:'本机输入正由其他会话使用', NATIVE_GEOMETRY_UNAVAILABLE:'无法确认当前分享范围的坐标映射，请查看反控诊断', TARGET_CONTRACT_MISMATCH:'接收端反控协议版本不匹配', INPUT_SESSION_FAULT:'反控连接异常，可重建连接'};
-    inputState.textContent = !state.localEnabled ? '反控未启用' : state.state === 'active' && state.sourceReady ? `反控已开启 · ${state.acceptedInputTypes.join(' / ')} · stream ${state.streamId}` : state.sourceReady ? '本机已就绪，等待接收端开启反控' : state.detail?.includes('BROWSER_WINDOW_INPUT_UNSUPPORTED') ? '窗口投屏可用；反控请改为分享整个屏幕' : state.detail?.includes('BROWSER_MULTIPLE_DISPLAYS_UNPROVEN') ? '多显示器投屏可用；当前无法确认屏幕坐标，反控暂不可用' : state.detail?.includes('BROWSER_SOURCE_SIZE_UNPROVEN') ? '无法确认原始屏幕尺寸，反控暂不可用' : state.detail?.includes('capture_window_not_foreground') ? '窗口反控已暂停，请切回正在分享的窗口' : state.detail?.includes('minimized') ? '窗口已最小化，反控已暂停' : state.disabledReason === 'NATIVE_PROBE_FAILED' ? '无法读取本机输入能力，请重试或检查系统权限' : captureProvider && state.disabledReason === 'NATIVE_GEOMETRY_UNAVAILABLE' ? '正在确认分享范围，反控暂不可用' : state.disabledReason === 'INPUT_SESSION_FAULT' && state.detail?.includes('Input queue age') ? '输入处理积压，已释放触点；可重建反控连接' : reasons[state.disabledReason] || '正在准备反控';
+    inputState.textContent = !state.localEnabled ? '反控未启用' : state.state === 'active' && state.sourceReady ? `反控已开启 · ${state.acceptedInputTypes.join(' / ')} · stream ${state.streamId}` : state.sourceReady ? '本机已就绪，等待接收端开启反控' : state.detail?.includes('BROWSER_WINDOW_INPUT_UNSUPPORTED') ? '窗口投屏可用；反控请改为分享整个屏幕' : state.detail?.includes('BROWSER_MULTIPLE_DISPLAYS_UNPROVEN') ? '未完成屏幕识别，反控暂不可用；请停止后重新分享整个屏幕' : state.detail?.includes('BROWSER_DISPLAY_LAYOUT_CHANGED') ? '显示布局已变化，请停止后重新分享以校验屏幕' : state.detail?.includes('BROWSER_DISPLAY_BINDING_RETIRED') ? '屏幕绑定已失效，请停止后重新分享' : state.detail?.includes('BROWSER_SOURCE_SIZE_UNPROVEN') ? '无法确认原始屏幕尺寸，反控暂不可用' : state.detail?.includes('capture_window_not_foreground') ? '窗口反控已暂停，请切回正在分享的窗口' : state.detail?.includes('minimized') ? '窗口已最小化，反控已暂停' : state.disabledReason === 'NATIVE_PROBE_FAILED' ? '无法读取本机输入能力，请重试或检查系统权限' : captureProvider && state.disabledReason === 'NATIVE_GEOMETRY_UNAVAILABLE' ? '正在确认分享范围，反控暂不可用' : state.disabledReason === 'INPUT_SESSION_FAULT' && state.detail?.includes('Input queue age') ? '输入处理积压，已释放触点；可重建反控连接' : reasons[state.disabledReason] || '正在准备反控';
     inputCleanup.hidden = !state.cleanupPending;
     inputReconnect.disabled = state.cleanupPending || !['connected','sharing'].includes(currentStatus);
     touchbackStatus.textContent = touchbackSummary(platformInfo ?? {});
@@ -379,12 +377,10 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
 setView('idle');
 platformReady = loadPlatformInfo(invoke).then(info => {
   platformInfo = info;
-  document.querySelector('#touch-feedback-settings').hidden=true;
-  touchFeedback.setEnabled(false);
   document.querySelector('#system-audio-settings').hidden=false;
-  document.querySelector('#capture-help').textContent = '系统选择器可分享屏幕或窗口；当前仅单显示器的整个屏幕支持反控。多屏和窗口仍可投屏。';
+  document.querySelector('#capture-help').textContent = '系统选屏后会短暂显示四角校验标记；识别成功的整屏支持多屏反控。窗口仅投屏。';
   captureProvider = new BrowserCaptureMediaDevices({platform:info.os,invoke,mediaDevices:navigator.mediaDevices,
-    onStatus: state => { if (state.error) setError(castError, new Error(state.error)); },
+    onStatus: state => { if(state.binding==='calibrating')document.querySelector('#capture-help').textContent='正在识别分享的屏幕，请稍候；四角校验标记将自动消失。';else document.querySelector('#capture-help').textContent=state.displayBinding?.state==='bound'?'已确认分享的屏幕，可开启反控。':'系统选屏后自动识别屏幕；窗口仅投屏，识别失败可停止后重试。';if (state.error) setError(castError, new Error(state.error)); },
   });
   client.mediaDevices = captureProvider;
   permissionsPanel.hidden = info.os !== 'macos';
@@ -395,6 +391,20 @@ platformReady = loadPlatformInfo(invoke).then(info => {
   return info;
 }).catch(() => ({os: 'unknown', touchback: false, inputControl: 'none'}));
 startDiscovery();
+if(tauri.core?.invoke){
+  diagnosticLogger=createDiagnostics({invoke,snapshot:()=>({status:currentStatus,input:touchback?.diagnostics(),capture:captureProvider?.diagnostics(),media:client?.mediaDiagnostics})});
+  diagnosticLogger.status(currentStatus);
+  window.addEventListener('error',()=>diagnosticLogger.error());
+  window.addEventListener('unhandledrejection',()=>diagnosticLogger.error());
+  window.addEventListener('beforeunload',()=>diagnosticLogger.stop());
+  const exportButton=document.querySelector('#export-diagnostics'),exportStatus=document.querySelector('#diagnostics-export-status');
+  exportButton.addEventListener('click',async()=>{
+    exportButton.disabled=true;
+    try{exportStatus.textContent='诊断已保存：'+await diagnosticLogger.export();}
+    catch{exportStatus.textContent='无法导出诊断，请检查本机日志目录权限。';}
+    finally{exportButton.disabled=false;}
+  });
+}
 if (tauri.core?.invoke) {
   const updates = mountUpdates({document, invoke, listen, isSharing: () => Boolean(client.stream),
     beforeInstall: async () => {

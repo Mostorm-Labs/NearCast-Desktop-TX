@@ -3,17 +3,17 @@ import assert from 'node:assert/strict';
 import {peer,openRequest,product,turn,geometry} from './helpers/typed-peer.mjs';
 import {encodeInputFrame} from '../src/touchback/typed-codec.mjs';
 
-test('stopping and reselecting monitors preserves resumable source state and opens fresh Touch coordinates',async t=>{
+test('stopping and reselecting the sole browser monitor preserves requested input with fresh coordinates',async t=>{
   let capture=null,releases=0;
   const p=await peer({provider:{probe:async()=>({inputTypes:['touch'],touch:{maxContacts:10},maxDataBytes:4096,nativeReady:true,
-    geometry:{revision:capture?.revision??'no-capture',displays:[{},{}],...(capture?{capture}:{})}}),releaseOwned:async()=>{releases++;return{status:'released'};}}});
+    geometry:{revision:capture?.revision??'no-capture',displays:capture?[capture]:[]}}),releaseOwned:async()=>{releases++;return{status:'released'};}}});
   t.after(()=>p.sender.fence());await p.handshake();await p.bind();await p.sender.setEnabled(true);
   assert.equal(p.source().data.disabledReason,'CAPTURE_UNAVAILABLE','initial absence is distinct from a previously shared source');
   const select=async(id,x)=>{
     const width=x<0?2560:1920,height=x<0?1440:1080;
-    capture={captureId:id,nativeId:`capture:${id}`,kind:'monitor',revision:`revision-${id}`,units:'physical-pixels',rotation:0,
+    capture={nativeId:id,primary:true,revision:`revision-${id}`,units:'physical-pixels',rotation:0,
       region:{x,y:0,width,height},captureWidth:width,captureHeight:height,inputReady:true,disabledReason:null};
-    const track=Object.assign(new EventTarget(),{readyState:'live',muted:false,getSettings:()=>({displaySurface:'monitor',width:1920,height:1080,nearcastCaptureId:id,nearcastCaptureRevision:`revision-${id}`})});
+    const track=Object.assign(new EventTarget(),{readyState:'live',muted:false,getSettings:()=>({displaySurface:'monitor',width:1920,height:1080,nearcastBrowserSource:{displaySurface:'monitor',width,height}})});
     await p.sender.setCaptureTrack(track);return track;
   };
   let track=await select('main-1',0),lastStream=0,lastBinding=null;
@@ -61,16 +61,16 @@ test('capture reselection waits for cleanup and its resumable history cannot cro
     'a new control session must not inherit the prior session capture pause');
 });
 
-test('temporary native window readiness loss keeps its precise reason and can recover on the same session',async t=>{
-  let capture={captureId:'native',nativeId:'capture:native',revision:'window-1',kind:'window',units:'physical-pixels',rotation:0,region:{x:100,y:100,width:800,height:600},captureWidth:800,captureHeight:600,inputReady:true,disabledReason:null};
-  const p=await peer({provider:{probe:async()=>({inputTypes:['touch'],maxDataBytes:4096,touch:{maxContacts:10},nativeReady:true,geometry:{revision:capture.revision,capture}})}});t.after(()=>p.sender.fence());
-  p.track.getSettings=()=>({displaySurface:'window',width:800,height:600,nearcastCaptureId:capture.captureId,nearcastCaptureRevision:capture.revision});
-  await p.handshake();await p.bind();await p.sender.setCaptureTrack(p.track);await p.sender.setEnabled(true);
-  for(const [nativeReason,reason] of [['capture_window_not_foreground','CAPTURE_WINDOW_NOT_FOREGROUND'],['capture_window_minimized_or_hidden','CAPTURE_WINDOW_MINIMIZED'],['capture_waiting_for_frame','CAPTURE_GEOMETRY_CHANGED'],['capture_window_pixels_do_not_match_native_bounds','CAPTURE_GEOMETRY_CHANGED']]){
-    capture={...capture,inputReady:false,disabledReason:nativeReason};await p.sender.captureGeometryChanged();
-    assert.equal(p.source().data.disabledReason,reason);assert.equal(p.sender.server.ready,true);assert.equal(p.sender.channel.readyState,'open');
-    capture={...capture,revision:capture.revision+'r',inputReady:true,disabledReason:null};await p.sender.captureGeometryChanged();assert.equal(p.source().data.available,true);
-  }
+test('browser window and multi-display sources never publish an input binding',async t=>{
+  let multiple=false;
+  const p=await peer({provider:{probe:async()=>({inputTypes:['touch'],maxDataBytes:4096,touch:{maxContacts:10},nativeReady:true,
+    geometry:{...geometry,displays:multiple?[...geometry.displays,...geometry.displays]:geometry.displays}})}});
+  t.after(()=>p.sender.fence());await p.handshake();await p.bind();await p.sender.setEnabled(true);
+  await p.sender.setCaptureTrack({...p.track,getSettings:()=>({displaySurface:'window',width:1920,height:1080})});
+  assert.equal(p.source().data.available,false);assert.match(p.sender.diagnostics().detail,/BROWSER_WINDOW/);
+  multiple=true;await p.sender.setCaptureTrack(p.track);
+  assert.equal(p.source().data.available,false);assert.match(p.sender.diagnostics().detail,/BROWSER_MULTIPLE/);
+  multiple=false;await p.sender.captureGeometryChanged();assert.equal(p.source().data.available,true);
 });
 
 test('source association requires local authorization, APP_READY, authenticated target and proven capture',async t=>{

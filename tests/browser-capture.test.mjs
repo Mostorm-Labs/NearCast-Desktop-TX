@@ -75,3 +75,29 @@ test('an old video track stop cannot retire a replacement session',async()=>{
   assert.equal(media.current.stream,second);
   await media.stop();
 });
+test('Windows monitor calibration binds the original track and releases the same source on stop',async()=>{
+  let sourceId;const released=[];
+  const media=new BrowserCaptureMediaDevices({platform:'windows',mediaDevices:{getDisplayMedia:async()=>stream()},
+    invoke:async(command,args)=>{if(command==='nearcast_display_binding_release')released.push(args.sourceId);},
+    calibrateDisplay:async args=>{sourceId=args.sourceId;return{bindingId:'test-binding',region:{x:-1920,y:0,width:1920,height:1080}};}});
+  const result=await media.getDisplayMedia();
+  assert.deepEqual(result.getVideoTracks()[0].getSettings().nearcastDisplayBinding,{sourceId,bindingId:'test-binding'});
+  assert.equal(media.diagnostics().displayBinding.region.x,-1920);
+  await media.stop();assert.deepEqual(released,[sourceId]);
+});
+test('calibration timeout preserves video and does not synthesize an identity',async()=>{
+  const media=new BrowserCaptureMediaDevices({platform:'windows',mediaDevices:{getDisplayMedia:async()=>stream()},
+    invoke:async()=>{},calibrateDisplay:async()=>{throw new Error('binding timeout');}});
+  const result=await media.getDisplayMedia();
+  assert.equal(result.getVideoTracks()[0].readyState,'live');
+  assert.equal(result.getVideoTracks()[0].getSettings().nearcastDisplayBinding,undefined);
+  assert.match(media.diagnostics().displayBinding.error,/timeout/);await media.stop();
+});
+test('binding release failure still cleans system audio and blocks unsafe reuse',async()=>{
+  let stopped=0;
+  const media=new BrowserCaptureMediaDevices({platform:'windows',mediaDevices:{getDisplayMedia:async()=>stream()},
+    invoke:async command=>{if(command.endsWith('release'))throw new Error('input cleanup pending');},calibrateDisplay:async()=>({bindingId:'b'}),
+    createSystemAudio:async()=>({track:track('audio'),stop:async()=>{stopped++;}})});
+  await media.getDisplayMedia({audio:true});
+  await assert.rejects(media.stop(),/cleanup/);assert.equal(stopped,1);
+});

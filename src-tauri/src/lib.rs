@@ -6,25 +6,11 @@ mod discovery;
 mod pinned_tls;
 mod trust;
 mod input_geometry;
-#[cfg(any(windows,test))]
-mod capture_target;
-#[cfg(any(windows,test))]
-mod capture_thumbnail;
-mod touch_feedback;
-mod native_capture;
 mod update;
+mod diagnostics;
+mod display_binding;
 #[cfg(any(windows,test))]
 mod native_audio;
-#[cfg(windows)]
-mod capture_indicator;
-#[cfg(all(test,windows))]
-mod capture_native_tests;
-#[cfg(test)]
-mod capture_outline_tests;
-#[cfg(test)]
-mod capture_chrome_tests;
-#[cfg(test)]
-mod capture_target_tests;
 mod input_native;
 #[cfg(all(test,windows))]
 mod input_native_tests;
@@ -35,12 +21,6 @@ mod macos_permissions;
 mod macos_input;
 #[cfg(any(target_os = "macos", test))]
 mod macos_input_model;
-// Retain the native Mouse provider; Windows TI-3 currently exposes typed Touch only.
-#[cfg(windows)]
-#[allow(dead_code)]
-mod windows_mouse;
-#[allow(dead_code)]
-mod windows_mouse_model;
 use discovery::{DiscoveryCache, SERVICE_TYPES, SNAPSHOT_INTERVAL, BRIDGE_LEASE_MS};
 
 struct MdnsRuntime {
@@ -327,32 +307,6 @@ fn nearcast_input_apply(owner_id:String,lease_id:String,geometry_revision:String
 fn nearcast_input_release(owner_id:String,lease_id:Option<String>)->serde_json::Value{input_native::release(owner_id,lease_id)}
 
 #[tauri::command]
-async fn nearcast_capture_targets()->Result<serde_json::Value,String>{
-    #[cfg(windows)]
-    {return tauri::async_runtime::spawn_blocking(||capture_target::list().and_then(|targets|serde_json::to_value(targets).map_err(|e|e.to_string()))).await.map_err(|e|e.to_string())?;}
-    #[cfg(not(windows))]
-    Err("native_capture_not_supported".into())
-}
-#[tauri::command]
-async fn nearcast_capture_thumbnail(target_id:String)->Result<tauri::ipc::Response,String>{
-    #[cfg(windows)]
-    {return tauri::async_runtime::spawn_blocking(move||native_capture::thumbnail(&target_id).map(tauri::ipc::Response::new)).await.map_err(|e|e.to_string())?;}
-    #[cfg(not(windows))]
-    {let _=target_id;Err("native_capture_not_supported".into())}
-}
-#[tauri::command]
-async fn nearcast_capture_start(target_id:String)->Result<serde_json::Value,String>{
-    #[cfg(windows)]
-    {return tauri::async_runtime::spawn_blocking(move||native_capture::start(&target_id).and_then(|info|serde_json::to_value(info).map_err(|e|e.to_string()))).await.map_err(|e|e.to_string())?;}
-    #[cfg(not(windows))]
-    {let _=target_id;Err("native_capture_not_supported".into())}
-}
-#[tauri::command]
-async fn nearcast_audio_start(capture_id:String)->Result<serde_json::Value,String>{
-    #[cfg(windows)] {return tauri::async_runtime::spawn_blocking(move||native_capture::start_audio(&capture_id)).await.map_err(|e|e.to_string())?;}
-    #[cfg(not(windows))] {let _=capture_id;Err("native_audio_not_supported".into())}
-}
-#[tauri::command]
 async fn nearcast_system_audio_start(capture_id:String)->Result<serde_json::Value,String>{
     #[cfg(windows)] {
         if capture_id.len()!=36 || !capture_id.bytes().all(|b| b.is_ascii_hexdigit()||b==b'-') {return Err("invalid_audio_owner".into());}
@@ -371,59 +325,52 @@ async fn nearcast_audio_stop(capture_id:String)->Result<(),String>{
     #[cfg(not(windows))] {let _=capture_id;Ok(())}
 }
 #[tauri::command]
-async fn nearcast_capture_frame(capture_id:String,after_version:Option<u64>)->Result<tauri::ipc::Response,String>{
-    #[cfg(windows)]
-    {return tauri::async_runtime::spawn_blocking(move||native_capture::frame_after(&capture_id,after_version.unwrap_or(0)).map(tauri::ipc::Response::new)).await.map_err(|e|e.to_string())?;}
-    #[cfg(not(windows))]
-    {let _=(capture_id,after_version);Err("native_capture_not_supported".into())}
+async fn nearcast_diagnostics_record(sample:diagnostics::Sample)->Result<(),String>{
+    tauri::async_runtime::spawn_blocking(move||diagnostics::record(sample)).await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
-async fn nearcast_capture_stop(capture_id:String)->Result<(),String>{
-    #[cfg(windows)]
-    {return tauri::async_runtime::spawn_blocking(move||native_capture::stop(&capture_id)).await.map_err(|e|e.to_string())?;}
-    #[cfg(not(windows))]
-    {let _=capture_id;Ok(())}
-}
-#[tauri::command]
-async fn nearcast_capture_touch_feedback(capture_id:String,geometry_revision:String,owner_id:String,serial:u64,points:Vec<touch_feedback::Point>)->Result<serde_json::Value,String>{
-    #[cfg(windows)]
-    {return tauri::async_runtime::spawn_blocking(move||capture_indicator::touch_scene(&capture_id,&geometry_revision,&owner_id,serial,points).map(|updated|serde_json::json!({"updated":updated}))).await.map_err(|e|e.to_string())?;}
-    #[cfg(not(windows))]
-    {let _=(capture_id,geometry_revision,owner_id,serial,points);Err("touch_feedback_not_supported".into())}
+async fn nearcast_diagnostics_export(app:AppHandle)->Result<String,String>{
+    tauri::async_runtime::spawn_blocking(move||diagnostics::export(&app)).await.map_err(|e|e.to_string())?
 }
 
 #[tauri::command]
-async fn nearcast_capture_indicator(capture_id:String,geometry_revision:String,active:bool,owner_id:Option<String>,sequence:u32)->Result<(),String>{
-    #[cfg(windows)]
-    {return tauri::async_runtime::spawn_blocking(move||native_capture::indicator(&capture_id,&geometry_revision,active,owner_id.as_deref(),sequence)).await.map_err(|e|e.to_string())?;}
-    #[cfg(not(windows))]
-    {let _=(capture_id,geometry_revision,active,owner_id,sequence);Err("native_capture_not_supported".into())}
+async fn nearcast_display_binding_begin(source_id:String)->Result<serde_json::Value,String>{
+    tauri::async_runtime::spawn_blocking(move||display_binding::begin(source_id)).await.map_err(|e|e.to_string())?
 }
-
+#[tauri::command]
+async fn nearcast_display_binding_confirm(source_id:String,challenge_id:String,token:String,corners:Vec<u8>,frame_width:u32,frame_height:u32)->Result<serde_json::Value,String>{
+    tauri::async_runtime::spawn_blocking(move||display_binding::confirm(source_id,challenge_id,token,corners,frame_width,frame_height)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn nearcast_display_binding_cancel(source_id:String,challenge_id:String)->Result<(),String>{
+    tauri::async_runtime::spawn_blocking(move||display_binding::cancel(source_id,challenge_id)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn nearcast_display_binding_release(source_id:String)->Result<(),String>{
+    tauri::async_runtime::spawn_blocking(move||display_binding::release(source_id)).await.map_err(|e|e.to_string())?
+}
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().pubkey(include_str!("../update.pub").trim()).build())
         .manage(update::State::default())
         .manage(MdnsState(Mutex::new(None)))
         .manage(TrustState::default())
+        .setup(|app| { let _=diagnostics::initialize(app.handle());Ok(()) })
         .on_window_event(|_, event| {
-            if matches!(event,tauri::WindowEvent::CloseRequested{..}|tauri::WindowEvent::Destroyed){input_native::shutdown();native_capture::shutdown();#[cfg(windows)] native_audio::shutdown();}
+            if matches!(event,tauri::WindowEvent::CloseRequested{..}|tauri::WindowEvent::Destroyed){input_native::shutdown();display_binding::shutdown();#[cfg(windows)] native_audio::shutdown();}
             #[cfg(target_os = "macos")]
             if matches!(event, tauri::WindowEvent::Destroyed) { let _ = macos_input::reset(); }
-            #[cfg(windows)]
-            if matches!(event, tauri::WindowEvent::CloseRequested {..} | tauri::WindowEvent::Destroyed) {
-                if let Err(error) = windows_mouse::reset() { eprintln!("windows_mouse_exit_reset_failed: {error}"); }
-            }
             #[cfg(not(target_os = "macos"))]
             let _ = event;
         })
-        .invoke_handler(tauri::generate_handler![nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_capture_targets, nearcast_capture_thumbnail, nearcast_capture_start, nearcast_audio_start, nearcast_system_audio_start, nearcast_audio_read, nearcast_audio_stop, nearcast_capture_frame, nearcast_capture_stop, nearcast_capture_indicator, nearcast_capture_touch_feedback, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info, nearcast_update_initialize, nearcast_update_check, nearcast_update_download, nearcast_update_install])
+        .invoke_handler(tauri::generate_handler![nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_system_audio_start, nearcast_audio_read, nearcast_audio_stop, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info, nearcast_display_binding_begin, nearcast_display_binding_confirm, nearcast_display_binding_cancel, nearcast_display_binding_release, nearcast_diagnostics_record, nearcast_diagnostics_export, nearcast_update_initialize, nearcast_update_check, nearcast_update_download, nearcast_update_install])
         .build(tauri::generate_context!())
         .expect("error while building NearCast Desktop TX")
         .run(|_, event| {
             if matches!(event, tauri::RunEvent::Exit) {
+                diagnostics::shutdown();
                 input_native::shutdown();
-                native_capture::shutdown_runtime();
+                display_binding::shutdown();
                 #[cfg(windows)] native_audio::shutdown();
             }
         });

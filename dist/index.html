@@ -64,11 +64,7 @@
       <section class="macos-interaction" aria-label="反向控制">
         <label><input id="input-enabled" type="checkbox"> 允许接收端反控本机</label>
         <p id="input-state" aria-live="polite">反控未启用</p>
-        <div id="touch-feedback-settings" hidden>
-          <label><input id="touch-feedback-enabled" type="checkbox" checked> 显示触控位置</label>
-          <p class="quality-help">黄圈：收到 Touch · 绿圈：已提交本机注入。抬起后短暂保留，仅本机显示。</p>
-        </div>
-        <p id="capture-help" class="quality-help">反控需要双方启用；当前仅单显示器的整个屏幕支持反控。</p>
+        <p id="capture-help" class="quality-help">反控需要双方启用；整屏分享在屏幕识别成功后支持反控，窗口仅投屏。</p>
         <button id="input-reconnect" class="refresh" type="button" disabled>重建反控连接</button>
         <button id="input-cleanup" class="refresh" type="button" hidden>重试释放输入</button>
       </section>
@@ -94,7 +90,7 @@
       </details>
     </section>
 
-    <footer>Launcher-compatible WebCast · Native Touch / Mouse input</footer>
+    <footer>Launcher-compatible WebCast · <button id="export-diagnostics" type="button" class="refresh">导出诊断</button><p id="diagnostics-export-status" role="status" style="overflow-wrap:anywhere;user-select:text"></p></footer>
   </main>
   <dialog id="update-dialog" class="update-dialog" aria-labelledby="update-title">
     <h2 id="update-title">软件更新</h2>

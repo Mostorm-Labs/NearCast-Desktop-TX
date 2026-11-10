@@ -42,6 +42,22 @@ test('native Touch fails closed on a Mouse-only platform and source/geometry mis
   await assert.rejects(engine.open(request('no-map'),{sessionId:'AUTH-SID'}),/geometry/i);
 });
 
+test('a calibrated display uses its binding revision while checking the current layout and exact binding on every open',async()=>{
+  const geometry={...binding.geometry,revision:'layout:binding',layoutRevision:'layout',nativeId:'screen-binding:binding',sourceId:'browser-source',bindingId:'binding',region:{x:-1920,y:0,width:1920,height:1080}};
+  let nativeGeometry={revision:'layout',browserBinding:structuredClone(geometry)};
+  const {engine,calls}=await fixture({probe:async()=>({nativeReady:true,inputTypes:['touch'],maxDataBytes:4096,touch:{maxContacts:10},geometry:structuredClone(nativeGeometry)})});
+  await engine.bindSource({...binding,geometry});
+  const params=touch(),first=await engine.open(params,{sessionId:'AUTH-SID'});
+  assert.equal((await engine.open(params,{sessionId:'AUTH-SID'})).streamId,first.streamId);
+  nativeGeometry.browserBinding.bindingId='different-binding';
+  await assert.rejects(engine.open(params,{sessionId:'AUTH-SID'}),/Native readiness lost/);
+  assert.equal(engine.state,'closed');
+  assert.equal(calls.filter(([name])=>name==='releaseOwned').length,1);
+  nativeGeometry={revision:'new-layout',browserBinding:structuredClone(geometry)};
+  await assert.rejects(engine.open(touch({commandId:'after-layout-change'}),{sessionId:'AUTH-SID'}),/Native geometry changed/);
+  assert.equal(calls.filter(([name])=>name==='prepare').length,1);
+});
+
 test('close waits for native release; failed cleanup blocks owner acquisition and explicit retry recovers',async()=>{
   let finishRelease;
   const {engine}=await fixture({releaseOwned:()=>new Promise(resolve=>{finishRelease=resolve;})});

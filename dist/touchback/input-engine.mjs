@@ -7,6 +7,14 @@ import {integer} from './frame-codec.mjs';
 const text=value=>typeof value==='string'&&value.length>0&&value.length<=128;
 const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))):item);
 const same=(a,b)=>canonical(a)===canonical(b);
+function nativeGeometryMatches(snapshot,descriptor){
+  if(descriptor.nativeId?.startsWith('screen-binding:')){
+    const binding=snapshot?.browserBinding;
+    return Boolean(binding&&snapshot.revision===descriptor.layoutRevision&&
+      ['sourceId','bindingId','nativeId','revision','layoutRevision'].every(key=>binding[key]===descriptor[key]));
+  }
+  return !snapshot||snapshot.revision===descriptor.revision;
+}
 // Only an unsubmitted motion snapshot can be superseded. Lifecycle frames
 // remain barriers, and wire validation happens before any queue reduction.
 function supersedesMotion(previous,next){
@@ -92,7 +100,7 @@ export class InputEngine{
       requireInput(this.state==='active'&&this.stream?.streamId===previous.result.streamId,'INVALID_STATE','Retired open command');
       const caps=await timeout(this.enqueueNative(()=>this.provider.probe()),this.operationTimeoutMs);
       const ready=this.state==='active'&&this.stream?.streamId===previous.result.streamId&&caps.nativeReady!==false&&!caps.cleanupBlocked&&
-        (!caps.geometry||caps.geometry.revision===geometry.descriptor.revision)&&previous.result.acceptedInputTypes.every(type=>caps.inputTypes?.includes(type));
+        nativeGeometryMatches(caps.geometry,geometry.descriptor)&&previous.result.acceptedInputTypes.every(type=>caps.inputTypes?.includes(type));
       if(!ready){const failure=new InputError('INVALID_STATE','Native readiness lost');if(this.owner)await this.fault(failure).catch(()=>{});throw failure;}
       return structuredClone(previous.result);
     }
@@ -106,7 +114,7 @@ export class InputEngine{
       try{
         const caps=await timeout(this.enqueueNative(()=>this.provider.probe()),this.operationTimeoutMs);
         requireInput(caps.nativeReady!==false&&!caps.cleanupBlocked,'NOT_SUPPORTED','Native input not ready');
-        requireInput(!caps.geometry||caps.geometry.revision===geometry.descriptor.revision,'INVALID_STATE','Native geometry changed');
+        requireInput(nativeGeometryMatches(caps.geometry,geometry.descriptor),'INVALID_STATE','Native geometry changed');
         const result=this.negotiate(params,caps);
         requireInput(this.owner===owner&&generation===this.generation,'CANCELED','Stale open');
         const prepared=await timeout(this.enqueueNative(()=>this.provider.prepare(owner,result)),this.operationTimeoutMs);

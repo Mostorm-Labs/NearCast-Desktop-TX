@@ -2,7 +2,7 @@
 
 ## 采集架构
 
-默认视频由系统 getDisplayMedia 返回的原始轨道直接交给 WebRTC；Windows 系统音频独立使用 WASAPI，不依赖 WGC 视频租约。当前反控只允许可证明的单显示器整屏来源；窗口和多屏视频可分享但不猜测坐标。原生 WGC 保留为实验实现，默认 UI 不启动其采集或缩略图流程。模块边界与验收范围见 [浏览器采集架构](docs/architecture/browser-capture.md)。
+默认视频由系统 getDisplayMedia 返回的原始轨道直接交给 WebRTC；Windows 系统音频独立使用 WASAPI，不依赖 WGC 视频租约。Windows 整屏来源使用短暂的四角随机标记识别所选物理屏幕，由 Rust 持有来源绑定，允许主屏/副屏及负坐标；校验失败不猜测屏幕，视频继续。窗口仅投屏，macOS 保留原有单主屏限制。原生 WGC、窗口缩略图及持续边框流程已移除；四角标记仅用于分享开始时的有界本地校准，不参与视频传输。模块边界与验收范围见 [浏览器采集架构](docs/architecture/browser-capture.md)。
 
 ## 版本号
 

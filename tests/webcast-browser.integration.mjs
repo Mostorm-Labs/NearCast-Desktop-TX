@@ -141,12 +141,20 @@ try {
       state.browserPickerCalls=(state.browserPickerCalls??0)+1;
       state.captureOptions=options;
       if (state.mode === 'cancel') throw new DOMException('Cancelled by user', 'NotAllowedError');
-      const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 180;
+      const canvas = document.createElement('canvas');
+      const width=state.testCalibration?1920:320,height=state.testCalibration?1080:180;
+      canvas.width=width;canvas.height=height;
       const ctx = canvas.getContext('2d');
-      const timer = setInterval(() => { ctx.fillStyle = `hsl(${Date.now() % 360} 80% 50%)`; ctx.fillRect(0, 0, 320, 180); }, 40);
+      const timer = setInterval(() => {
+        ctx.fillStyle = 'hsl('+(Date.now()%360)+' 80% 50%)';ctx.fillRect(0,0,width,height);
+        if(state.markerPatterns)for(let corner=0;corner<4;corner++){
+          const {rect,bits}=state.markerPatterns[corner];
+          bits.forEach((bit,i)=>{ctx.fillStyle=bit?'white':'black';ctx.fillRect(rect.x+(i%12)*8,rect.y+Math.floor(i/12)*8,8,8);});
+        }
+      },40);
       const stream = canvas.captureStream(25);
       const track = stream.getVideoTracks()[0]; const stop = track.stop.bind(track);const settings=track.getSettings.bind(track);
-      track.getSettings=()=>({...settings(),displaySurface:state.captureKind??'monitor',width:320,height:180});
+      track.getSettings=()=>({...settings(),displaySurface:state.captureKind??'monitor',width,height});
       track.stop = () => { clearInterval(timer); stop(); };
       state.browserVideoTrack=track;return stream;
     }});
@@ -154,6 +162,29 @@ try {
     globalThis.__TAURI__ = {core: {invoke: async (command,args={}) => {
       if(command==='nearcast_platform_info')return{os:'windows',screenCapture:true,nativeCapture:false,captureBackend:'browser',systemAudio:true,touchback:true};
       if(command.startsWith('nearcast_capture_'))throw new Error('Browser default must not invoke WGC/preview IPC: '+command);
+      if(command==='nearcast_diagnostics_record'){(state.logSamples??=[]).push(args.sample);return null;}
+      if(command==='nearcast_diagnostics_export')return 'C:/diagnostics/nearcast-diagnostics-test.json';
+      if(command==='nearcast_display_binding_begin'){
+        if(!state.testCalibration)throw new Error('Calibration disabled in fixture');
+        const {markerBits,markerRect}=await import('/capture/display-binding.mjs');
+        const displays=[0,1].map(i=>({nativeId:'DISPLAY'+i,primary:i===0,units:'physical-pixels',rotation:0,region:{x:i===0?0:-1920,y:0,width:1920,height:1080},captureWidth:1920,captureHeight:1080,token:i===0?'1111111111111111':'2222222222222222'}));
+        const selected=displays[state.selectedDisplay??1];
+        state.markerPatterns=[0,1,2,3].map(corner=>({rect:markerRect(1920,1080,corner),bits:markerBits(selected.token,corner)}));
+        state.challenge={sourceId:args.sourceId,challengeId:'challenge-'+args.sourceId,timeoutMs:5000,displays};
+        return state.challenge;
+      }
+      if(command==='nearcast_display_binding_confirm'){
+        const challenge=state.challenge,selected=challenge.displays[state.selectedDisplay??1];
+        if(args.sourceId!==challenge.sourceId||args.challengeId!==challenge.challengeId||args.token!==selected.token||args.corners.join(',')!=='0,1,2,3')throw new Error('Invalid calibration observation');
+        state.markerPatterns=null;
+        state.browserBinding={sourceId:args.sourceId,bindingId:'bound-'+args.sourceId,nativeId:'screen-binding:'+args.sourceId,revision:'bound-'+args.sourceId,layoutRevision:state.displayRevision??'single-display',kind:'monitor',units:'physical-pixels',rotation:0,region:selected.region,captureWidth:1920,captureHeight:1080};
+        return state.browserBinding;
+      }
+      if(command==='nearcast_display_binding_cancel'){state.markerPatterns=null;return null;}
+      if(command==='nearcast_display_binding_release'){
+        if(state.browserBinding?.sourceId===args.sourceId){state.releasedBinding=state.browserBinding;state.browserBinding=null;}
+        return null;
+      }
       if(command==='nearcast_system_audio_start'){
         audioCaptureId=args.captureId;audioSequence=0;audioPosition=0;state.audioStarts=(state.audioStarts??0)+1;
         return{source:'wasapi-loopback',sampleRate:48000,channels:2};
@@ -174,7 +205,10 @@ try {
         if(audioCaptureId===args.captureId)audioCaptureId=null;
         state.audioStops=(state.audioStops??0)+1;return null;
       }
-      if(command==='nearcast_input_probe')return{nativeReady:true,inputTypes:['touch'],maxDataBytes:4096,touch:{maxContacts:10},geometry:{revision:state.displayRevision??'single-display',displays:Array.from({length:state.displayCount??1},(_,i)=>({nativeId:'DISPLAY'+i,primary:i===0,units:'physical-pixels',rotation:0,region:{x:i*320,y:0,width:320,height:180},captureWidth:320,captureHeight:180}))}};
+      if(command==='nearcast_input_probe'){
+        const width=state.testCalibration?1920:320,height=state.testCalibration?1080:180;
+        return{nativeReady:true,inputTypes:['touch'],maxDataBytes:4096,touch:{maxContacts:10},geometry:{browserBinding:state.browserBinding,revision:state.displayRevision??'single-display',displays:Array.from({length:state.displayCount??1},(_,i)=>({nativeId:'DISPLAY'+i,primary:i===0,units:'physical-pixels',rotation:0,region:{x:i===0?0:-width,y:0,width,height},captureWidth:width,captureHeight:height}))}};
+      }
       if(command==='nearcast_input_prepare'){state.nativeOwner=args;return{status:'ready',leaseId:'local-test-lease'};}
       if(command==='nearcast_input_apply'){if(state.nativeApplyDelayMs)await new Promise(resolve=>setTimeout(resolve,state.nativeApplyDelayMs));state.lastNativeAction=args.action;state.nativeApplyCalls=(state.nativeApplyCalls??0)+1;return{status:'submitted',nativeDurationMs:1};}
       if(command==='nearcast_input_release'){state.nativeOwner=null;state.borderActive=false;return{status:'released'};}
@@ -250,6 +284,33 @@ try {
     assert.equal(await page.evaluate(()=>testReceiver.receivedTracks.filter(t=>t==='video').length),1);
     assert.equal(await page.evaluate(()=>testReceiver.receivedTracks.filter(t=>t==='audio').length),1);
   }
+  // Production pixel matching against an actual browser video frame, using a
+  // deterministic native bridge fixture. Same-sized displays cannot be guessed.
+  await page.locator('#stop-share-button').click();
+  await page.evaluate(()=>{testReceiver.testCalibration=true;testReceiver.displayCount=2;testReceiver.selectedDisplay=1;});
+  await share();
+  await page.waitForFunction(()=>testReceiver.inputActive&&__nearcastTouchbackDiagnostics().sourceReady);
+  assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().capture.displayBinding.state),'bound');
+  await page.evaluate(()=>testReceiver.sendSample(1,0));
+  await page.waitForFunction(()=>testReceiver.lastNativeAction?.records[0].x===-1);
+  assert.equal(await page.evaluate(()=>testReceiver.lastNativeAction.records[0].y),1079);
+  await page.evaluate(()=>testReceiver.sendSample(2,2));
+  await page.waitForFunction(()=>__nearcastTouchbackDiagnostics().touchContacts===0);
+  await page.evaluate(()=>{testReceiver.displayRevision='layout-changed';});
+  await page.waitForFunction(()=>__nearcastTouchbackDiagnostics().detail?.includes('BROWSER_DISPLAY_LAYOUT_CHANGED'));
+  assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().sourceReady),false);
+  const afterLayoutChange=await page.evaluate(()=>testReceiver.frames);
+  await page.waitForFunction(n=>testReceiver.frames>n+2,afterLayoutChange);
+  await page.locator('#stop-share-button').click();
+  assert.equal(await page.evaluate(()=>testReceiver.browserBinding),null);
+  assert.ok(await page.evaluate(()=>testReceiver.releasedBinding?.sourceId));
+  await page.evaluate(()=>{testReceiver.selectedDisplay=0;});
+  await share();
+  await page.waitForFunction(()=>testReceiver.inputActive&&__nearcastTouchbackDiagnostics().sourceReady);
+  await page.evaluate(()=>testReceiver.sendSample(1,0));
+  await page.waitForFunction(()=>testReceiver.lastNativeAction?.records[0].x===1919);
+  await page.evaluate(()=>testReceiver.sendSample(2,2));
+  await page.waitForFunction(()=>__nearcastTouchbackDiagnostics().touchContacts===0);
   assert.deepEqual(errors,[]);
   await page.evaluate(()=>testReceiver.sendMalformedInput());
   await page.waitForFunction(()=>!document.querySelector('#input-reconnect').disabled);
@@ -261,8 +322,11 @@ try {
   await page.waitForFunction(()=>!document.querySelector('#code-view').hidden);
   await page.waitForFunction(()=>testReceiver.audioStops===testReceiver.audioStarts);
   assert.equal(await page.evaluate(()=>document.querySelector('#preview').srcObject),null);
+  await page.locator('#export-diagnostics').click();
+  await page.waitForFunction(()=>document.querySelector('#diagnostics-export-status').textContent.includes('nearcast-diagnostics-test.json'));
+  assert.ok((await page.evaluate(()=>testReceiver.logSamples)).every(row=>Object.keys(row).every(key=>['event','status','metrics'].includes(key))));
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({result:'PASS',videoBackend:'browser',originalTrack:true,independentPcmOpus:true,screenOnlyInput:true,windowAndMultiDisplayVideo:true,senderReuse:true,frames:await page.evaluate(()=>testReceiver.frames)},null,2));
+  console.log(JSON.stringify({result:'PASS',videoBackend:'browser',originalTrack:true,independentPcmOpus:true,screenOnlyInput:true,multiDisplayCalibration:true,negativeCoordinates:true,layoutInvalidation:true,screenReselection:true,windowAndMultiDisplayVideo:true,senderReuse:true,frames:await page.evaluate(()=>testReceiver.frames)},null,2));
 } finally {
   await browser?.close();
   await new Promise(resolve => server.close(resolve));
