@@ -95,14 +95,19 @@ mod platform {
         capture_generation: u64,
     }
     enum Request {
-        Frame(SyncSender<Result<Vec<u8>, String>>),
         Stop(SyncSender<()>),
+    }
+    struct LatestFrame {
+        version: u64,
+        packet: Option<Arc<Vec<u8>>>,
+        stopped: bool,
     }
     struct Controller {
         id: String,
         target: Target,
         observed: Arc<Mutex<Observed>>,
         tx: SyncSender<Request>,
+        latest: Arc<(Mutex<LatestFrame>, std::sync::Condvar)>,
     }
     static ACTIVE: Mutex<Option<Controller>> = Mutex::new(None);
     fn text_error(e: impl std::fmt::Display) -> String {
@@ -131,6 +136,7 @@ mod platform {
                 }
             }
         }
+        let _ = crate::native_audio::stop(id);
         let _ = crate::input_native::release_capture(&format!("capture:{id}"));
     }
     fn info(id: &str, target: &Target, observed: &Observed) -> Info {
@@ -156,7 +162,13 @@ mod platform {
         }
         let revision = format!(
             "{:x}",
-            Sha256::digest(format!("{id}:{:?}:{:?}:{}:{:?}", rect, observed.size, observed.capture_generation, observed.layout).as_bytes())
+            Sha256::digest(
+                format!(
+                    "{id}:{:?}:{:?}:{}:{:?}",
+                    rect, observed.size, observed.capture_generation, observed.layout
+                )
+                .as_bytes()
+            )
         );
         Info {
             capture_id: id.into(),
@@ -175,7 +187,11 @@ mod platform {
             capture_height: observed.size.1.max(0) as u32,
             input_ready: reason.is_none(),
             disabled_reason: reason,
-            native_region: if observed.closed.load(Ordering::Acquire) { None } else { target.bounds(None).ok() },
+            native_region: if observed.closed.load(Ordering::Acquire) {
+                None
+            } else {
+                target.bounds(None).ok()
+            },
         }
     }
     pub fn snapshot() -> Option<Info> {
@@ -276,10 +292,19 @@ mod platform {
             capture_generation: 1,
         }));
         let (tx, rx) = mpsc::sync_channel(2);
+        let latest = Arc::new((
+            Mutex::new(LatestFrame {
+                version: 0,
+                packet: None,
+                stopped: false,
+            }),
+            std::sync::Condvar::new(),
+        ));
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let worker_target = target.clone();
         let worker_id = id.clone();
         let worker_observed = observed.clone();
+        let worker_latest = latest.clone();
         std::thread::spawn(move || {
             let closed = worker_observed.lock().unwrap().closed.clone();
             let apartment = Apartment::new();
@@ -301,77 +326,134 @@ mod platform {
                     if ready_tx.send(Ok(())).is_ok() {
                         let mut sequence = 0u64;
                         let mut pending_layout = None;
-                        while let Ok(request) = rx.recv_timeout(Duration::from_secs(10)) {
-                            match request {
-                                Request::Stop(done) => {
+                        let mut version = 0u64;
+                        let mut state_key = String::new();
+                        loop {
+                            match rx.try_recv() {
+                                Ok(Request::Stop(done)) => {
                                     drop(capture);
+                                    if let Ok(mut latest) = worker_latest.0.lock() {
+                                        latest.stopped = true;
+                                        worker_latest.1.notify_all();
+                                    }
                                     let _ = done.send(());
                                     return;
                                 }
-                                Request::Frame(reply) => {
-                                    let result = (|| {
-                                        let pixels = if let Ok(layout) = worker_target.capture_layout() {
-                                            let changed = {
-                                                let mut obs = worker_observed.lock().map_err(|_| "capture_observation_poisoned")?;
-                                                let changed = obs.layout != layout;
-                                                if changed { obs.frame_size = None; }
-                                                changed
-                                            };
-                                            if changed && pending_layout.as_ref() != Some(&layout) {
-                                                // Return the invalid source before expensive WGC
-                                                // reconstruction so JS can fence queued old input.
-                                                pending_layout = Some(layout);
-                                                Vec::new()
-                                            } else {
-                                                if changed {
-                                                    crate::input_native::release_stale_capture(&format!("capture:{worker_id}"), "", false)?;
-                                                    capture.restart(&worker_target)?;
-                                                    let mut obs = worker_observed.lock().map_err(|_| "capture_observation_poisoned")?;
-                                                    obs.layout = layout;
-                                                    obs.capture_generation += 1;
-                                                    obs.size = (capture.size.Width, capture.size.Height);
-                                                    obs.frame_size = None;
-                                                }
-                                                pending_layout = None;
-                                                capture.read()?
-                                            }
-                                        } else { capture.read()? };
-                                        let geometry = {
-                                            let mut obs = worker_observed.lock().map_err(|_| "capture_observation_poisoned")?;
-                                            obs.size = (capture.size.Width, capture.size.Height);
-                                            if let Ok(rect) = worker_target.bounds(Some(obs.size)) { obs.rect = rect; }
-                                            if !pixels.is_empty() {
-                                                obs.last_frame = Some(Instant::now());
-                                                obs.frame_size = Some(obs.size);
-                                                sequence += 1;
-                                            }
-                                            info(&worker_id, &worker_target, &obs)
-                                        };
-                                        let (width,height) = if pixels.is_empty() {(0,0)} else {(capture.size.Width,capture.size.Height)};
-                                        let mut diagnostics = capture.last_readback.clone().unwrap_or_else(|| serde_json::json!({}));
-                                        diagnostics["nativeRegion"] = serde_json::to_value(geometry.native_region).map_err(text_error)?;
-                                        {
-                                            let obs = worker_observed.lock().map_err(|_| "capture_observation_poisoned")?;
-                                            diagnostics["captureGeneration"] = serde_json::json!(obs.capture_generation);
-                                            diagnostics["captureLayout"] = serde_json::to_value(&obs.layout).map_err(text_error)?;
+                                Err(mpsc::TryRecvError::Disconnected) => break,
+                                Err(mpsc::TryRecvError::Empty) => {}
+                            }
+                            let result: Result<Option<Vec<u8>>, String> = (|| {
+                                let pixels = if let Ok(layout) = worker_target.capture_layout() {
+                                    let changed = {
+                                        let mut obs = worker_observed
+                                            .lock()
+                                            .map_err(|_| "capture_observation_poisoned")?;
+                                        let changed = obs.layout != layout;
+                                        if changed {
+                                            obs.frame_size = None;
                                         }
-                                        let metadata = serde_json::to_vec(&serde_json::json!({
+                                        changed
+                                    };
+                                    if changed && pending_layout.as_ref() != Some(&layout) {
+                                        // Return the invalid source before expensive WGC
+                                        // reconstruction so JS can fence queued old input.
+                                        pending_layout = Some(layout);
+                                        Vec::new()
+                                    } else {
+                                        if changed {
+                                            crate::input_native::release_stale_capture(
+                                                &format!("capture:{worker_id}"),
+                                                "",
+                                                false,
+                                            )?;
+                                            capture.restart(&worker_target)?;
+                                            let mut obs = worker_observed
+                                                .lock()
+                                                .map_err(|_| "capture_observation_poisoned")?;
+                                            obs.layout = layout;
+                                            obs.capture_generation += 1;
+                                            obs.size = (capture.size.Width, capture.size.Height);
+                                            obs.frame_size = None;
+                                        }
+                                        pending_layout = None;
+                                        capture.read()?
+                                    }
+                                } else {
+                                    capture.read()?
+                                };
+                                let geometry = {
+                                    let mut obs = worker_observed
+                                        .lock()
+                                        .map_err(|_| "capture_observation_poisoned")?;
+                                    obs.size = (capture.size.Width, capture.size.Height);
+                                    if let Ok(rect) = worker_target.bounds(Some(obs.size)) {
+                                        obs.rect = rect;
+                                    }
+                                    if !pixels.is_empty() {
+                                        obs.last_frame = Some(Instant::now());
+                                        obs.frame_size = Some(obs.size);
+                                        sequence += 1;
+                                    }
+                                    info(&worker_id, &worker_target, &obs)
+                                };
+                                let (width, height) = if pixels.is_empty() {
+                                    (0, 0)
+                                } else {
+                                    (capture.size.Width, capture.size.Height)
+                                };
+                                let key = format!(
+                                    "{}:{}:{:?}",
+                                    geometry.revision,
+                                    geometry.input_ready,
+                                    geometry.disabled_reason
+                                );
+                                if pixels.is_empty() && key == state_key {
+                                    return Ok(None);
+                                }
+                                state_key = key;
+                                version += 1;
+                                let mut diagnostics = capture
+                                    .last_readback
+                                    .clone()
+                                    .unwrap_or_else(|| serde_json::json!({}));
+                                diagnostics["nativeRegion"] =
+                                    serde_json::to_value(geometry.native_region)
+                                        .map_err(text_error)?;
+                                {
+                                    let obs = worker_observed
+                                        .lock()
+                                        .map_err(|_| "capture_observation_poisoned")?;
+                                    diagnostics["captureGeneration"] =
+                                        serde_json::json!(obs.capture_generation);
+                                    diagnostics["captureLayout"] =
+                                        serde_json::to_value(&obs.layout).map_err(text_error)?;
+                                }
+                                let metadata = serde_json::to_vec(&serde_json::json!({
                                             "captureId":worker_id, "pixelFormat":"BGRA8", "frameId":sequence,
+                                            "captureVersion":version,
                                             "width":width, "height":height, "geometry":geometry,
                                             "nativeCapture":diagnostics,
                                             "indicator":crate::capture_indicator::status(&worker_id)
                                         })).map_err(text_error)?;
-                                        let mut packet = Vec::with_capacity(4 + metadata.len() + pixels.len());
-                                        packet.extend_from_slice(&(metadata.len() as u32).to_be_bytes());
-                                        packet.extend_from_slice(&metadata);
-                                        packet.extend_from_slice(&pixels);
-                                        Ok(packet)
-                                    })();
-                                    let failed = result.is_err();
-                                    let _ = reply.send(result);
-                                    if failed {
-                                        break;
+                                let mut packet =
+                                    Vec::with_capacity(4 + metadata.len() + pixels.len());
+                                packet.extend_from_slice(&(metadata.len() as u32).to_be_bytes());
+                                packet.extend_from_slice(&metadata);
+                                packet.extend_from_slice(&pixels);
+                                Ok(Some(packet))
+                            })(
+                            );
+                            match result {
+                                Ok(Some(packet)) => {
+                                    if let Ok(mut latest) = worker_latest.0.lock() {
+                                        latest.version = version;
+                                        latest.packet = Some(Arc::new(packet));
+                                        worker_latest.1.notify_all();
                                     }
+                                }
+                                Ok(None) => {}
+                                Err(_error) => {
+                                    break;
                                 }
                             }
                         }
@@ -381,6 +463,11 @@ mod platform {
             if let Ok(obs) = worker_observed.lock() {
                 obs.closed.store(true, Ordering::Release);
             }
+            if let Ok(mut latest) = worker_latest.0.lock() {
+                latest.stopped = true;
+                worker_latest.1.notify_all();
+            }
+            let _ = crate::native_audio::stop(&worker_id);
             let _ = crate::input_native::release_capture(&format!("capture:{worker_id}"));
         });
         ready_rx
@@ -397,6 +484,7 @@ mod platform {
             target,
             observed,
             tx,
+            latest,
         });
         drop(active);
         if let Err(error) = crate::capture_indicator::start(&id) {
@@ -406,38 +494,89 @@ mod platform {
         Ok(result)
     }
     pub fn frame(id: &str) -> Result<Vec<u8>, String> {
-        let tx = {
+        frame_after(id, 0)
+    }
+    pub fn frame_after(id: &str, after_version: u64) -> Result<Vec<u8>, String> {
+        let latest = {
             let active = ACTIVE.lock().map_err(|_| "capture_state_poisoned")?;
             let c = active
                 .as_ref()
                 .filter(|c| c.id == id)
                 .ok_or("capture_retired")?;
-            c.tx.clone()
+            c.latest.clone()
         };
-        let (reply, receive) = mpsc::sync_channel(1);
-        tx.try_send(Request::Frame(reply)).map_err(text_error)?;
-        receive
-            .recv_timeout(Duration::from_secs(2))
-            .map_err(text_error)?
+        let value = latest.0.lock().map_err(|_| "capture_latest_poisoned")?;
+        let (value, _) = latest
+            .1
+            .wait_timeout_while(value, Duration::from_millis(180), |value| {
+                !value.stopped && (value.packet.is_none() || value.version <= after_version)
+            })
+            .map_err(|_| "capture_latest_poisoned")?;
+        if value.stopped {
+            return Err("capture_worker_stopped".into());
+        }
+        let packet = value.packet.clone().ok_or("capture_waiting_for_frame")?;
+        let fresh = value.version > after_version;
+        drop(value);
+        if fresh {
+            return Ok(packet.as_ref().clone());
+        }
+        let length = u32::from_be_bytes(packet[..4].try_into().unwrap()) as usize;
+        let mut metadata: serde_json::Value =
+            serde_json::from_slice(&packet[4..4 + length]).map_err(text_error)?;
+        metadata["width"] = serde_json::json!(0);
+        metadata["height"] = serde_json::json!(0);
+        metadata["indicator"] =
+            serde_json::to_value(crate::capture_indicator::status(id)).map_err(text_error)?;
+        let metadata = serde_json::to_vec(&metadata).map_err(text_error)?;
+        let mut packet = Vec::with_capacity(4 + metadata.len());
+        packet.extend_from_slice(&(metadata.len() as u32).to_be_bytes());
+        packet.extend(metadata);
+        Ok(packet)
     }
     pub fn stop(id: &str) -> Result<(), String> {
+        // Serialize audio start/stop with the video lease to fence late IPC.
+        let mut active = ACTIVE.lock().map_err(|_| "capture_state_poisoned")?;
+        let audio = crate::native_audio::stop(id);
+        let controller = if active.as_ref().is_some_and(|c| c.id == id) {
+            active.take()
+        } else {
+            None
+        };
+        drop(active);
+        // The outline worker calls snapshot(); never join it under ACTIVE.
         let border = crate::capture_indicator::stop(id);
         let cleanup = crate::input_native::release_capture(&format!("capture:{id}"));
-        let controller = {
-            let mut active = ACTIVE.lock().map_err(|_| "capture_state_poisoned")?;
-            if active.as_ref().is_none_or(|c| c.id != id) {
-                border?;
-                return cleanup;
-            }
-            active.take().unwrap()
+        let Some(controller) = controller else {
+            audio?;
+            border?;
+            return cleanup;
         };
         let (done, wait) = mpsc::sync_channel(1);
         if controller.tx.try_send(Request::Stop(done)).is_ok() {
             wait.recv_timeout(Duration::from_secs(2))
                 .map_err(text_error)?;
         }
+        audio?;
         border?;
         cleanup
+    }
+    pub fn start_audio(id: &str) -> Result<serde_json::Value, String> {
+        let active = ACTIVE.lock().map_err(|_| "capture_state_poisoned")?;
+        let capture = active
+            .as_ref()
+            .filter(|c| c.id == id)
+            .ok_or("capture_retired")?;
+        if capture
+            .observed
+            .lock()
+            .map_err(|_| "capture_observation_poisoned")?
+            .closed
+            .load(Ordering::Acquire)
+        {
+            return Err("capture_target_closed".into());
+        }
+        crate::native_audio::start(id)
     }
     pub fn indicator(
         id: &str,

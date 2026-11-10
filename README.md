@@ -39,33 +39,29 @@ open "src-tauri/target/debug/bundle/macos/NearCast Desktop TX.app"
 
 从旧 ad-hoc 包切换到稳定签名后，旧授权可能仍绑定原来的代码哈希，单纯关闭再开启系统开关不会更新该身份。本机系统日志会报告 `Failed to match existing code requirement`。仅重置当前应用对应的 `Accessibility` / `ScreenCapture` 授权，再由用户重新确认；不要清空其他应用的授权或修改 TCC 数据库。
 
-WKWebView 需要至少一个媒体用途声明才暴露 `navigator.mediaDevices`。`Info.plist` 包含媒体用途说明以启用此接口；屏幕分享请求显示/系统音频，但不申请或采集麦克风音频。Windows 原生视频采集会额外使用 WebView 显示采集拿到音频轨道，并立即丢弃其临时视频轨道。
+WKWebView 需要至少一个媒体用途声明才暴露 `navigator.mediaDevices`。`Info.plist` 包含媒体用途说明以启用此接口。Windows TX 使用 WASAPI `eRender` loopback 采集默认播放设备的系统混音，不打开第二次系统选屏窗口，也不申请或采集麦克风；音频经过受限 PCM IPC 和 AudioWorklet 后加入 WebRTC Opus sender。没有播放设备或设备切换时，视频和反控仍保持独立，诊断会显示 WASAPI 错误。
 
 macOS 界面顶部提供“本地网络”“录屏与系统录音”“辅助功能”三个权限开关入口。点击任一入口会打开对应的系统设置页面，由用户确认授权或关闭；回到应用后自动重新检测，也可点击“刷新状态”。录屏和辅助功能读取系统授权状态；本地网络显示实际组播访问检测结果“网络可用”，检测失败显示“待确认”，不把离线或网络异常误判为用户拒绝。修改本地网络权限后返回配对页会重新扫描。首次配置录屏或辅助功能时会触发对应系统授权提示，授权后如系统要求重启，请重新打开 `.app`。Windows 隐藏此面板。
 
 部分 macOS 版本的本地网络链接会打开“隐私与安全”总页，此时再选择“本地网络”；新版系统可能将“辅助功能”权限显示为“设备控制和数据访问”。
 
-启动后输入接收端显示的 4 位配对码，点击“连接”，待接收端确认后点击“开始分享屏幕”。Windows 原生采集可用时，会弹出发送端的屏幕/窗口选择器；其他平台沿用系统选择器。点击“停止分享”会停止媒体轨道但保留连接，点击“断开连接”会关闭 WebRTC/WebSocket 并清理 Touchback 状态。
+启动后输入接收端显示的 4 位配对码，点击“连接”，待接收端确认后点击“开始分享屏幕”。默认使用 WebView 系统选择器，展示屏幕/窗口预览。视频原始轨道直接交给 WebRTC，不经过 WGC 回读、像素 IPC 或 Canvas。点击“停止分享”会停止媒体轨道但保留连接，点击“断开连接”会关闭 WebRTC/WebSocket 并清理 Touchback 状态。
 
 连接后可以在“Video quality”面板选择采集分辨率、动态码率或固定目标码率。默认使用 1920×1080、固定 12 Mbps，适合先观察桌面文字清晰度。可选分辨率为 Auto、1280×720、1920×1080、2560×1440 和 3840×2160；可选目标码率为 2、4、8、12 和 20 Mbps。配置在下一次开始分享时生效，两种模式都会把选择的数值作为 `maxBitrate` 上限；动态模式允许 WebRTC 根据网络和编码器自适应降码率，固定模式尽量维持选择的目标。屏幕轨道会标记为 `contentHint=detail`，提示编码器优先保留文字和细节。目标码率受网络、接收端和浏览器 H.264 编码器能力影响，不代表每秒流量恒定。
 
-发送端等待控制 DataChannel 建立后才启用分享按钮。初始 Offer 使用 WebSocket，携带 Launcher 的 roomId/userId/hostUserId/targetId；随后优先用 `webrtc-signal` DataChannel 消息协商 H.264/Opus，ICE 在 Answer 到达前排队。停止分享时清空 sender 的 track，重新选择时复用原 sender，避免出现重复视频轨道。取消或拒绝屏幕选择会保留连接并在分享页显示错误。
+发送端等待控制 DataChannel 建立后才启用分享按钮。初始 Offer 使用 WebSocket，携带 Launcher 的 roomId/userId/hostUserId/targetId；随后优先用 `webrtc-signal` DataChannel 消息协商 H.264/Opus，ICE 在 Answer 到达前排队。Windows 只弹出一次系统选屏窗口；视频由浏览器采集，WASAPI 默认播放设备音频使用独立本机会话，不依赖视频采集目标。停止分享时清空音视频 sender 的 track，重新选择时复用原 sender，避免出现重复视频轨道。取消或拒绝屏幕选择会保留连接并在分享页显示错误。
 
 反控采用 `AXTP-TYPED-INPUT-V1` / `input-sample-v1`，固定开发合同为 `0.18.0-dev.feac6fa2a4b9`（尚未发布）。控制通道完成标准 CONTROL 与 Hello/Identify/Identified 握手后，接收端通过 `input.openStream` 请求输入类型集合，发送端按实际软件能力取交集。每包使用完整 Standard Frame、STREAM header、类型字节及 CRC16；不再接受旧 BIND、TouchBatch、wire epoch 或私有文本 RPC。普通输入无应用 ACK，查询和状态变更使用现有 `stream.getState` / `stream.stateChanged`。
 
 发送端投屏页提供“允许接收端反控本机”，默认关闭；接收端也需启用。默认 Native 策略保持输入类型，不把 Touch 猜成鼠标手势。当前 Windows typed 通路支持原生 Touch（最多 10 点）；既有 Windows Mouse 后端保留，但尚未接入新版 typed Mouse。macOS 目前支持基本原生 Mouse，不支持原生 Touch，不暗转 Mouse；原有手势与滚动代码留作后续明确输出策略的实现材料。
 
-Windows 原生采集支持多屏环境中选择任意一块屏幕，或一个可见的前台窗口。分享目标按实际 HMONITOR/HWND 建立本地采集租约；反控坐标映射到该目标的物理像素范围，支持副屏负坐标和按比例降低视频分辨率。红框表示正在分享，绿框表示输入流和对应的原生输入 owner 均已就绪；停止分享后移除边框。窗口移动、缩放、失去前台、最小化或关闭会取消已按住的触点并撤销旧绑定；TX 在来源重新有效后发布新绑定，接收端需关闭旧流并使用新绑定重新开流，媒体连接保持。窗口输入还会检查目标点的实际窗口命中，遮挡处不会注入到其他窗口。当前原生源最多 3840×2160 像素，不额外放大较小窗口；视频质量设置作为保持纵横比的输出上限。macOS/浏览器回退仍要求单一活动主屏幕、无旋转、完整屏幕且原始分辨率采集，不能据 Windows 测试宣称其已支持窗口反控。实现和验证范围见 [采集目标 handoff](docs/superpowers/handoffs/2026-11-06-capture-target-and-border.md)。原生清理失败会保留 owner 并阻止重新开流；点击“重试释放输入”确认释放后，再“重建反控连接”。若接收端已有 streamId，可以在接收端显式重试关闭。输入或控制通道失败不会关闭媒体连接。
+当前反控仅在单显示器、完整屏幕分享、原始来源尺寸可确认且无旋转时启用。分享窗口或存在多显示器时，视频和音频继续发送，反控明确显示不可用，不按相同分辨率猜测屏幕。浏览器选择完成后先保存原始来源尺寸，再由 WebRTC 层应用分辨率设置，输入仍映射到原始物理屏幕。macOS 仍须满足其原有屏幕坐标和辅助功能权限要求。停止、重新选择或显示布局变化时撤销旧输入绑定、释放触点，重新就绪后由接收端开流。原生 WGC 采集模块保留为独立实验实现，默认路径不调用它。架构边界见 [浏览器采集架构](docs/architecture/browser-capture.md)。
 
 展开“反控收包诊断”或调用 `globalThis.__nearcastTouchbackDiagnostics()`，可查看 `appReady`、`sourceReady`、`nativeReady`、软件输入类型、streamId、本地 generation、队列、清理状态和错误。`receiverEnabled` 为 null，接收端的 effectiveEnabled/lifecycleState 需在接收端查询；RPC 成功本身不证明原生输入生效。诊断不包含配对码或 native lease。详细模块边界与精确合同 SHA 见 [TI-3 handoff](docs/superpowers/handoffs/2026-11-06-tx-typed-input-ti3.md)。
 
 WebSocket 地址默认为 `wss://cast.nearhub.us`，也可以通过 Tauri 页面 URL 的 `?ws=` 参数覆盖，例如 `?ws=wss%3A%2F%2Flocalhost%3A8888`。
 
-Windows 原生采集时可勾选“显示触控位置”（默认开启）：黄圈表示有效 Touch 已收到并校验，绿圈表示已提交本机注入；抬起后保留约 700 ms。提示层穿透输入并排除在采集画面外，关闭开关或反控连接结束后清除。绿圈表示原生 API 已确认提交，不等同于目标应用已处理事件。
-
-已知联调限制：当前 RX 在活动输入流中收到来源几何变化或撤回时可能关闭反控通道，尺寸变化后尚不能保证自动恢复。暂时可在发送端点击“重建反控连接”，再在接收端重新开启反控；共享窗口仍须处于前台。此限制不代表应继续使用旧坐标注入，后续需补齐双方的关闭旧流、接收新绑定及重新开流流程，见 [窗口尺寸变化重绑定记录](docs/superpowers/handoffs/2026-11-06-window-resize-input-rebinding.md)。
-
-Windows 的分享范围选择器使用“屏幕 / 窗口”页签和真实缩略图卡片，选中后点击“开始分享”。缩略图是本次打开选择器时的快照，只在本机按需读取；关闭后释放，重新打开会重新读取。预览不可用时仍可选择目标尝试分享。
+当前默认浏览器采集不使用原生红绿边框或桌面触点提示层；分享状态由系统采集指示和发送端界面呈现。旧 WGC 选择器、窗口反控与边框相关文档保留为历史实验记录，不代表本次默认行为。
 
 ## 局域网发现与显示配对码
 

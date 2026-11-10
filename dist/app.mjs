@@ -7,8 +7,7 @@ import {loadPlatformInfo, platformSummary, screenCaptureError, touchbackSummary}
 import {canAttachTouchbackChannel} from './webcast/touchback-channel-policy.mjs';
 import {normalizeVideoQuality} from './webcast/video-quality.mjs';
 import {MacOsPermissions} from './macos-permissions.mjs';
-import {NativeCaptureMediaDevices} from './capture/native-capture.mjs';
-import {CaptureTargetPreviews} from './capture/target-previews.mjs';
+import {BrowserCaptureMediaDevices} from './capture/browser-capture.mjs';
 import {TouchFeedback} from './touchback/touch-feedback.mjs';
 import {mountUpdates} from './update/update-ui.mjs';
 
@@ -40,6 +39,8 @@ const stopShareButton = document.querySelector('#stop-share-button');
 const leaveButton = document.querySelector('#leave-button');
 const previewWrap = document.querySelector('#preview-wrap');
 const preview = document.querySelector('#preview');
+const systemAudioEnabled=document.querySelector('#system-audio-enabled');
+const systemAudioStatus=document.querySelector('#system-audio-status');
 const castError = document.querySelector('#cast-error');
 const platformStatus = document.querySelector('#platform-status');
 const touchbackStatus = document.querySelector('#touchback-status');
@@ -62,10 +63,6 @@ touchFeedbackToggle.addEventListener('change',()=>touchFeedback.setEnabled(touch
 const inputState = document.querySelector('#input-state');
 const inputReconnect = document.querySelector('#input-reconnect');
 const inputCleanup = document.querySelector('#input-cleanup');
-const capturePicker = document.querySelector('#capture-picker');
-const captureTarget = document.querySelector('#capture-target');
-const captureConfirm = document.querySelector('#capture-picker-confirm');
-const capturePickerError = document.querySelector('#capture-picker-error');
 let permissionActionPending = false;
 let permissionSettingsOpened = null;
 
@@ -81,14 +78,23 @@ let touchback;
 let platformReady = Promise.resolve();
 let controlGeneration = 0;
 let capturePending = false;
-let nativeCapture = null;
+let captureProvider = null;
+let client;
 let videoQuality = normalizeVideoQuality({resolution: videoResolution.value, bitrateMode: videoBitrateMode.value, bitrateKbps: videoBitrate.value});
-globalThis.__nearcastTouchbackDiagnostics = () => touchback ? {...touchback.diagnostics(), control: touchback.controlDiagnostics(),capture:nativeCapture?.diagnostics()??null,touchFeedback:touchFeedback.diagnostics()} : null;
+globalThis.__nearcastTouchbackDiagnostics = () => touchback ? {...touchback.diagnostics(), control: touchback.controlDiagnostics(),capture:captureProvider?.diagnostics()??null,touchFeedback:touchFeedback.diagnostics()} : null;
 const controlDiagnostics = document.querySelector('#touchback-diagnostics');
 const renderControlDiagnostics = () => {
-  if (controlDiagnostics) controlDiagnostics.textContent = JSON.stringify(globalThis.__nearcastTouchbackDiagnostics(), null, 2);
+  if (controlDiagnostics) controlDiagnostics.textContent = JSON.stringify({...globalThis.__nearcastTouchbackDiagnostics(),media:client?.mediaDiagnostics??null}, null, 2);
+  const audio=captureProvider?.diagnostics()?.audio;
+  if(systemAudioStatus)systemAudioStatus.textContent=audio?.error?`系统声音不可用，视频继续：${audio.error}`:audio?.state==='capturing'?'正在分享默认播放设备的系统声音':captureProvider?.current?'本次分享没有音频轨道':'开始分享后采集系统声音';
 };
-setInterval(renderControlDiagnostics, 1000);
+let mediaStatsPending=false;
+setInterval(async()=>{
+  if(mediaStatsPending)return;
+  mediaStatsPending=true;
+  try{await client?.refreshMediaDiagnostics?.();}catch{/* Statistics cannot stop media. */}
+  finally{mediaStatsPending=false;renderControlDiagnostics();}
+},1000);
 
 const setError = (element, error) => {
   element.textContent = error ? (error.message || String(error)) : '';
@@ -156,9 +162,8 @@ const buildTouchback = () => new WebCastTouchbackSender({
   provider: createPlatformInputAdapter({}, {invoke}),
   onTouchFeedback:event=>touchFeedback.observe(event),
   onStatus: (_status, state) => {
-    void nativeCapture?.setInputState(state);
-    const reasons = {LOCAL_INPUT_DISABLED:'反控未启用', APP_NOT_READY:'等待接收端建立反控会话', TARGET_UNBOUND:'等待接收端绑定投屏来源', CAPTURE_UNAVAILABLE:'请先分享屏幕或窗口', CAPTURE_CHANGED:'分享已停止，重新分享后等待接收端恢复反控', CAPTURE_GEOMETRY_CHANGED:'正在更新分享范围，反控暂时暂停', CAPTURE_MUTED:'采集已暂停', NATIVE_CLEANUP_PENDING:'等待释放上一次输入', NATIVE_PERMISSION_UNAVAILABLE:'本机输入不可用，请检查系统权限', NATIVE_DOMAIN_BUSY:'本机输入正由其他会话使用', NATIVE_GEOMETRY_UNAVAILABLE:'无法确认当前分享范围的坐标映射，请查看反控诊断', TARGET_CONTRACT_MISMATCH:'接收端反控协议版本不匹配', INPUT_SESSION_FAULT:'反控连接异常，可重建连接'};
-    inputState.textContent = !state.localEnabled ? '反控未启用' : state.state === 'active' && state.sourceReady ? `反控已开启 · ${state.acceptedInputTypes.join(' / ')} · stream ${state.streamId}` : state.sourceReady ? '本机已就绪，等待接收端开启反控' : state.detail?.includes('capture_window_not_foreground') ? '窗口反控已暂停，请切回正在分享的窗口' : state.detail?.includes('minimized') ? '窗口已最小化，反控已暂停' : state.disabledReason === 'NATIVE_PROBE_FAILED' ? '无法读取本机输入能力，请重试或检查系统权限' : nativeCapture && state.disabledReason === 'NATIVE_GEOMETRY_UNAVAILABLE' ? '正在确认分享范围，反控暂不可用' : state.disabledReason === 'INPUT_SESSION_FAULT' && state.detail?.includes('Input queue age') ? '输入处理积压，已释放触点；可重建反控连接' : reasons[state.disabledReason] || '正在准备反控';
+    const reasons = {LOCAL_INPUT_DISABLED:'反控未启用', APP_NOT_READY:'等待接收端建立反控会话', TARGET_UNBOUND:'等待接收端绑定投屏来源', CAPTURE_UNAVAILABLE:'请先分享整个屏幕', CAPTURE_CHANGED:'分享已停止，重新分享后等待接收端恢复反控', CAPTURE_GEOMETRY_CHANGED:'正在更新分享范围，反控暂时暂停', CAPTURE_MUTED:'采集已暂停', NATIVE_CLEANUP_PENDING:'等待释放上一次输入', NATIVE_PERMISSION_UNAVAILABLE:'本机输入不可用，请检查系统权限', NATIVE_DOMAIN_BUSY:'本机输入正由其他会话使用', NATIVE_GEOMETRY_UNAVAILABLE:'无法确认当前分享范围的坐标映射，请查看反控诊断', TARGET_CONTRACT_MISMATCH:'接收端反控协议版本不匹配', INPUT_SESSION_FAULT:'反控连接异常，可重建连接'};
+    inputState.textContent = !state.localEnabled ? '反控未启用' : state.state === 'active' && state.sourceReady ? `反控已开启 · ${state.acceptedInputTypes.join(' / ')} · stream ${state.streamId}` : state.sourceReady ? '本机已就绪，等待接收端开启反控' : state.detail?.includes('BROWSER_WINDOW_INPUT_UNSUPPORTED') ? '窗口投屏可用；反控请改为分享整个屏幕' : state.detail?.includes('BROWSER_MULTIPLE_DISPLAYS_UNPROVEN') ? '多显示器投屏可用；当前无法确认屏幕坐标，反控暂不可用' : state.detail?.includes('BROWSER_SOURCE_SIZE_UNPROVEN') ? '无法确认原始屏幕尺寸，反控暂不可用' : state.detail?.includes('capture_window_not_foreground') ? '窗口反控已暂停，请切回正在分享的窗口' : state.detail?.includes('minimized') ? '窗口已最小化，反控已暂停' : state.disabledReason === 'NATIVE_PROBE_FAILED' ? '无法读取本机输入能力，请重试或检查系统权限' : captureProvider && state.disabledReason === 'NATIVE_GEOMETRY_UNAVAILABLE' ? '正在确认分享范围，反控暂不可用' : state.disabledReason === 'INPUT_SESSION_FAULT' && state.detail?.includes('Input queue age') ? '输入处理积压，已释放触点；可重建反控连接' : reasons[state.disabledReason] || '正在准备反控';
     inputCleanup.hidden = !state.cleanupPending;
     inputReconnect.disabled = state.cleanupPending || !['connected','sharing'].includes(currentStatus);
     touchbackStatus.textContent = touchbackSummary(platformInfo ?? {});
@@ -181,90 +186,7 @@ inputReconnect.addEventListener('click', async () => {
   try { client.recreateControlChannel({replace: true}); }
   catch (error) { inputState.textContent = error.message; }
 });
-let capturePickerGeneration = 0;
-const chooseCaptureTarget = async () => {
-  const generation = ++capturePickerGeneration;
-  capturePicker.returnValue = 'cancel';captureTarget.replaceChildren();captureConfirm.disabled = true;setError(capturePickerError, null);
-  const choices = await invoke('nearcast_capture_targets');
-  if (generation !== capturePickerGeneration) return null;
-  let selectedTargetId = null;
-  const rows = [], tabs = [], tabsHost = document.querySelector('#capture-kind-tabs');
-  tabsHost.replaceChildren();
-  const previews = new CaptureTargetPreviews({invoke});
-  const selectRow = row => {
-    if (!capturePicker.open || row.hidden || generation !== capturePickerGeneration) return;
-    selectedTargetId = row.dataset.targetId;
-    for (const candidate of rows) {
-      candidate.setAttribute('aria-checked', String(candidate === row));
-      candidate.tabIndex = candidate === row ? 0 : -1;
-    }
-    captureConfirm.disabled = false;
-    row.focus({preventScroll:true});
-  };
-  const setKind = kind => {
-    selectedTargetId = null;captureConfirm.disabled = true;captureTarget.scrollTop = 0;
-    for (const tab of tabs) {const active=tab.dataset.kind===kind;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;}
-    let first = true;
-    for (const row of rows) {
-      row.hidden = row.dataset.kind !== kind;row.setAttribute('aria-checked','false');
-      row.tabIndex = !row.hidden && first ? 0 : -1;if(!row.hidden)first=false;
-    }
-  };
-  for (const [kind, label] of [['monitor','屏幕'],['window','窗口']]) {
-    const groupChoices = choices.filter(choice => choice.kind === kind);
-    if (!groupChoices.length) continue;
-    const tab=document.createElement('button');tab.type='button';tab.dataset.kind=kind;tab.setAttribute('role','tab');tab.setAttribute('aria-controls','capture-target');tab.textContent=`${label} (${groupChoices.length})`;tabs.push(tab);tabsHost.append(tab);
-    tab.addEventListener('click',()=>setKind(kind));
-    tab.addEventListener('keydown',event=>{
-      if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
-      event.preventDefault();const index=event.key==='Home'?0:event.key==='End'?tabs.length-1:(tabs.indexOf(tab)+(event.key==='ArrowLeft'?-1:1)+tabs.length)%tabs.length;
-      setKind(tabs[index].dataset.kind);tabs[index].focus();
-    });
-    for (const choice of groupChoices) {
-      const row = document.createElement('button');row.type = 'button';row.className = 'capture-target-row';
-      row.dataset.targetId = choice.targetId;row.dataset.kind=kind;row.setAttribute('role','radio');row.setAttribute('aria-checked','false');row.tabIndex=-1;
-      const preview=document.createElement('span');preview.className='capture-target-preview';preview.dataset.status='loading';preview.textContent='正在加载预览…';preview.setAttribute('aria-hidden','true');
-      const title = document.createElement('span');title.className = 'capture-target-title';
-      title.textContent = kind === 'monitor' ? `${choice.primary ? '主屏幕' : `副屏幕${choice.region.x < 0 ? '（左侧）' : choice.region.y < 0 ? '（上方）' : ''}`} · ${choice.region.width} × ${choice.region.height}` : choice.title;
-      row.title = title.textContent;row.append(preview,title);rows.push(row);captureTarget.append(row);
-      row.addEventListener('click', () => selectRow(row));
-      row.addEventListener('keydown', event => {
-        const visible=rows.filter(candidate=>!candidate.hidden);
-        const columns=Math.max(1,getComputedStyle(captureTarget).gridTemplateColumns.split(' ').length);
-        const step = {ArrowDown:columns,ArrowRight:1,ArrowUp:-columns,ArrowLeft:-1}[event.key];
-        if (!step && !['Home','End'].includes(event.key)) return;
-        event.preventDefault();
-        const index = event.key === 'Home' ? 0 : event.key === 'End' ? visible.length - 1 : (visible.indexOf(row) + step % visible.length + visible.length) % visible.length;
-        selectRow(visible[index]);visible[index].scrollIntoView({block:'nearest'});
-      });
-    }
-  }
-  if (!rows.length) {previews.dispose();throw new Error('没有可分享的屏幕或窗口');}
-  const observer=new IntersectionObserver(entries=>{
-    for(const entry of entries){
-      const row=entry.target;
-      if(!entry.isIntersecting||row.hidden||!capturePicker.open)continue;
-      previews.request(row.dataset.targetId,state=>{
-        if(!capturePicker.open||generation!==capturePickerGeneration)return;
-        const box=row.querySelector('.capture-target-preview');box.dataset.status=state.status;
-        if(state.status==='ready'){
-          const img=document.createElement('img');img.alt='';img.src=state.url;
-          img.onerror=()=>{box.dataset.status='error';box.textContent='预览暂不可用';};box.replaceChildren(img);
-        }else box.textContent=state.status==='error'?'预览暂不可用':'正在加载预览…';
-      });
-    }
-  },{root:captureTarget});
-  setKind(tabs[0].dataset.kind);
-  return new Promise(resolve => {
-    capturePicker.addEventListener('close', () => {
-      observer.disconnect();previews.dispose();
-      resolve(generation === capturePickerGeneration && capturePicker.returnValue === 'share' ? selectedTargetId : null);
-    }, {once:true});
-    capturePicker.showModal();for(const row of rows)observer.observe(row);
-  });
-};
-chooseCaptureTarget.cancel = () => { capturePickerGeneration++;if (capturePicker.open) capturePicker.close('cancel'); };
-const client = new LauncherWebCastClient({
+client = new LauncherWebCastClient({
   endpoint: selectedEndpoint,
   videoQuality,
   codeDisplayTransport: ({instance, request}) => invoke('nearcast_code_display', {instance, request}),
@@ -280,7 +202,7 @@ const client = new LauncherWebCastClient({
     setCodeDisplayStatus(`无法请求接收端显示配对码：${error.message || error}`);
     if (String(error.message || error).includes('NEARCAST_KEY_MISMATCH')) trustManager.keyMismatch(error.message || error);
   },
-  onSessionEnded: () => { controlGeneration++; touchback.fence(); void nativeCapture?.stop().catch(error => setError(castError,error)); },
+  onSessionEnded: () => { controlGeneration++; touchback.fence(); void captureProvider?.stop().catch(error => setError(castError,error)); },
   onControlClosed: () => { controlGeneration++; void touchback.fence('control channel closed'); inputReconnect.disabled = false; inputState.textContent = '反控连接已关闭，投屏继续'; },
   onControlChannel: (channel, mediaIdentity) => {
     if (!canAttachTouchbackChannel(channel)) return;
@@ -346,7 +268,7 @@ shareButton.addEventListener('click', async () => {
   if (capturePending) return;
   capturePending = true; shareButton.disabled = true;
   setError(castError, null);
-  try { client.videoQuality = videoQuality; await client.startScreenShare({video: true, audio: true}); }
+  try { client.videoQuality = videoQuality; await client.startScreenShare({video: true, audio: systemAudioEnabled.checked}); }
   catch (error) { setError(castError, screenCaptureError(error, platformInfo)); }
   finally { capturePending = false; shareButton.disabled = !['connected', 'sharing'].includes(currentStatus); }
 });
@@ -457,16 +379,14 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
 setView('idle');
 platformReady = loadPlatformInfo(invoke).then(info => {
   platformInfo = info;
-  document.querySelector('#touch-feedback-settings').hidden=!(info.os==='windows'&&info.nativeCapture);
-  touchFeedback.setEnabled(info.os==='windows'&&info.nativeCapture&&touchFeedbackToggle.checked);
-  if (info.os === 'windows' && info.nativeCapture) {
-    document.querySelector('#capture-help').textContent = '红框表示正在分享，绿框表示反控已就绪；分享窗口时请保持该窗口处于前台。';
-    nativeCapture = new NativeCaptureMediaDevices({invoke, chooseTarget:chooseCaptureTarget, displayMediaDevices:navigator.mediaDevices,
-      onGeometryChange: (_geometry, track) => { if (touchback.track === track) void touchback.captureGeometryChanged(); },
-      onStatus: state => { if (state.error) setError(castError, new Error(state.error)); },
-    });
-    client.mediaDevices = nativeCapture;
-  }
+  document.querySelector('#touch-feedback-settings').hidden=true;
+  touchFeedback.setEnabled(false);
+  document.querySelector('#system-audio-settings').hidden=false;
+  document.querySelector('#capture-help').textContent = '系统选择器可分享屏幕或窗口；当前仅单显示器的整个屏幕支持反控。多屏和窗口仍可投屏。';
+  captureProvider = new BrowserCaptureMediaDevices({platform:info.os,invoke,mediaDevices:navigator.mediaDevices,
+    onStatus: state => { if (state.error) setError(castError, new Error(state.error)); },
+  });
+  client.mediaDevices = captureProvider;
   permissionsPanel.hidden = info.os !== 'macos';
   if (info.os === 'macos') { renderPermissions(); refreshPermissions(); }
   platformStatus.textContent = platformSummary(info);
@@ -483,7 +403,7 @@ if (tauri.core?.invoke) {
       await touchback.fence('software update');
       if (touchback.diagnostics()?.cleanupPending) throw new Error('输入尚未释放，请先重试释放输入后再更新。');
       await client.stop();
-      await nativeCapture?.stop();
+      await captureProvider?.stop();
     },
   });
   window.addEventListener('beforeunload', () => updates.stop());

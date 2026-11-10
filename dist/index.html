@@ -55,6 +55,11 @@
       <div class="panel-eyebrow">CONNECTED TO RECEIVER</div>
       <h1>Sharing to <span id="target-name">NearCast</span></h1>
       <p id="cast-status" class="panel-desc">Receiver is ready for casting.</p>
+      <div id="system-audio-settings" hidden>
+        <label><input id="system-audio-enabled" type="checkbox" checked> 分享系统声音（下次开始分享时生效）</label>
+        <p class="quality-help">采集默认播放设备的全部系统声音，分享窗口时也一样；不采集麦克风。</p>
+        <p id="system-audio-status" class="quality-help" aria-live="polite"></p>
+      </div>
       <div id="preview-wrap" class="preview-wrap" hidden><video id="preview" autoplay muted playsinline></video><span class="preview-badge">LOCAL PREVIEW</span></div>
       <section class="macos-interaction" aria-label="反向控制">
         <label><input id="input-enabled" type="checkbox"> 允许接收端反控本机</label>
@@ -63,7 +68,7 @@
           <label><input id="touch-feedback-enabled" type="checkbox" checked> 显示触控位置</label>
           <p class="quality-help">黄圈：收到 Touch · 绿圈：已提交本机注入。抬起后短暂保留，仅本机显示。</p>
         </div>
-        <p id="capture-help" class="quality-help">反控需要双方启用，请在分享前确认目标范围。</p>
+        <p id="capture-help" class="quality-help">反控需要双方启用；当前仅单显示器的整个屏幕支持反控。</p>
         <button id="input-reconnect" class="refresh" type="button" disabled>重建反控连接</button>
         <button id="input-cleanup" class="refresh" type="button" hidden>重试释放输入</button>
       </section>
@@ -91,16 +96,6 @@
 
     <footer>Launcher-compatible WebCast · Native Touch / Mouse input</footer>
   </main>
-  <dialog id="capture-picker" class="capture-picker" aria-labelledby="capture-picker-title">
-    <form method="dialog">
-      <h2 id="capture-picker-title">选择分享范围</h2>
-      <p>选择一个屏幕或窗口。分享窗口时，反控仅在该窗口处于前台且目标可见时启用。</p>
-      <div id="capture-kind-tabs" class="capture-kind-tabs" role="tablist" aria-label="分享类型"></div>
-      <div id="capture-target" class="capture-target-list" role="radiogroup" aria-label="屏幕或窗口"></div>
-      <p id="capture-picker-error" class="error" hidden></p>
-      <div class="capture-picker-actions"><button class="button secondary" value="cancel">取消</button><button id="capture-picker-confirm" class="button primary" value="share" disabled>开始分享</button></div>
-    </form>
-  </dialog>
   <dialog id="update-dialog" class="update-dialog" aria-labelledby="update-title">
     <h2 id="update-title">软件更新</h2>
     <p id="update-detail" aria-live="polite"></p>

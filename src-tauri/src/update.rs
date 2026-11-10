@@ -529,6 +529,7 @@ pub async fn install(app: AppHandle, state: &State) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(|| {
         crate::input_native::ensure_released_for_update()?;
         crate::native_capture::shutdown();
+        #[cfg(windows)] crate::native_audio::shutdown();
         Ok::<_, String>(())
     })
     .await

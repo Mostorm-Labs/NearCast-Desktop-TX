@@ -90,11 +90,25 @@ export class LauncherWebCastClient {
     this.remoteReady = false;
     this.signalingChain = Promise.resolve();
     this.mediaSenders = new Map();
+    this.mediaDiagnostics = {video: null, audio: null, updatedAt: 0};
   }
 
   setStatus(status) {
     this.status = status;
     this.onStatus(status);
+  }
+
+  async refreshMediaDiagnostics() {
+    const read = async sender => {
+      if (!sender || typeof sender.getStats !== 'function') return null;
+      const stats = await sender.getStats();
+      const row = [...stats.values()].find(value => value.type === 'outbound-rtp' && value.kind === sender.track?.kind);
+      if (!row) return null;
+      return {framesSent: row.framesSent ?? 0, framesEncoded: row.framesEncoded ?? 0, framesPerSecond: row.framesPerSecond ?? null, totalEncodeTime: row.totalEncodeTime ?? 0, qualityLimitationReason: row.qualityLimitationReason ?? 'none'};
+    };
+    const [video, audio] = await Promise.all([read(this.mediaSenders.get('video')), read(this.mediaSenders.get('audio'))]);
+    this.mediaDiagnostics = {video, audio, updatedAt: Date.now()};
+    return this.mediaDiagnostics;
   }
 
   send(payload) {

@@ -42,6 +42,7 @@ export async function applyVideoEncodingParameters(sender, quality = DEFAULT_VID
   parameters.encodings = encodings.map(encoding => {
     const next = {...encoding};
     next.maxBitrate = normalized.bitrateKbps * 1000;
+    next.maxFramerate = 60;
     next.scaleResolutionDownBy = 1;
     return next;
   });

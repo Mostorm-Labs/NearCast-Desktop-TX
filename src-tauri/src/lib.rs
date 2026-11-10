@@ -13,6 +13,8 @@ mod capture_thumbnail;
 mod touch_feedback;
 mod native_capture;
 mod update;
+#[cfg(any(windows,test))]
+mod native_audio;
 #[cfg(windows)]
 mod capture_indicator;
 #[cfg(all(test,windows))]
@@ -278,7 +280,7 @@ async fn nearcast_update_install(app: AppHandle, state: State<'_, update::State>
 #[tauri::command]
 fn nearcast_platform_info() -> serde_json::Value {
     #[cfg(target_os = "windows")]
-    { return serde_json::json!({"os":"windows","webview":"WebView2","screenCapture":true,"nativeCapture":native_capture::supported(),"screenCapturePermission":"not_required","touchback":true,"inputControl":"windows-pointer","multiTouch":true,"accessibilityPermission":"not_required"}); }
+    { return serde_json::json!({"os":"windows","webview":"WebView2","screenCapture":true,"nativeCapture":false,"captureBackend":"browser","systemAudio":true,"screenCapturePermission":"not_required","touchback":true,"inputControl":"windows-pointer","multiTouch":true,"accessibilityPermission":"not_required"}); }
     #[cfg(target_os = "macos")]
     { return serde_json::json!({"os":"macos","webview":"WKWebView","screenCapture":true,"screenCapturePermission":"required","touchback":true,"inputControl":"macos-mouse","multiTouch":false,"accessibilityPermission":"required"}); }
     #[cfg(target_os = "linux")]
@@ -346,11 +348,34 @@ async fn nearcast_capture_start(target_id:String)->Result<serde_json::Value,Stri
     {let _=target_id;Err("native_capture_not_supported".into())}
 }
 #[tauri::command]
-async fn nearcast_capture_frame(capture_id:String)->Result<tauri::ipc::Response,String>{
+async fn nearcast_audio_start(capture_id:String)->Result<serde_json::Value,String>{
+    #[cfg(windows)] {return tauri::async_runtime::spawn_blocking(move||native_capture::start_audio(&capture_id)).await.map_err(|e|e.to_string())?;}
+    #[cfg(not(windows))] {let _=capture_id;Err("native_audio_not_supported".into())}
+}
+#[tauri::command]
+async fn nearcast_system_audio_start(capture_id:String)->Result<serde_json::Value,String>{
+    #[cfg(windows)] {
+        if capture_id.len()!=36 || !capture_id.bytes().all(|b| b.is_ascii_hexdigit()||b==b'-') {return Err("invalid_audio_owner".into());}
+        return tauri::async_runtime::spawn_blocking(move||native_audio::start(&capture_id)).await.map_err(|e|e.to_string())?;
+    }
+    #[cfg(not(windows))] {let _=capture_id;Err("native_audio_not_supported".into())}
+}
+#[tauri::command]
+async fn nearcast_audio_read(capture_id:String)->Result<tauri::ipc::Response,String>{
+    #[cfg(windows)] {return tauri::async_runtime::spawn_blocking(move||native_audio::read(&capture_id).map(tauri::ipc::Response::new)).await.map_err(|e|e.to_string())?;}
+    #[cfg(not(windows))] {let _=capture_id;Err("native_audio_not_supported".into())}
+}
+#[tauri::command]
+async fn nearcast_audio_stop(capture_id:String)->Result<(),String>{
+    #[cfg(windows)] {return tauri::async_runtime::spawn_blocking(move||native_audio::stop(&capture_id)).await.map_err(|e|e.to_string())?;}
+    #[cfg(not(windows))] {let _=capture_id;Ok(())}
+}
+#[tauri::command]
+async fn nearcast_capture_frame(capture_id:String,after_version:Option<u64>)->Result<tauri::ipc::Response,String>{
     #[cfg(windows)]
-    {return tauri::async_runtime::spawn_blocking(move||native_capture::frame(&capture_id).map(tauri::ipc::Response::new)).await.map_err(|e|e.to_string())?;}
+    {return tauri::async_runtime::spawn_blocking(move||native_capture::frame_after(&capture_id,after_version.unwrap_or(0)).map(tauri::ipc::Response::new)).await.map_err(|e|e.to_string())?;}
     #[cfg(not(windows))]
-    {let _=capture_id;Err("native_capture_not_supported".into())}
+    {let _=(capture_id,after_version);Err("native_capture_not_supported".into())}
 }
 #[tauri::command]
 async fn nearcast_capture_stop(capture_id:String)->Result<(),String>{
@@ -382,7 +407,7 @@ pub fn run() {
         .manage(MdnsState(Mutex::new(None)))
         .manage(TrustState::default())
         .on_window_event(|_, event| {
-            if matches!(event,tauri::WindowEvent::CloseRequested{..}|tauri::WindowEvent::Destroyed){input_native::shutdown();native_capture::shutdown();}
+            if matches!(event,tauri::WindowEvent::CloseRequested{..}|tauri::WindowEvent::Destroyed){input_native::shutdown();native_capture::shutdown();#[cfg(windows)] native_audio::shutdown();}
             #[cfg(target_os = "macos")]
             if matches!(event, tauri::WindowEvent::Destroyed) { let _ = macos_input::reset(); }
             #[cfg(windows)]
@@ -392,13 +417,14 @@ pub fn run() {
             #[cfg(not(target_os = "macos"))]
             let _ = event;
         })
-        .invoke_handler(tauri::generate_handler![nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_capture_targets, nearcast_capture_thumbnail, nearcast_capture_start, nearcast_capture_frame, nearcast_capture_stop, nearcast_capture_indicator, nearcast_capture_touch_feedback, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info, nearcast_update_initialize, nearcast_update_check, nearcast_update_download, nearcast_update_install])
+        .invoke_handler(tauri::generate_handler![nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_capture_targets, nearcast_capture_thumbnail, nearcast_capture_start, nearcast_audio_start, nearcast_system_audio_start, nearcast_audio_read, nearcast_audio_stop, nearcast_capture_frame, nearcast_capture_stop, nearcast_capture_indicator, nearcast_capture_touch_feedback, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info, nearcast_update_initialize, nearcast_update_check, nearcast_update_download, nearcast_update_install])
         .build(tauri::generate_context!())
         .expect("error while building NearCast Desktop TX")
         .run(|_, event| {
             if matches!(event, tauri::RunEvent::Exit) {
                 input_native::shutdown();
                 native_capture::shutdown_runtime();
+                #[cfg(windows)] native_audio::shutdown();
             }
         });
 }

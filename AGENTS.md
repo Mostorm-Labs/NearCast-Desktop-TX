@@ -1,5 +1,9 @@
 # NearCast Desktop TX 发布约定
 
+## 采集架构
+
+默认视频由系统 getDisplayMedia 返回的原始轨道直接交给 WebRTC；Windows 系统音频独立使用 WASAPI，不依赖 WGC 视频租约。当前反控只允许可证明的单显示器整屏来源；窗口和多屏视频可分享但不猜测坐标。原生 WGC 保留为实验实现，默认 UI 不启动其采集或缩略图流程。模块边界与验收范围见 [浏览器采集架构](docs/architecture/browser-capture.md)。
+
 ## 版本号
 
 对外版本号固定为 `X.Y.Z.Build`：

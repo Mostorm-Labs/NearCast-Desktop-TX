@@ -67,9 +67,34 @@ test('applies selected capture resolution and fixed video bitrate to the sender'
   await client.startScreenShare();
   assert.deepEqual(captures[0], {video: {width: {ideal: 1920}, height: {ideal: 1080}}, audio: false});
   assert.equal(parameters.encodings[0].maxBitrate, 8000000);
+  assert.equal(parameters.encodings[0].maxFramerate, 60);
   assert.equal(parameters.degradationPreference, 'maintain-resolution');
   assert.equal(fixture.track.contentHint, 'detail');
   assert.deepEqual(fixture.track.appliedConstraints.at(-1), {width: {ideal: 1920}, height: {ideal: 1080}});
+  await client.stop();
+});
+
+test('reports outbound video encoder statistics for frame-rate diagnosis', async () => {
+  const fixture = streamFixture();
+  const parameters = {encodings: [{}]};
+  const sender = {
+    track: fixture.track,
+    getParameters: () => parameters,
+    async setParameters(value) { Object.assign(parameters, value); },
+    async replaceTrack() {},
+    async getStats() { return new Map([['video', {type: 'outbound-rtp', kind: 'video', framesSent: 41, framesEncoded: 39, framesPerSecond: 29.5, totalEncodeTime: 1.24, qualityLimitationReason: 'none'}]]); },
+  };
+  class StatsPeer extends FakePeerConnection {
+    addTrack(track, stream) { this.tracks.push({track, stream}); return sender; }
+    getTransceivers() { return [{sender, setCodecPreferences() {}}]; }
+  }
+  FakeSocket.instances.length = 0;
+  const client = new LauncherWebCastClient({WebSocketImpl: FakeSocket, RTCPeerConnectionImpl: StatsPeer,
+    mediaDevices: {getDisplayMedia: async () => fixture.stream}});
+  const connecting = client.connect('1234'); const socket = FakeSocket.instances.at(-1); socket.open(); await connecting;
+  await socket.receive({type: 'joined'}); await wait(); await client.startScreenShare();
+  await client.refreshMediaDiagnostics();
+  assert.deepEqual(client.mediaDiagnostics.video, {framesSent: 41, framesEncoded: 39, framesPerSecond: 29.5, totalEncodeTime: 1.24, qualityLimitationReason: 'none'});
   await client.stop();
 });
 
@@ -113,6 +138,7 @@ test('leaves bitrate adaptive when dynamic mode is selected', async () => {
   await socket.receive({type: 'joined'}); await wait();
   await client.startScreenShare();
   assert.equal(parameters.encodings[0].maxBitrate, 8000000);
+  assert.equal(parameters.encodings[0].maxFramerate, 60);
   assert.equal(parameters.degradationPreference, 'balanced');
   assert.equal(parameters.encodings[0].scaleResolutionDownBy, 1);
   await client.stop();

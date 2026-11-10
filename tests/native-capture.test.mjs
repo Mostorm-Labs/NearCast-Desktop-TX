@@ -20,23 +20,90 @@ test('quality sizing preserves the captured aspect ratio without stretching a wi
   assert.deepEqual(fitCaptureSize(2000,1000,{width:{ideal:1280},height:{ideal:720}}),{width:1280,height:640});
 });
 
-test('native video capture can reuse a browser display-audio track without capturing a microphone', async () => {
+test('native canvas capture declares a 60 fps sampling target',async()=>{
+  let requestedRate=null;
+  const video={kind:'video',getSettings:()=>({width:2,height:2}),stop(){}};
+  const devices=new NativeCaptureMediaDevices({chooseTarget:async()=> 'target-1',
+    createCanvas:()=>({canvas:{captureStream(rate){requestedRate=rate;return{getVideoTracks:()=>[video]};}},close(){}}),
+    invoke:async method=>{if(method==='nearcast_capture_start')return{...geometry,captureWidth:2,captureHeight:2};if(method==='nearcast_capture_frame')return new Promise(()=>{});}});
+  await devices.getDisplayMedia({video:true});
+  assert.equal(requestedRate,60);
+  await devices.stop();
+});
+
+test('native capture does not redraw the same native frame more than once',async()=>{
+  let reads=0,requests=0;
+  const video={kind:'video',getSettings:()=>({width:2,height:2}),stop(){},requestFrame(){requests++;}};
+  const pixels=Uint8Array.from([0,0,0,255,0,0,0,255,0,0,0,255,0,0,0,255]);
+  const devices=new NativeCaptureMediaDevices({chooseTarget:async()=> 'target-1',
+    createCanvas:()=>({canvas:{captureStream:()=>({getVideoTracks:()=>[video]})},draw(){},close(){}}),
+    invoke:async method=>{
+      if(method==='nearcast_capture_start')return{...geometry,captureWidth:2,captureHeight:2};
+      if(method==='nearcast_capture_frame'){
+        reads++;
+        if(reads===1)return packet({frameId:1},pixels);
+        if(reads===2)return packet({frameId:1},pixels);
+        if(reads===3)return packet({frameId:2},Uint8Array.from(pixels.map((v,i)=>i===1?255:v)));
+        return new Promise(()=>{});
+      }
+    }});
+  await devices.getDisplayMedia({video:true});
+  await new Promise(resolve=>setImmediate(resolve));
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(devices.diagnostics().frames,2);
+  assert.equal(requests,2);
+  await devices.stop();
+});
+
+test('native capture uses the WASAPI audio bridge without opening a second display picker', async () => {
   const calls = [];
   const video = {kind:'video',getSettings:()=>({width:2,height:2}),stop(){this.stopped=true;}};
   const audio = {kind:'audio',stop(){this.stopped=true;}};
   const nativeStream = {getVideoTracks:()=>[video],getTracks(){return [video,...(this.audio?[this.audio]:[])];},addTrack(track){this.audio=track;},getAudioTracks(){return this.audio?[this.audio]:[];}};
-  const displayAudio = {getTracks:()=>[audio],getVideoTracks:()=>[video],getAudioTracks:()=>[audio]};
   const devices = new NativeCaptureMediaDevices({
     chooseTarget:async()=> 'target-1',
-    displayMediaDevices:{getDisplayMedia:async constraints=>{calls.push(constraints);return displayAudio;}},
+    displayMediaDevices:{getDisplayMedia:async()=>{throw new Error('second picker must not open');}},
+    createAudioTrack:async options=>{assert.equal(options.captureId,'capture-1');return {track:audio,stop:async()=>audio.stop(),diagnostics:()=>({source:'wasapi-loopback'})};},
     createCanvas:()=>({canvas:{captureStream:()=>nativeStream},close(){}}),
-    invoke:async method=>{if(method==='nearcast_capture_start')return geometry;if(method==='nearcast_capture_frame')return new Promise(()=>{});}
+    invoke:async method=>{calls.push(method);if(method==='nearcast_capture_start')return geometry;if(method==='nearcast_capture_frame')return new Promise(()=>{});}
   });
   await devices.getDisplayMedia({video:true,audio:true});
-  assert.deepEqual(calls,[{video:true,audio:true}]);
   assert.deepEqual(nativeStream.getAudioTracks(),[audio]);
+  assert.equal(devices.diagnostics().audio.source,'wasapi-loopback');
   await devices.stop();
   assert.equal(audio.stopped,true);
+});
+
+test('an unavailable system audio device preserves native video and reports the audio error',async()=>{
+  const video={kind:'video',getSettings:()=>({}),stop(){}};
+  const states=[];
+  const devices=new NativeCaptureMediaDevices({chooseTarget:async()=> 'target-1',onStatus:s=>states.push(s),
+    createAudioTrack:async()=>{throw new Error('WASAPI 0x88890004 device invalidated');},
+    createCanvas:()=>({canvas:{captureStream:()=>({getVideoTracks:()=>[video]})},close(){}}),
+    invoke:async method=>{if(method==='nearcast_capture_start')return geometry;if(method==='nearcast_capture_frame')return new Promise(()=>{});}});
+  try{const stream=await devices.getDisplayMedia({audio:true});assert.equal(stream.getVideoTracks()[0],video);assert.match(devices.diagnostics().audio.error,/0x88890004/);assert.ok(states.some(s=>s.audio?.error));}finally{await devices.stop();}
+});
+
+test('a late native audio start after stop cannot publish a retired capture or leak its audio track',async()=>{
+  let finish;const audio={stop(){this.stopped=true;}};
+  const video={getSettings:()=>({}),stop(){}};
+  const devices=new NativeCaptureMediaDevices({chooseTarget:async()=> 'target-1',
+    createAudioTrack:()=>new Promise(resolve=>{finish=resolve;}),
+    createCanvas:()=>({canvas:{captureStream:()=>({getVideoTracks:()=>[video],addTrack(){assert.fail('retired audio attached');}})},close(){}}),
+    invoke:async method=>{if(method==='nearcast_capture_start')return geometry;}});
+  const opening=devices.getDisplayMedia({audio:true});while(!finish)await new Promise(resolve=>setImmediate(resolve));
+  await devices.stop();finish({track:audio,stop:async()=>audio.stop()});await assert.rejects(opening,/retired|cancel/i);assert.equal(audio.stopped,true);
+});
+
+test('audio cleanup failure cannot prevent release of native video and its renderer',async()=>{
+  let nativeStopped=false,rendererClosed=false;
+  const video={kind:'video',getSettings:()=>({}),stop(){}};
+  const devices=new NativeCaptureMediaDevices({chooseTarget:async()=> 'target-1',
+    createAudioTrack:async()=>({track:{stop(){}},stop:async()=>{throw new Error('audio stop failed');}}),
+    createCanvas:()=>({canvas:{captureStream:()=>({getVideoTracks:()=>[video],addTrack(){}})},close(){rendererClosed=true;}}),
+    invoke:async method=>{if(method==='nearcast_capture_start')return geometry;if(method==='nearcast_capture_frame')return new Promise(()=>{});if(method==='nearcast_capture_stop')nativeStopped=true;}});
+  await devices.getDisplayMedia({audio:true});await assert.rejects(devices.stop(),/audio stop failed/);
+  assert.equal(nativeStopped,true);assert.equal(rendererClosed,true);
 });
 
 test('window resize publishes the rendered dimensions even while browser track settings lag',async()=>{

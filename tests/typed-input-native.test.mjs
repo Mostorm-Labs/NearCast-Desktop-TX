@@ -14,6 +14,16 @@ test('capture mapping requires one native primary monitor and exact uncropped mo
   assert.throws(()=>proveCaptureGeometry({displaySurface:'monitor',width:1920,height:1080},{...snapshot,displays:[{...display,rotation:90}]}));
 });
 
+test('browser source facts preserve single-monitor proof after video scaling but never infer a multi-display source',()=>{
+  const settings={displaySurface:'monitor',width:1280,height:720,nearcastBrowserSource:{displaySurface:'monitor',width:1920,height:1080}};
+  const proven=proveCaptureGeometry(settings,snapshot);
+  assert.equal(proven.region.width,1920);assert.equal(proven.captureFacts.width,1920);
+  assert.throws(()=>proveCaptureGeometry({...settings,displaySurface:'window'},snapshot));
+  assert.throws(()=>proveCaptureGeometry(settings,{...snapshot,displays:[display,{...display,nativeId:'D2'}]}),/multiple|single|display|显示器/i);
+  assert.throws(()=>proveCaptureGeometry({...settings,width:1000,height:1000},snapshot),/aspect/i);
+  assert.throws(()=>proveCaptureGeometry({...settings,nearcastBrowserSource:{...settings.nearcastBrowserSource,width:1280,height:720}},snapshot),/original/i);
+});
+
 test('typed native adapter holds a lease, maps high wire IDs, and releases only its owner',async()=>{
   const calls=[];
   const adapter=new NativeInputAdapter({invoke:async(name,args)=>{calls.push([name,args]);return name==='nearcast_input_prepare'?{status:'ready',leaseId:'native-secret'}:name==='nearcast_input_apply'?{status:'submitted',inputType:'touch',nativeApi:'InjectTouchInput',pointerType:'PT_TOUCH'}:{status:'released'};}});
