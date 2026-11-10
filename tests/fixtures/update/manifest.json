@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "version": "0.2.0.37",
+  "logicalVersion": "0.2.0",
+  "build": 37,
+  "platform": "windows",
+  "productSlug": "nearcast-tx-windows",
+  "channel": "release",
+  "notes": "Fixture",
+  "assets": [
+    {
+      "platform": "windows",
+      "arch": "x86_64",
+      "format": "nsis",
+      "name": "NearCast-Desktop-TX-0.2.0.37-windows-x86_64-setup.exe",
+      "url": "https://example.test/update.exe",
+      "size": 31,
+      "sha256": "baf4baa0dd902f958e496da4a343e76507f59549311cfcffbb1c33d1d8f7852a",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTUEhRN1lUY1lmNXV4YVpveEwweEgvdDZma3VBZ2dGU1VOaG83ajdSajhKQUpDekhLc1E5YUtpcFc4YXN3UDNnTTdFTld0UTBPUDZ5d1lTYXlINTBhL1JvYWhnV3pHS3dJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0Mjk4NzI4CWZpbGU6cGFja2FnZS5iaW4JdmVyc2lvbjowLjIuMCszNwpkMFBrSnBZT3dsZzdNRVQ5YkVxRlFvK1hHZE9IZGR6WmNjMW9EaEt3OFAwN3NYaGQ2QWVVckRqRHNCWjgxcW82MElEdE9mUm9kdXRGTUllWmphWW1DZz09Cg=="
+    }
+  ]
+}

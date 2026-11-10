@@ -537,6 +537,14 @@ pub fn shutdown() {
         }
     }
 }
+pub fn ensure_released_for_update() -> Result<(), String> {
+    shutdown();
+    if OWNER.lock().map_err(|_| "native_owner_lock_poisoned")?.is_some() {
+        Err("native_input_cleanup_pending".into())
+    } else {
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod tests {

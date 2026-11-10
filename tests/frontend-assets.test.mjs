@@ -13,9 +13,16 @@ test('Tauri frontend is self-contained under dist', () => {
 });
 
 test('every packaged runtime module exactly matches its source',()=>{
-  for(const directory of ['touchback','webcast','capture'])for(const file of fs.readdirSync(path.join(root,'src',directory)).filter(file=>file.endsWith('.mjs'))){
+  for(const directory of ['touchback','webcast','capture','update'])for(const file of fs.readdirSync(path.join(root,'src',directory)).filter(file=>file.endsWith('.mjs'))){
     assert.equal(fs.readFileSync(path.join(root,'dist',directory,file),'utf8'),fs.readFileSync(path.join(root,'src',directory,file),'utf8'),`${directory}/${file}`);
   }
+});
+
+test('plain Cargo builds include a valid updater configuration and the embedded public key',()=>{
+  const config=JSON.parse(fs.readFileSync(path.join(root,'src-tauri','tauri.conf.json'),'utf8'));
+  assert.equal(typeof config.plugins?.updater,'object');
+  assert.equal(config.plugins.updater.pubkey.trim(),fs.readFileSync(path.join(root,'src-tauri','update.pub'),'utf8').trim());
+  assert.equal(config.plugins.updater.requireSignedVersion,true);
 });
 
 test('packaged discovery module resolves its dependencies and matches source capabilities', async () => {

@@ -1,3 +1,6 @@
 src-tauri/target/
 src-tauri/gen/
+src-tauri/tauri.release.conf.json
+/release/
+node_modules/
 

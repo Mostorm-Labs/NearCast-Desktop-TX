@@ -10,6 +10,7 @@ import {MacOsPermissions} from './macos-permissions.mjs';
 import {NativeCaptureMediaDevices} from './capture/native-capture.mjs';
 import {CaptureTargetPreviews} from './capture/target-previews.mjs';
 import {TouchFeedback} from './touchback/touch-feedback.mjs';
+import {mountUpdates} from './update/update-ui.mjs';
 
 const tauri = globalThis.__TAURI__ ?? {};
 const invoke = tauri.core?.invoke ?? (async () => false);
@@ -474,3 +475,16 @@ platformReady = loadPlatformInfo(invoke).then(info => {
   return info;
 }).catch(() => ({os: 'unknown', touchback: false, inputControl: 'none'}));
 startDiscovery();
+if (tauri.core?.invoke) {
+  const updates = mountUpdates({document, invoke, listen, isSharing: () => Boolean(client.stream),
+    beforeInstall: async () => {
+      if (capturePending) throw new Error('正在选择分享范围，请先完成或取消分享。');
+      await touchback.setEnabled(false);
+      await touchback.fence('software update');
+      if (touchback.diagnostics()?.cleanupPending) throw new Error('输入尚未释放，请先重试释放输入后再更新。');
+      await client.stop();
+      await nativeCapture?.stop();
+    },
+  });
+  window.addEventListener('beforeunload', () => updates.stop());
+}

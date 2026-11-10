@@ -25,8 +25,15 @@
     },
     "withGlobalTauri": true
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU2MUZDNjRERDgwRTFEOEYKUldTUEhRN1lUY1lmNXJFNTVxUHErWFBtUlBMUDUrZU9ZcnV0ZGJRMW1ET1F5VGYwWndLN1lZcUoK",
+      "requireSignedVersion": true
+    }
+  },
   "bundle": {
     "active": true,
+    "icon": ["icons/icon.ico", "icons/icon.png"],
     "targets": ["nsis", "msi", "app", "dmg"],
     "windows": {
       "webviewInstallMode": {"type": "downloadBootstrapper", "silent": true}

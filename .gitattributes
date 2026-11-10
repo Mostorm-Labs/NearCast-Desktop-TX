@@ -1,0 +1,2 @@
+# Signed fixture bytes must remain identical on Windows/macOS checkouts.
+tests/fixtures/update/* -text

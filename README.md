@@ -1,5 +1,9 @@
 # NearCast Desktop TX
 
+版本和 Mosapi 更新发布契约见 [`AGENTS.md`](AGENTS.md) 与 [`docs/release/version-and-mosapi.md`](docs/release/version-and-mosapi.md)。完整版本使用 `X.Y.Z.Build`，TX 仅发布 Windows 和 macOS：`nearcast-tx-windows`（product-id `646`）与 `nearcast-tx-macos`（product-id `647`）。同一 GitHub Release 提供两平台更新包、签名和版本清单，并提供聚合 ZIP 单链接下载。
+
+应用启动后后台检查正式更新并自动下载，顶部显示“发现新版本/更新已就绪”；每次启动发现更新时弹框，可选择“暂不更新”或在下载校验完成后“立即更新并重启”。安装前会结束投屏和反控。运行期间每 4 小时检查，网络失败不影响投屏；安装包及版本清单均需通过内置公钥验证。发布 workflow、签名 Secret 配置和平台验收限制见上述发布契约。
+
 当前反控使用 AXTP typed-input R2 开发快照；实现、依赖指纹、恢复步骤和验证限制见 [TI-3 handoff](docs/superpowers/handoffs/2026-11-06-tx-typed-input-ti3.md)。早期 TouchBatch/BIND 联调记录仅供历史追溯。
 
 支持 Windows 10/11 和 macOS 13 及以上版本。Windows 使用 WebView2；Windows 安装包会在安装时下载并静默安装 WebView2 Bootstrapper。macOS 首次分享屏幕前，需要在“系统设置 → 隐私与安全性 → 屏幕录制”允许 NearCast Desktop TX。

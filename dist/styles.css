@@ -64,4 +64,13 @@ h1 { margin: 10px 0 0; color: #fff; font-size: clamp(28px, 4vw, 38px); line-heig
 .capture-target-preview img {display:block;width:100%;height:100%;object-fit:contain;}
 .capture-target-title {display:block;width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px 3px;}
 .capture-picker-actions {display:flex;justify-content:flex-end;gap:10px;margin-top:12px;}
+.update-heading {display:flex;align-items:center;gap:12px;color:#8d9ab1;font-size:11px}
+#update-button[data-available="true"] {padding:7px 10px;border-radius:8px;background:#438fff33;color:#a8efff}
+.update-dialog {width:min(560px,92vw);max-height:85vh;overflow:auto;padding:24px;border:1px solid #71829e;border-radius:16px;background:#161c2b;color:#e9effa;box-shadow:0 25px 80px #0009}
+.update-dialog::backdrop {background:#0009}
+.update-dialog h2 {margin:0 0 14px;font-size:20px}
+.update-dialog p {font-size:13px;line-height:1.6;color:#b7c4d9}
+.update-dialog pre {max-height:250px;overflow:auto;white-space:pre-wrap;font:inherit;font-size:13px;line-height:1.6;user-select:text}
+.update-dialog progress {width:100%;accent-color:#73e3ff}
+.update-actions {display:flex;justify-content:flex-end;flex-wrap:wrap;gap:10px;margin-top:22px}
 @media(max-width:600px) {.capture-picker {padding:18px;}.capture-target-list {grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}}

@@ -21,6 +21,11 @@ sha2 = "0.10"
 httparse = "1"
 tempfile = "3"
 getrandom = "0.3"
+minisign-verify = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls-no-provider"] }
+tauri-plugin-updater = "=2.14.1"
+base64 = "0.23"
+tokio = { version = "1", features = ["sync"] }
 
 [dev-dependencies]
 rcgen = "0.14"

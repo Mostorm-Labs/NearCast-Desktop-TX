@@ -8,7 +8,7 @@
 </head>
 <body>
   <main class="webcast-sender">
-    <header class="topbar"><div class="logo"><span class="logo-mark">N</span><span>NearHub</span></div><span class="product-label">WebCast</span></header>
+    <header class="topbar"><div class="logo"><span class="logo-mark">N</span><span>NearHub</span></div><div class="update-heading"><span id="app-version"></span><button id="update-button" type="button" class="refresh">检查更新</button></div></header>
 
     <section id="macos-permissions" class="permissions-panel" aria-labelledby="permissions-title" hidden>
       <div class="permissions-heading"><h2 id="permissions-title">macOS 权限</h2><button id="refresh-permissions" class="refresh" type="button">刷新状态</button></div>
@@ -100,6 +100,14 @@
       <p id="capture-picker-error" class="error" hidden></p>
       <div class="capture-picker-actions"><button class="button secondary" value="cancel">取消</button><button id="capture-picker-confirm" class="button primary" value="share" disabled>开始分享</button></div>
     </form>
+  </dialog>
+  <dialog id="update-dialog" class="update-dialog" aria-labelledby="update-title">
+    <h2 id="update-title">软件更新</h2>
+    <p id="update-detail" aria-live="polite"></p>
+    <pre id="update-notes"></pre>
+    <progress id="update-progress" aria-label="更新下载进度" hidden></progress>
+    <p id="update-error" class="error" role="status" hidden></p>
+    <div class="update-actions"><button id="update-check" class="refresh" type="button">检查更新</button><button id="update-later" class="button secondary" type="button">暂不更新</button><button id="update-install" class="button primary" type="button" disabled>立即更新并重启</button></div>
   </dialog>
   <script type="module" src="./app.mjs"></script>
 </body>

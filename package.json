@@ -5,5 +5,8 @@
   "scripts": {
     "test": "node --test",
     "build:macos": "node scripts/build-macos.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4"
   }
 }

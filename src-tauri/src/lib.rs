@@ -12,6 +12,7 @@ mod capture_target;
 mod capture_thumbnail;
 mod touch_feedback;
 mod native_capture;
+mod update;
 #[cfg(windows)]
 mod capture_indicator;
 #[cfg(all(test,windows))]
@@ -255,6 +256,26 @@ async fn nearcast_macos_permission_settings(permission: macos_permissions::Permi
 }
 
 #[tauri::command]
+async fn nearcast_update_initialize(app: AppHandle, state: State<'_, update::State>) -> Result<serde_json::Value, String> {
+    update::initialize(app, &state).await
+}
+
+#[tauri::command]
+async fn nearcast_update_check(app: AppHandle, state: State<'_, update::State>) -> Result<serde_json::Value, String> {
+    update::check(app, &state).await
+}
+
+#[tauri::command]
+async fn nearcast_update_download(app: AppHandle, state: State<'_, update::State>) -> Result<serde_json::Value, String> {
+    update::download(app, &state).await
+}
+
+#[tauri::command]
+async fn nearcast_update_install(app: AppHandle, state: State<'_, update::State>) -> Result<serde_json::Value, String> {
+    update::install(app, &state).await
+}
+
+#[tauri::command]
 fn nearcast_platform_info() -> serde_json::Value {
     #[cfg(target_os = "windows")]
     { return serde_json::json!({"os":"windows","webview":"WebView2","screenCapture":true,"nativeCapture":native_capture::supported(),"screenCapturePermission":"not_required","touchback":true,"inputControl":"windows-pointer","multiTouch":true,"accessibilityPermission":"not_required"}); }
@@ -356,6 +377,8 @@ async fn nearcast_capture_indicator(capture_id:String,geometry_revision:String,a
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().pubkey(include_str!("../update.pub").trim()).build())
+        .manage(update::State::default())
         .manage(MdnsState(Mutex::new(None)))
         .manage(TrustState::default())
         .on_window_event(|_, event| {
@@ -369,7 +392,7 @@ pub fn run() {
             #[cfg(not(target_os = "macos"))]
             let _ = event;
         })
-        .invoke_handler(tauri::generate_handler![nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_capture_targets, nearcast_capture_thumbnail, nearcast_capture_start, nearcast_capture_frame, nearcast_capture_stop, nearcast_capture_indicator, nearcast_capture_touch_feedback, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info])
+        .invoke_handler(tauri::generate_handler![nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_capture_targets, nearcast_capture_thumbnail, nearcast_capture_start, nearcast_capture_frame, nearcast_capture_stop, nearcast_capture_indicator, nearcast_capture_touch_feedback, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info, nearcast_update_initialize, nearcast_update_check, nearcast_update_download, nearcast_update_install])
         .build(tauri::generate_context!())
         .expect("error while building NearCast Desktop TX")
         .run(|_, event| {
