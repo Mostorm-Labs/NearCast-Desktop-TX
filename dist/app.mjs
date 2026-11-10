@@ -287,8 +287,8 @@ const renderDevices = devices => {
     }
   }
   deviceGroups.replaceChildren();
-  const groups = [{protocol: 'webcast', label: 'NEARCAST RECEIVERS', icon: '▣'}, {protocol: 'airplay', label: 'AIRPLAY DEVICES', icon: ''}];
-  const available = devices.filter(device => device.protocol === 'webcast' || device.protocol === 'airplay');
+  const groups = [{protocol: 'webcast', label: 'NEARCAST RECEIVERS', icon: '▣'}];
+  const available = devices.filter(device => device.protocol === 'webcast');
   deviceStatus.textContent = available.length ? `${available.length} device${available.length === 1 ? '' : 's'} found on your local network` : 'No receivers found yet — keep scanning…';
   for (const group of groups) {
     const entries = devices.filter(device => device.protocol === group.protocol);
@@ -319,7 +319,7 @@ const renderDevices = devices => {
 const discovery = new TauriDeviceDiscovery({invoke, listen});
 const startDiscovery = async () => {
   trustManager.cancel(); trustDevice = null; client.cancelCodeDisplay(); codeDisplayRequestId = null;
-  refreshDevices.disabled = true; deviceStatus.textContent = 'Scanning for AirPlay and WebCast receivers…';
+  refreshDevices.disabled = true; deviceStatus.textContent = 'Scanning for NearCast receivers…';
   try { await discovery.stop().catch(() => {}); await discovery.start(renderDevices); }
   catch (error) { deviceStatus.textContent = `Scan unavailable: ${error.message || error}`; }
   finally { refreshDevices.disabled = false; }

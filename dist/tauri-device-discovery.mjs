@@ -1,4 +1,4 @@
-import {DiscoveryRegistry, normalizeDiscoveryDevice} from './discovery-devices.mjs';
+import {DiscoveryRegistry, normalizeDiscoveryDevice, SERVICE_PROTOCOLS} from './discovery-devices.mjs';
 
 export class TauriDeviceDiscovery {
   constructor({invoke, listen, now = () => Date.now()} = {}) {
@@ -18,7 +18,7 @@ export class TauriDeviceDiscovery {
     this.unsubscribers.push(await this.listen('nearcast://mdns-snapshot', event => {
       if (generation !== this.generation) return;
       const {service_type: serviceType, services, lease_ms: leaseMs} = event.payload ?? {};
-      if (!['_nearcast._tcp.local.', '_airplay._tcp.local.', '_raop._tcp.local.'].includes(serviceType) || !Array.isArray(services) || !Number.isFinite(leaseMs) || leaseMs <= 0) return;
+      if (!SERVICE_PROTOCOLS.webcast.has(serviceType) || !Array.isArray(services) || !Number.isFinite(leaseMs) || leaseMs <= 0) return;
       const now = this.now(); const valid = [];
       for (const service of services) {
         if ((service.service_type ?? service.serviceType) !== serviceType) continue;
@@ -27,7 +27,7 @@ export class TauriDeviceDiscovery {
       const currentKeys = new Set(valid.map(device => device.instance));
       for (const [key, device] of records) if (device.serviceType === serviceType && !currentKeys.has(device.instance)) records.delete(key);
       for (const device of valid) records.set(`${serviceType}:${device.instance}`, {...device, serviceType});
-      // Rebuild both service families so removing RAOP cannot remove surviving AirPlay.
+      // Rebuild the registry from current, unexpired NearCast records.
       this.registry.entries.clear();
       for (const device of records.values()) if (device.expiresAt > now) this.registry.upsert(device);
       emit();
@@ -43,7 +43,7 @@ export class TauriDeviceDiscovery {
       emit();
     }));
     this.timer = setInterval(emit, 1000);
-    await this.invoke('nearcast_mdns_start', {services: ['_nearcast._tcp', '_airplay._tcp', '_raop._tcp']});
+    await this.invoke('nearcast_mdns_start', {services: ['_nearcast._tcp']});
     emit();
   }
   async stop() {

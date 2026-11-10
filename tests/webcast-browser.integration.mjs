@@ -32,7 +32,7 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   const pcmFixture=process.env.NEARCAST_AUDIO_PCM_FIXTURE?[...await readFile(process.env.NEARCAST_AUDIO_PCM_FIXTURE)]:null;
   await page.addInitScript(({pcmFixture}) => {
-    globalThis.testReceiver = {signals: [], receivedTracks: [], frames: 0, mode: 'capture',sourceMessages:[],inputRpcId:100};
+    globalThis.testReceiver = {signals: [], receivedTracks: [], frames: 0, mode: 'capture',sourceMessages:[],inputRpcId:100,discoveryListeners:{}};
     const state = globalThis.testReceiver;
     const receiver = new RTCPeerConnection({iceServers: []});
     state.receiverPeer=receiver;
@@ -161,6 +161,7 @@ try {
     let audioCaptureId=null,audioSequence=0,audioPosition=0;
     globalThis.__TAURI__ = {core: {invoke: async (command,args={}) => {
       if(command==='nearcast_platform_info')return{os:'windows',screenCapture:true,nativeCapture:false,captureBackend:'browser',systemAudio:true,touchback:true};
+      if(command==='nearcast_mdns_start'){state.discoveryServices=args.services;return null;}
       if(command.startsWith('nearcast_capture_'))throw new Error('Browser default must not invoke WGC/preview IPC: '+command);
       if(command==='nearcast_diagnostics_record'){(state.logSamples??=[]).push(args.sample);return null;}
       if(command==='nearcast_diagnostics_export')return 'C:/diagnostics/nearcast-diagnostics-test.json';
@@ -213,9 +214,19 @@ try {
       if(command==='nearcast_input_apply'){if(state.nativeApplyDelayMs)await new Promise(resolve=>setTimeout(resolve,state.nativeApplyDelayMs));state.lastNativeAction=args.action;state.nativeApplyCalls=(state.nativeApplyCalls??0)+1;return{status:'submitted',nativeDurationMs:1};}
       if(command==='nearcast_input_release'){state.nativeOwner=null;state.borderActive=false;return{status:'released'};}
       return false;
-    }}, event: {listen: async () => () => {}}};
+    }}, event: {listen: async (name,callback) => {state.discoveryListeners[name]=callback;return()=>delete state.discoveryListeners[name];}}};
   },{pcmFixture});
   await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.waitForFunction(()=>testReceiver.discoveryServices);
+  assert.deepEqual(await page.evaluate(()=>testReceiver.discoveryServices),['_nearcast._tcp']);
+  await page.evaluate(()=>{
+    const service=serviceType=>({serviceType,instance:'Board.'+serviceType,hostname:'board.local.',port:8443,addresses:['192.0.2.21'],txt:{id:'board',display:'Test NearCast Board',capability:'webcast'}});
+    for(const type of ['_nearcast._tcp.local.','_airplay._tcp.local.','_raop._tcp.local.'])testReceiver.discoveryListeners['nearcast://mdns-service']({payload:service(type)});
+  });
+  assert.equal(await page.locator('.device-row').count(),1);
+  assert.equal(await page.locator('.device-name').textContent(),'Test NearCast Board');
+  assert.deepEqual(await page.locator('.group-title').allTextContents(),['NEARCAST RECEIVERS']);
+  assert.match(await page.locator('#device-status').textContent(),/^1 device found/);
   const share=async()=>{await page.locator('#share-button').click();};
   for (const [index, value] of [...'1234'].entries()) await page.locator('.code-digit').nth(index).fill(value);
   await page.locator('#connect-button').click();

@@ -2,7 +2,7 @@ use mdns_sd::ServiceEvent;
 use serde::Serialize;
 use std::{collections::BTreeMap, net::{IpAddr, SocketAddr, TcpStream}, time::{Duration, Instant}};
 
-pub const SERVICE_TYPES: [&str; 3] = ["_nearcast._tcp.local.", "_airplay._tcp.local.", "_raop._tcp.local."];
+pub const SERVICE_TYPES: [&str; 1] = ["_nearcast._tcp.local."];
 pub const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(15);
 pub const BRIDGE_LEASE_MS: u64 = 45000;
 
@@ -148,10 +148,14 @@ mod tests {
     #[test]
     fn airplay_or_missing_capability_cannot_authorize_native_display_requests() {
         let mut cache = DiscoveryCache::default();
-        for (ty, cap) in [("_airplay._tcp.local.", "webcast,code-display-v1"), ("_nearcast._tcp.local.", "webcast")] {
+        for (ty, cap) in [("_airplay._tcp.local.", "webcast,code-display-v1"), ("_raop._tcp.local.", "webcast,code-display-v1"), ("_nearcast._tcp.local.", "webcast")] {
             let info = ServiceInfo::new(ty, "TV", "tv.local.", "192.0.2.22", 8443, [("id", "tv"),("capability",cap)].as_slice()).unwrap();
             let instance = info.get_fullname().to_string();
-            cache.apply(ServiceEvent::ServiceResolved(info));
+            let accepted = cache.apply(ServiceEvent::ServiceResolved(info));
+            if ty != "_nearcast._tcp.local." {
+                assert!(!accepted);
+                assert!(cache.snapshot(ty).is_empty());
+            }
             assert!(cache.code_display_target(&instance, "tv").is_err());
         }
     }

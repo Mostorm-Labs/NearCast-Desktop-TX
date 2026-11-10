@@ -65,7 +65,7 @@ WebSocket 地址默认为 `wss://cast.nearhub.us`，也可以通过 Tauri 页面
 
 ## 局域网发现与显示配对码
 
-Tauri 原生浏览 `_nearcast._tcp.local.`、`_airplay._tcp.local.` 和 `_raop._tcp.local.`；旧 `_webcast._tcp` 不再使用。NearCast TXT 需要 `capability=webcast` 才可选择，`code-display-v1` / `touchback-v1` / `trust-display-v1` 分别声明显示码、触控和现场指纹显示能力。AirPlay 仅展示，不提供这些能力。
+Tauri 原生仅浏览 `_nearcast._tcp.local.`，设备列表只展示 NearCast 接收端；不再搜索或展示 AirPlay/RAOP，旧 `_webcast._tcp` 不再使用。NearCast TXT 需要 `capability=webcast` 才可选择，`code-display-v1` / `touchback-v1` / `trust-display-v1` 分别声明显示码、触控和现场指纹显示能力。
 
 原生 DNS-SD 缓存以 ServiceResolved/ServiceRemoved 跟踪在线状态，每 15 秒向界面发送完整快照，界面桥接租约为 45 秒；不会因为未变化的 TXT `ttl=60` 就移除仍在线的设备。请求目标来自 SRV 端口及该目标的 A/AAAA 地址，TXT endpoint 不决定连接主机或端口。
 

@@ -19,5 +19,6 @@ test('macOS bundle explains screen capture and Bonjour discovery', () => {
   assert.match(plist, /NSScreenCaptureUsageDescription/);
   assert.match(plist, /NSAccessibilityUsageDescription/);
   assert.match(plist, /NSLocalNetworkUsageDescription/);
-  for (const service of ['_nearcast._tcp', '_airplay._tcp', '_raop._tcp']) assert.match(plist, new RegExp(service.replaceAll('_', '\\_')));
+  assert.match(plist, /_nearcast\._tcp/);
+  assert.doesNotMatch(plist, /_airplay\._tcp|_raop\._tcp/);
 });

@@ -21,7 +21,7 @@ function fixture(overrides = {}) {
 test('discovery exposes trust-display only for NearCast with explicit capability',()=>{
   const service = {serviceType:'_nearcast._tcp.local.',instance:'Board',hostname:'board.local.',port:8443,txt:{id:'Board-ID',capability:'webcast,trust-display-v1',fingerprint:pin}};
   assert.equal(normalizeDiscoveryDevice(service).supportsTrustDisplay,true);
-  assert.equal(normalizeDiscoveryDevice({...service,serviceType:'_airplay._tcp.local.'}).supportsTrustDisplay,false);
+  assert.throws(()=>normalizeDiscoveryDevice({...service,serviceType:'_airplay._tcp.local.'}),/unsupported/i);
   assert.equal(normalizeDiscoveryDevice({...service,txt:{...service.txt,capability:'webcast'}}).supportsTrustDisplay,false);
 });
 

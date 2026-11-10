@@ -1,5 +1,4 @@
 const SERVICE_PROTOCOLS = Object.freeze({
-  airplay: new Set(['_airplay._tcp.local.', '_raop._tcp.local.']),
   webcast: new Set(['_nearcast._tcp.local.']),
 });
 const PRIVATE_TXT_KEYS = new Set(['token', 'room', 'roomcode', 'paircode', 'password', 'secret']);
@@ -8,10 +7,6 @@ const stripServiceSuffix = (instance, serviceType) => String(instance ?? '').rep
 const text = value => typeof value === 'string' ? value.trim() : '';
 const capabilityTokens = value => new Set(String(value ?? '').split(/[\s,;]+/).map(token => token.trim().toLowerCase()).filter(Boolean).slice(0, 32));
 const canonicalDeviceId = value => text(value).toLowerCase().replace(/[^a-z0-9]/g, '');
-const instanceHardwareId = instance => {
-  const match = text(instance).match(/^([0-9a-f]{2}(?:[-:][0-9a-f]{2}){5})@/i);
-  return match ? canonicalDeviceId(match[1]) : '';
-};
 const secureEndpoint = (txt, hostname, addresses, port) => {
   const advertised = text(txt.endpoint || txt.url || txt.wss || txt.https);
   if (advertised) {
@@ -33,21 +28,20 @@ const secureEndpoint = (txt, hostname, addresses, port) => {
 
 export function normalizeDiscoveryDevice(service, nowMs = Number(service?.nowMs ?? Date.now())) {
   const serviceType = text(service?.serviceType ?? service?.service_type).toLowerCase();
-  const protocol = SERVICE_PROTOCOLS.airplay.has(serviceType) ? 'airplay' : SERVICE_PROTOCOLS.webcast.has(serviceType) ? 'webcast' : null;
+  const protocol = SERVICE_PROTOCOLS.webcast.has(serviceType) ? 'webcast' : null;
   if (!protocol) throw new RangeError('unsupported discovery service');
   const txt = service?.txt ?? {};
   for (const key of Object.keys(txt)) if (PRIVATE_TXT_KEYS.has(String(key).toLowerCase())) throw new RangeError('private discovery field');
   const addresses = Array.isArray(service?.addresses) ? service.addresses.map(text).filter(Boolean) : [];
   const hostname = text(service?.hostname).replace(/\.$/, '');
   const port = Number(service?.port ?? 0);
-  let displayName = text(txt.display) || stripServiceSuffix(text(service?.instance), serviceType) || hostname || 'Unknown device';
-  if (serviceType === '_raop._tcp.local.' && displayName.includes('@')) displayName = displayName.slice(displayName.indexOf('@') + 1);
-  const rawCapabilities = protocol === 'webcast' ? capabilityTokens(txt.capability) : new Set();
-  const isWebCast = protocol === 'webcast' && rawCapabilities.has('webcast');
+  const displayName = text(txt.display) || stripServiceSuffix(text(service?.instance), serviceType) || hostname || 'Unknown device';
+  const rawCapabilities = capabilityTokens(txt.capability);
+  const isWebCast = rawCapabilities.has('webcast');
   const capabilities = isWebCast ? rawCapabilities : new Set();
   const {endpoint = '', resolvedEndpoints = []} = isWebCast ? secureEndpoint(txt, hostname, addresses, port) : {};
   const advertisedDeviceId = text(txt.deviceId || txt.device_id || txt.id);
-  const hardwareId = canonicalDeviceId(advertisedDeviceId || txt.deviceid) || (serviceType === '_raop._tcp.local.' ? instanceHardwareId(service?.instance) : '');
+  const hardwareId = canonicalDeviceId(advertisedDeviceId || txt.deviceid);
   const discoveryId = hardwareId ? `${protocol}:${hardwareId}` : `${protocol}:${text(service?.instance) || displayName}`;
   const ttlSeconds = Number(txt.ttl ?? 60);
   if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) throw new RangeError('ttl');

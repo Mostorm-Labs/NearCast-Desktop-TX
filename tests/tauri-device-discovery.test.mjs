@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {TauriDeviceDiscovery} from '../src/discovery/tauri-device-discovery.mjs';
 
-test('browses NearCast and AirPlay service types and emits a unified device list', async () => {
+test('browses only NearCast and ignores AirPlay/RAOP events and snapshots', async () => {
   const calls = []; const listeners = new Map(); const snapshots = [];
   const discovery = new TauriDeviceDiscovery({
     invoke: async (command, args) => { calls.push([command, args]); },
@@ -10,10 +10,15 @@ test('browses NearCast and AirPlay service types and emits a unified device list
     now: () => 1000,
   });
   await discovery.start(devices => snapshots.push(devices));
-  listeners.get('nearcast://mdns-service')({payload: {serviceType: '_airplay._tcp.local.', instance: 'TV._airplay._tcp.local.', hostname: 'tv.local.', port: 7000, addresses: ['192.168.1.8'], txt: {model: 'AppleTV5,3'}}});
   listeners.get('nearcast://mdns-service')({payload: {serviceType: '_nearcast._tcp.local.', instance: 'Board._nearcast._tcp.local.', hostname: 'board.local.', port: 8443, addresses: ['192.168.1.9'], txt: {id: 'board', endpoint: 'wss://board.local:8443', capability: 'webcast,code-display-v1', ttl: '60'}}});
-  assert.equal(snapshots.at(-1).length, 2);
-  assert.deepEqual(calls[0][1].services, ['_nearcast._tcp', '_airplay._tcp', '_raop._tcp']);
+  for (const serviceType of ['_airplay._tcp.local.', '_raop._tcp.local.']) {
+    const service = {serviceType, instance: 'TV.'+serviceType, hostname: 'tv.local.', port: 7000, addresses: ['192.168.1.8'], txt: {capability:'webcast'}};
+    listeners.get('nearcast://mdns-service')({payload: service});
+    listeners.get('nearcast://mdns-snapshot')({payload:{service_type:serviceType,lease_ms:45000,services:[service]}});
+  }
+  assert.equal(snapshots.at(-1).length, 1);
+  assert.equal(snapshots.at(-1)[0].deviceId, 'board');
+  assert.deepEqual(calls[0][1].services, ['_nearcast._tcp']);
   await discovery.stop();
   assert.equal(calls.at(-1)[0], 'nearcast_mdns_stop');
 });
@@ -40,7 +45,7 @@ test('native snapshot bridge leases expire if the worker stops renewing them', a
   const discovery = new TauriDeviceDiscovery({invoke:async()=>{},listen:async(name,handler)=>{listeners.set(name,handler);return()=>listeners.delete(name);},now:()=>now});
   try {
     await discovery.start(()=>{});
-    listeners.get('nearcast://mdns-snapshot')?.({payload:{service_type:'_airplay._tcp.local.',lease_ms:45000,services:[{service_type:'_airplay._tcp.local.',instance:'TV',hostname:'tv.local.',port:7000,txt:{ttl:'3600'}}]}});
+    listeners.get('nearcast://mdns-snapshot')?.({payload:{service_type:'_nearcast._tcp.local.',lease_ms:45000,services:[{service_type:'_nearcast._tcp.local.',instance:'Board',hostname:'board.local.',port:8443,txt:{id:'board',capability:'webcast',ttl:'3600'}}]}});
     assert.equal(discovery.registry.list(now).length,1);
     now = 46001;
     assert.equal(discovery.registry.list(now).length,0);

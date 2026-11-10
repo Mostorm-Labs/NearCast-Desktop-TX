@@ -36,9 +36,11 @@ test('packaged discovery module resolves its dependencies and matches source cap
   try {
     await discovery.start(devices => snapshots.push(devices));
     listeners.get('nearcast://mdns-service')({payload:{serviceType:'_airplay._tcp.local.', instance:'TV', txt:{capability:'webcast,code-display-v1,touchback-v1'}}});
+    assert.deepEqual(snapshots.at(-1), []);
+    listeners.get('nearcast://mdns-service')({payload:{serviceType:'_nearcast._tcp.local.', instance:'Board', hostname:'board.local.',port:8443,txt:{id:'board',capability:'webcast,code-display-v1,touchback-v1'}}});
     const device = snapshots.at(-1)[0];
-    assert.equal(device.selectable, false);
-    assert.equal(device.supportsCodeDisplay, false);
-    assert.equal(device.supportsTouchback, false);
+    assert.equal(device.selectable, true);
+    assert.equal(device.supportsCodeDisplay, true);
+    assert.equal(device.supportsTouchback, true);
   } finally { await discovery.stop(); }
 });

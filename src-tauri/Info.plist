@@ -3,12 +3,10 @@
 <plist version="1.0">
 <dict>
   <key>NSLocalNetworkUsageDescription</key>
-  <string>NearCast Desktop TX 需要访问局域网，以发现 NearCast 和 AirPlay 接收设备。</string>
+  <string>NearCast Desktop TX 需要访问局域网，以发现 NearCast 接收设备。</string>
   <key>NSBonjourServices</key>
   <array>
     <string>_nearcast._tcp</string>
-    <string>_airplay._tcp</string>
-    <string>_raop._tcp</string>
   </array>
   <key>NSScreenCaptureUsageDescription</key>
   <string>NearCast Desktop TX 需要屏幕录制权限，才能把你选择的屏幕发送到接收端。</string>
