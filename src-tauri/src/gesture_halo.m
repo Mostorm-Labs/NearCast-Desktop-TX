@@ -1,0 +1,81 @@
+#import <AppKit/AppKit.h>
+#import <QuartzCore/QuartzCore.h>
+
+// Bounded, click-through feedback only. No input synthesis or focus changes.
+// The feed comes from the current leased owner, never from network/UI coordinates.
+@interface NearcastHaloView : NSView
+@property NSInteger stage;
+@property double progress;
+@end
+@implementation NearcastHaloView
+- (BOOL)isOpaque { return NO; }
+- (void)drawRect:(NSRect)dirty {
+    (void)dirty;
+    NSRect ring=NSInsetRect(self.bounds,10,10);
+    NSColor *color=self.stage==1?[NSColor colorWithRed:.25 green:.85 blue:1 alpha:.9]:
+        self.stage==2?[NSColor colorWithRed:.3 green:1 blue:.55 alpha:.95]:
+        self.stage==3?[NSColor colorWithRed:.3 green:.65 blue:1 alpha:.95]:
+        self.stage==4?[NSColor colorWithRed:.8 green:.5 blue:1 alpha:.95]:
+        self.stage==5?[NSColor colorWithRed:1 green:.7 blue:.2 alpha:.95]:[NSColor colorWithWhite:.7 alpha:.7];
+    [[color colorWithAlphaComponent:.12] setFill];[[NSBezierPath bezierPathWithOvalInRect:ring] fill];
+    [[NSColor colorWithWhite:1 alpha:.35] setStroke];NSBezierPath *base=[NSBezierPath bezierPathWithOvalInRect:ring];base.lineWidth=2;[base stroke];
+    [color setStroke];
+    if(self.stage==1){
+        NSBezierPath *arc=[NSBezierPath bezierPath];arc.lineWidth=4;
+        [arc appendBezierPathWithArcWithCenter:NSMakePoint(40,40) radius:30 startAngle:90 endAngle:90-360*self.progress clockwise:YES];[arc stroke];
+    }else{
+        NSBezierPath *outer=[NSBezierPath bezierPathWithOvalInRect:ring];outer.lineWidth=4;[outer stroke];
+        if(self.stage==2||self.stage==4||self.stage==5){
+            NSBezierPath *inner=[NSBezierPath bezierPathWithOvalInRect:NSInsetRect(ring,7,7)];inner.lineWidth=2;[inner stroke];
+        }
+    }
+    if(self.stage==4||self.stage==5){
+        [color setFill];for(int direction=-1;direction<=1;direction+=2){[[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(37+direction*10,37,6,6)] fill];}
+    }
+}
+@end
+
+@interface NearcastHaloPanel : NSPanel
+@end
+@implementation NearcastHaloPanel
+- (BOOL)canBecomeKeyWindow { return NO; }
+- (BOOL)canBecomeMainWindow { return NO; }
+@end
+
+static NearcastHaloPanel *halo;
+static NearcastHaloView *view;
+static NSTimer *expiry;
+static CFTimeInterval deadline;
+
+void nearcast_halo_clear(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [halo orderOut:nil];[expiry invalidate];expiry=nil;
+    });
+}
+
+// stage 1 holding, 2 armed, 3 dragging, 4 two fingers, 5 pinch, 6 scroll.
+void nearcast_halo_show(double x,double y,int stage,double progress) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if(!isfinite(x)||!isfinite(y)||!isfinite(progress)||stage<1||stage>6)return;
+        if(!halo){
+            halo=[[NearcastHaloPanel alloc] initWithContentRect:NSMakeRect(0,0,80,80)
+                styleMask:NSWindowStyleMaskBorderless|NSWindowStyleMaskNonactivatingPanel backing:NSBackingStoreBuffered defer:NO];
+            halo.opaque=NO;halo.backgroundColor=NSColor.clearColor;halo.hasShadow=NO;
+            halo.ignoresMouseEvents=YES;halo.hidesOnDeactivate=NO;halo.level=NSStatusWindowLevel;
+            halo.collectionBehavior=NSWindowCollectionBehaviorCanJoinAllSpaces|NSWindowCollectionBehaviorFullScreenAuxiliary|NSWindowCollectionBehaviorIgnoresCycle;
+            view=[[NearcastHaloView alloc] initWithFrame:NSMakeRect(0,0,80,80)];halo.contentView=view;
+        }
+        // CGEvent uses upper-left desktop points; AppKit uses lower-left.
+        NSScreen *primary=NSScreen.screens.firstObject;
+        CGFloat top=primary?NSMaxY(primary.frame):0;
+        [halo setFrameOrigin:NSMakePoint(x-40,top-y-40)];
+        view.stage=stage;view.progress=fmin(1,fmax(0,progress));[view setNeedsDisplay:YES];
+        [halo orderFrontRegardless];deadline=CACurrentMediaTime()+.5;
+        if(!expiry){
+            expiry=[NSTimer timerWithTimeInterval:.1 repeats:YES block:^(NSTimer *timer){
+                if(CACurrentMediaTime()>deadline){[halo orderOut:nil];[timer invalidate];expiry=nil;}
+            }];
+            [[NSRunLoop mainRunLoop] addTimer:expiry forMode:NSRunLoopCommonModes];
+        }
+    });
+}

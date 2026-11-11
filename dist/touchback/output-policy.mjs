@@ -1,4 +1,5 @@
 import {check} from './frame-codec.mjs';
+import {TouchMouseGestures,normalizeGestureSettings} from './touch-mouse-gestures.mjs';
 
 export const DEFAULT_OUTPUT_POLICY=Object.freeze({touch:'native',mouse:'native'});
 export function outputPolicyOptions(native){
@@ -6,15 +7,17 @@ export function outputPolicyOptions(native){
   return {
     touch:[{value:'native',label:'原生 Touch（保持类型）',supported:touch},{value:'mouse-drag',label:'Mouse · 点击与拖拽',supported:mouse&&Boolean(native.mouse?.buttonsMask&1)},
       {value:'mouse-scroll',label:'Mouse · 轻点点击 / 滑动滚动',supported:mouse&&Boolean(native.mouse?.buttonsMask&1)&&native.mouse?.continuousScroll===true&&native.mouse?.wheelUnits.includes('regionQ16_16')},
+      {value:'mouse-gestures',label:'Mouse · 滚动 / 长按拖拽 / 双指右键与缩放',supported:mouse&&(native.mouse?.buttonsMask&3)===3&&native.mouse?.continuousScroll===true&&native.mouse?.wheelUnits.includes('regionQ16_16')},
       {value:'disabled',label:'禁用 Touch 输入',supported:true}],
     mouse:[{value:'native',label:'原生 Mouse（保持类型）',supported:mouse},{value:'touch',label:'Touch · 左键单点触控',supported:touch},
       {value:'disabled',label:'禁用 Mouse 输入',supported:true}],
   };
 }
 export function normalizeOutputPolicy(value){
-  check(value&&Object.keys(value).every(key=>['touch','mouse'].includes(key)),'Invalid input output policy');
+  check(value&&Object.keys(value).every(key=>['touch','mouse','gestures'].includes(key)),'Invalid input output policy');
   const policy={...DEFAULT_OUTPUT_POLICY,...value};
-  check(['native','mouse-drag','mouse-scroll','disabled'].includes(policy.touch)&&['native','touch','disabled'].includes(policy.mouse),'Invalid input output policy');
+  check(['native','mouse-drag','mouse-scroll','mouse-gestures','disabled'].includes(policy.touch)&&['native','touch','disabled'].includes(policy.mouse),'Invalid input output policy');
+  if(policy.gestures)policy.gestures=normalizeGestureSettings(policy.gestures);
   return policy;
 }
 const outputType=(policy,type)=>policy[type]==='disabled'?null:policy[type]==='native'?type:type==='touch'?'mouse':'touch';
@@ -22,9 +25,10 @@ export function policyCapabilities(native,policy){
   const result={...structuredClone(native),inputTypes:[],nativeTypes:[...(native.nativeTypes??native.inputTypes)]};
   delete result.touch;delete result.mouse;
   if(policy.touch==='native'&&native.inputTypes.includes('touch')){result.inputTypes.push('touch');result.touch={...native.touch};}
-  if(['mouse-drag','mouse-scroll'].includes(policy.touch)&&native.inputTypes.includes('mouse')&&(native.mouse.buttonsMask&1)&&
-    (policy.touch!=='mouse-scroll'||native.mouse.continuousScroll&&native.mouse.wheelUnits.includes('regionQ16_16'))){
-    result.inputTypes.push('touch');result.touch={maxContacts:1};
+  if(['mouse-drag','mouse-scroll','mouse-gestures'].includes(policy.touch)&&native.inputTypes.includes('mouse')&&(native.mouse.buttonsMask&1)&&
+    (policy.touch==='mouse-drag'||native.mouse.continuousScroll&&native.mouse.wheelUnits.includes('regionQ16_16'))&&
+    (policy.touch!=='mouse-gestures'||(native.mouse.buttonsMask&2))){
+    result.inputTypes.push('touch');result.touch={maxContacts:policy.touch==='mouse-gestures'?2:1};
   }
   if(policy.mouse==='native'&&native.inputTypes.includes('mouse')){result.inputTypes.push('mouse');result.mouse=structuredClone(native.mouse);}
   if(policy.mouse==='touch'&&native.inputTypes.includes('touch')){
@@ -37,21 +41,28 @@ export function policyCapabilities(native,policy){
 // owned serial native chain. The wire type stays intact; only local actions
 // change. A policy is immutable for the lifetime of each native owner.
 export class OutputPolicyAdapter {
-  constructor(native){this.native=native;this.policy={...DEFAULT_OUTPUT_POLICY};this.nativeCaps=null;this.owners=new Map();this.lastConversion=null;}
+  constructor(native,{now=()=>performance.now()}={}){this.native=native;this.now=now;this.policy={...DEFAULT_OUTPUT_POLICY};this.nativeCaps=null;this.owners=new Map();this.lastConversion=null;}
   async probe(){this.nativeCaps=await this.native.probe();return policyCapabilities(this.nativeCaps,this.policy);}
   async setOutputPolicy(value){
     const next=normalizeOutputPolicy(value);
     check(this.owners.size===0,'Input cleanup required before policy change');
     const native=await this.native.probe(),caps=policyCapabilities(native,next);
     for(const type of ['touch','mouse'])if(!['native','disabled'].includes(next[type]))check(caps.inputTypes.includes(type),`Output conversion not supported: ${type} → ${outputType(next,type)}`);
+    if(next.touch==='mouse-gestures'){
+      const settings=normalizeGestureSettings(next.gestures);
+      check(settings.pinchAction!=='browser-zoom'||native.zoom?.browser===true,'Browser zoom not supported');
+      check(settings.pinchAction!=='ctrl-wheel'||(native.mouse.modifierMask&2)&&native.mouse.wheelUnits.includes('detent120'),'Ctrl-wheel zoom not supported');
+      next.gestures=settings;
+    }
     this.nativeCaps=native;this.policy=next;this.lastConversion=null;
   }
   async configuration(){
     const caps=await this.native.probe();this.nativeCaps=caps;
-    return{policy:{...this.policy},options:outputPolicyOptions(caps),nativeInputTypes:[...(caps.nativeTypes??caps.inputTypes)]};
+    return{policy:structuredClone(this.policy),options:outputPolicyOptions(caps),nativeInputTypes:[...(caps.nativeTypes??caps.inputTypes)],
+      gestureSettings:normalizeGestureSettings(this.policy.gestures),pinchActions:['disabled',...(caps.zoom?.browser?['browser-zoom']:[]),...(caps.mouse?.modifierMask&2&&caps.mouse?.wheelUnits.includes('detent120')?['ctrl-wheel']:[])]};
   }
   async prepare(context,contract){
-    const policy={...this.policy};
+    const policy=structuredClone(this.policy);
     const nativeTypes=[...new Set(contract.acceptedInputTypes.map(type=>outputType(policy,type)))];
     const nativeContract={...contract,acceptedInputTypes:nativeTypes};
     delete nativeContract.touch;delete nativeContract.mouse;
@@ -59,7 +70,8 @@ export class OutputPolicyAdapter {
     if(nativeTypes.includes('mouse'))nativeContract.mouse=structuredClone(this.nativeCaps.mouse);
     // Retain context even if IPC loses the prepare response: release must still
     // reach the guarded native owner before another policy can be selected.
-    this.owners.set(context.ownerId,{policy,gesture:null,activeType:null,buttons:0,scrolling:false});
+    this.owners.set(context.ownerId,{policy,gesture:null,activeType:null,buttons:0,scrolling:false,
+      recognizer:policy.touch==='mouse-gestures'?new TouchMouseGestures({region:context.geometry.region,settings:policy.gestures}):null});
     return this.native.prepare(context,nativeContract);
   }
   convert(action,owner,context){
@@ -68,6 +80,7 @@ export class OutputPolicyAdapter {
     if(mode==='native')return [action];
     const mouse=(eventKind,buttons,x,y,extra={})=>({inputType:'mouse',eventKind,buttons,modifiers:0,x,y,...extra});
     if(type==='touch'){
+      if(mode==='mouse-gestures')return owner.recognizer.accept(action.records,this.now());
       check(action.records.length===1,'Touch conversion supports one contact');
       const r=action.records[0],g=owner.gesture;
       if(r.phase===0){
@@ -124,7 +137,7 @@ export class OutputPolicyAdapter {
           if(action.eventKind===2&&action.wheelUnit===1)owner.scrolling=action.wheelPhase<3;
         }
       }
-      const active=owner.gesture||action.inputType==='touch'&&owner.policy.touch==='native'&&action.records.some(r=>r.phase<2)||owner.buttons||owner.scrolling;
+      const active=owner.recognizer?.group||owner.gesture||action.inputType==='touch'&&owner.policy.touch==='native'&&action.records.some(r=>r.phase<2)||owner.buttons||owner.scrolling;
       owner.activeType=active?action.inputType:null;
       this.lastConversion.status='submitted';return{status:'submitted',submittedActions:submitted};
     }catch(error){this.lastConversion.status='rejected';return{status:submitted?'partial':'rejected',submittedActions:submitted,error:String(error.message??error)};}
@@ -135,5 +148,10 @@ export class OutputPolicyAdapter {
     return result;
   }
   owns(ownerId){return this.native.owns(ownerId);}
-  snapshot(){return{...this.native.snapshot(),outputPolicy:{...this.policy},nativeInputTypes:[...(this.nativeCaps?.nativeTypes??this.nativeCaps?.inputTypes??[])],lastConversion:structuredClone(this.lastConversion)};}
+  gestureFeedback(){for(const owner of this.owners.values())if(owner.recognizer)return owner.recognizer.tick(this.now());return null;}
+  async refreshGestureFeedback(){
+    for(const [ownerId,owner]of this.owners)if(owner.recognizer)return this.native.showGestureFeedback?.(ownerId,owner.recognizer.tick(this.now()));
+  }
+  snapshot(){return{...this.native.snapshot(),outputPolicy:structuredClone(this.policy),nativeInputTypes:[...(this.nativeCaps?.nativeTypes??this.nativeCaps?.inputTypes??[])],lastConversion:structuredClone(this.lastConversion),
+    ...(this.policy.touch==='mouse-gestures'?{gestureFeedback:this.gestureFeedback()}: {})};}
 }

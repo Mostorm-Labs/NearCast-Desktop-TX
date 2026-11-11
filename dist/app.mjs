@@ -66,17 +66,32 @@ const inputPolicyApply=document.querySelector('#input-policy-apply');
 const inputPolicyStatus=document.querySelector('#input-policy-status');
 const touchOutputHelp=document.querySelector('#input-touch-help');
 const mouseOutputHelp=document.querySelector('#input-mouse-help');
+const gestureSettings=document.querySelector('#gesture-settings');
+const gestureHold=document.querySelector('#gesture-hold-ms');
+const gestureHoldValue=document.querySelector('#gesture-hold-value');
+const gesturePinch=document.querySelector('#gesture-pinch-action');
+const gesturePinchHelp=document.querySelector('#gesture-pinch-help');
+const gestureFeedback=document.querySelector('#gesture-feedback');
 const inputProvider=createPlatformInputAdapter({}, {invoke});
 let policyPending=false;
 const outputLabels={touch:'Touch',mouse:'Mouse'};
 const outputHelp={
   touch:{native:'Touch 直接输出为原生触控；不支持时不会自动转换。','mouse-drag':'单指按下立即按住鼠标左键，移动拖拽，抬手释放；可选中文字和拖动物体。',
-    'mouse-scroll':'轻点松开时点击；移动超过 6 个本机坐标单位后开始滚动，不会按住鼠标；只支持单点。',disabled:'不协商和执行接收到的 Touch 输入。'},
+    'mouse-scroll':'轻点松开时点击；移动超过 6 个本机坐标单位后开始滚动，不会按住鼠标；只支持单点。',
+    'mouse-gestures':'轻点点击、滑动滚动、长按后拖拽；双指轻点右键，双指捏合按下方配置缩放。',disabled:'不协商和执行接收到的 Touch 输入。'},
   mouse:{native:'保持 Mouse 语义，包括本机支持的按钮与滚轮。',touch:'只将左键按下、移动、释放转换成单点 Touch；不转换悬停、右键或滚轮。',disabled:'不协商和执行接收到的 Mouse 输入。'},
 };
-const updatePolicyHelp=()=>{touchOutputHelp.textContent=outputHelp.touch[inputTouchOutput.value]??'';mouseOutputHelp.textContent=outputHelp.mouse[inputMouseOutput.value]??'';};
+const updatePolicyHelp=()=>{
+  touchOutputHelp.textContent=outputHelp.touch[inputTouchOutput.value]??'';mouseOutputHelp.textContent=outputHelp.mouse[inputMouseOutput.value]??'';
+  gestureSettings.hidden=inputTouchOutput.value!=='mouse-gestures';
+  gestureHoldValue.value=`${gestureHold.value} ms`;
+  gesturePinchHelp.textContent=gesturePinch.value==='browser-zoom'?'网页缩放使用前台应用的 ⌘＋/− 快捷键，非原生触控捏合；请先点按目标网页。':
+    gesturePinch.value==='ctrl-wheel'?'Ctrl＋滚轮：适合 Windows 网页；Mac 可能按系统设置触发整屏缩放，请谨慎选择。':'捏合不输出缩放；不会误触双指右键。';
+};
 inputTouchOutput.addEventListener('change',updatePolicyHelp);
 inputMouseOutput.addEventListener('change',updatePolicyHelp);
+gestureHold.addEventListener('input',updatePolicyHelp);
+gesturePinch.addEventListener('change',updatePolicyHelp);
 async function renderPolicyConfiguration(){
   const config=await inputProvider.configuration();
   for(const [type,select]of [['touch',inputTouchOutput],['mouse',inputMouseOutput]]){
@@ -87,6 +102,10 @@ async function renderPolicyConfiguration(){
     select.value=config.policy[type];select.disabled=policyPending;
   }
   inputPolicyApply.disabled=policyPending;
+  gestureHold.value=String(config.gestureSettings.holdMs);gestureFeedback.checked=config.gestureSettings.feedback;
+  const pinchLabels={disabled:'关闭缩放','browser-zoom':'网页缩放 · ⌘＋/−','ctrl-wheel':'兼容缩放 · Ctrl＋滚轮'};
+  gesturePinch.replaceChildren(...config.pinchActions.map(value=>{const option=document.createElement('option');option.value=value;option.textContent=pinchLabels[value];return option;}));
+  gesturePinch.value=config.policy.gestures?.pinchAction??(config.pinchActions.includes('browser-zoom')?'browser-zoom':'disabled');
   updatePolicyHelp();
   inputPolicyStatus.textContent=`本机原生输出：${config.nativeInputTypes.map(type=>outputLabels[type]).join(' / ')||'暂无可用类型'}。转换仅在选择并应用后生效。`;
 }
@@ -202,7 +221,8 @@ const buildTouchback = () => new WebCastTouchbackSender({
 touchback = buildTouchback();
 inputPolicyApply.addEventListener('click',async()=>{
   if(policyPending)return;
-  const requested={touch:inputTouchOutput.value,mouse:inputMouseOutput.value};
+  const requested={touch:inputTouchOutput.value,mouse:inputMouseOutput.value,
+    ...(inputTouchOutput.value==='mouse-gestures'?{gestures:{holdMs:Number(gestureHold.value),pinchAction:gesturePinch.value,feedback:gestureFeedback.checked}}:{})};
   policyPending=true;inputPolicyApply.disabled=true;inputTouchOutput.disabled=true;inputMouseOutput.disabled=true;
   inputPolicyStatus.textContent='正在释放当前输入并应用转换配置…';
   try{
@@ -215,6 +235,14 @@ inputPolicyApply.addEventListener('click',async()=>{
   }finally{policyPending=false;inputTouchOutput.disabled=false;inputMouseOutput.disabled=false;inputPolicyApply.disabled=touchback.diagnostics().cleanupPending;}
 });
 inputEnabled.addEventListener('change', () => { void touchback.setEnabled(inputEnabled.checked); });
+let haloPending=false;
+const haloTimer=setInterval(async()=>{
+  if(haloPending||inputProvider.policy.touch!=='mouse-gestures')return;
+  haloPending=true;
+  try{await inputProvider.refreshGestureFeedback();}catch{/* Feedback never controls input. */}
+  finally{haloPending=false;}
+},40);
+window.addEventListener('beforeunload',()=>clearInterval(haloTimer));
 inputCleanup.addEventListener('click', async () => {
   inputCleanup.disabled = true;
   try { await touchback.retryCleanup(); } finally { inputCleanup.disabled = false; }

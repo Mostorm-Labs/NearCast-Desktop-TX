@@ -1,0 +1,47 @@
+{
+  "date": "2026-11-11",
+  "baseCommit": "5d17fcc36c93a93953d951c200dc638076e3721d",
+  "baseCommitPushed": true,
+  "testedBuildIncludesGestureChanges": true,
+  "gestureCoreSha256": "6214b1483f66c0ce42a86ffc214d8394bb407991cfcb843e9cc68781eb1ae951",
+  "signedExecutableSha256": "11f65e0b39c480543ab1f1cf236bbe041ca3d82de172cb6d1b9abc6d6b078a4c",
+  "checks": {
+    "nodeTests": {"passed": 192, "failed": 0},
+    "rustTests": {"passed": 38, "failed": 0, "ignored": 1},
+    "signedMacosDebugBuild": "passed",
+    "codesignVerification": "passed",
+    "srcDistParity": "passed"
+  },
+  "interaction": {
+    "tap": "Left click on release",
+    "earlyMotion": "Scroll",
+    "hold": "Arms drag after adjustable delay, without pressing until motion",
+    "holdMsDefault": 300,
+    "holdMsUiRange": [150, 1000],
+    "rightClick": "Two-finger tap; no longer-hold right click",
+    "pinch": ["disabled", "browser shortcut", "explicit Ctrl-wheel compatibility"],
+    "macosZoom": "Command+Equals/Minus in foreground application; not native pinch",
+    "nativeMacosTouch": false
+  },
+  "feedback": {
+    "macosDesktopHaloImplemented": true,
+    "clickThrough": true,
+    "nonactivating": true,
+    "ownerLeaseValidated": true,
+    "expiryMs": 500,
+    "colors": {"holding": "cyan progress", "armed": "green double ring", "dragging": "blue", "twoFinger": "purple double ring", "pinching": "orange"},
+    "repeatedTextPrompts": false
+  },
+  "deviceAcceptance": {
+    "appStarted": true,
+    "permissionsGranted": true,
+    "receiverDiscovered": "nearcast-500q",
+    "combinedModePhysicalGesturesVerified": true,
+    "haloAppearanceVerified": true,
+    "browserZoomVerified": true,
+    "operatorConfirmation": "All requested gestures work, including the halo",
+    "verificationMethod": "Operator confirmed tap/scroll, hold-to-drag, two-finger right-click, browser pinch mapping and halo feedback on the actual receiver",
+    "operatorQuestionPending": false
+  },
+  "windows": {"pureLogicTested": true, "nativeMouseImplemented": false, "nativeHaloImplemented": false, "hardwareVerified": false}
+}

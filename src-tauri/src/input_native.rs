@@ -19,6 +19,26 @@ static OWNER: Mutex<Option<Owner>> = Mutex::new(None);
 #[cfg(windows)]
 static TOUCH_READY: Mutex<Option<bool>> = Mutex::new(None);
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GestureFeedback{stage:String,x:f64,y:f64,progress:f64}
+impl GestureFeedback{
+    fn valid(&self,display:&Display)->bool{
+        ["holding","armed","dragging","two-finger","pinching","scrolling"].contains(&self.stage.as_str())&&
+            self.progress.is_finite()&&(0.0..=1.0).contains(&self.progress)&&display.contains(self.x,self.y)
+    }
+}
+pub fn feedback(owner_id:String,lease_id:String,feedback:Option<GestureFeedback>)->Value{
+    let mut guard=match OWNER.lock(){Ok(guard)=>guard,Err(_)=>return failure("rejected","native_owner_lock_poisoned")};
+    let owner=match authorized(&mut guard,&owner_id,&lease_id){Ok(owner)=>owner,Err(error)=>return failure("rejected",error)};
+    if let Some(feedback)=feedback{
+        let display=match input_geometry::current(&owner.revision,&owner.native_id){Ok(display)=>display,Err(error)=>return failure("rejected",error)};
+        if !feedback.valid(&display){return failure("rejected","invalid_gesture_feedback");}
+        crate::gesture_halo::show(feedback.x,feedback.y,&feedback.stage,feedback.progress);
+    }else{crate::gesture_halo::clear();}
+    json!({"status":"displayed"})
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TouchRecord {
@@ -30,6 +50,7 @@ pub struct TouchRecord {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "inputType", rename_all = "lowercase", deny_unknown_fields)]
 pub enum Action {
+    Zoom {steps:i32,x:f64,y:f64},
     Touch {
         records: Vec<TouchRecord>,
     },
@@ -107,7 +128,7 @@ pub fn probe() -> Value {
     }
     #[cfg(target_os = "macos")]
     {
-        return json!({"inputTypes":["mouse"],"nativeTypes":["mouse"],"maxDataBytes":4096,"mouse":{"buttonsMask":7,"modifierMask":15,"allowChords":false,"wheelUnits":["detent120","regionQ16_16"],"continuousScroll":true},"nativeReady":crate::macos_input::initialize()&&!blocked,"cleanupBlocked":blocked,"ownerBusy":busy,"geometry":geometry});
+        return json!({"inputTypes":["mouse"],"nativeTypes":["mouse"],"zoom":{"browser":true},"maxDataBytes":4096,"mouse":{"buttonsMask":7,"modifierMask":15,"allowChords":false,"wheelUnits":["detent120","regionQ16_16"],"continuousScroll":true},"nativeReady":crate::macos_input::initialize()&&!blocked,"cleanupBlocked":blocked,"ownerBusy":busy,"geometry":geometry});
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
@@ -116,6 +137,7 @@ pub fn probe() -> Value {
 }
 
 fn cleanup(owner: &mut Owner) -> Result<(), String> {
+    crate::gesture_halo::clear();
     #[cfg(windows)]
     {
         if owner.possible_touch.is_empty() {
@@ -250,6 +272,16 @@ pub fn apply(
         Err(error) => return failure("rejected", error),
     };
     match action {
+        Action::Zoom {steps,x,y}=>{
+            #[cfg(target_os="macos")]{
+                if owner.input_types!=["mouse"]||owner.mouse_buttons!=0||!display.contains(x,y){return failure("rejected","invalid_browser_zoom_owner/point");}
+                return match crate::macos_input::browser_zoom(steps){
+                    Ok(())=>json!({"status":"submitted","submittedActions":steps.abs()*2,"inputType":"zoom","nativeApi":"CGEventPost","shortcut":"Command+Plus/Minus"}),
+                    Err(error)=>failure("rejected",error),
+                };
+            }
+            #[cfg(not(target_os="macos"))]{let _=(steps,x,y);failure("rejected","NOT_SUPPORTED browser zoom shortcut")}
+        },
         Action::Touch { records } => apply_touch(owner, &display, records),
         Action::Mouse {
             event_kind,
@@ -494,6 +526,7 @@ pub fn release_binding(native_id:&str)->Result<(),String>{
     Ok(())
 }
 pub fn shutdown() {
+    crate::gesture_halo::clear();
     if let Ok(mut guard) = OWNER.lock() {
         if let Some(owner) = guard.as_mut() {
             match cleanup(owner) {
@@ -522,6 +555,17 @@ pub fn ensure_released_for_update() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn halo_feedback_is_bounded_to_display_and_known_phases() {
+        let display=Display{native_id:"one".into(),primary:true,units:"points".into(),rotation:0,
+            region:input_geometry::Region{x:0.0,y:0.0,width:1000.0,height:800.0},capture_width:2000,capture_height:1600};
+        let feedback=|stage:&str,x,progress|GestureFeedback{stage:stage.into(),x,y:100.0,progress};
+        assert!(feedback("armed",500.0,1.0).valid(&display));
+        assert!(!feedback("unknown",500.0,1.0).valid(&display));
+        assert!(!feedback("armed",1000.0,1.0).valid(&display));
+        assert!(!feedback("armed",f64::NAN,1.0).valid(&display));
+        assert!(!feedback("holding",500.0,1.1).valid(&display));
+    }
     #[test]
     fn typed_mouse_wheel_fields_reach_native_with_exact_units_and_terminal_rules() {
         let action:Action=serde_json::from_value(json!({"inputType":"mouse","eventKind":2,"buttons":0,"modifiers":0,"x":10.0,"y":20.0,

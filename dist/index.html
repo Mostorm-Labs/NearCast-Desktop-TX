@@ -71,6 +71,20 @@
           </div>
           <p id="input-touch-help" class="quality-help"></p>
           <p id="input-mouse-help" class="quality-help"></p>
+          <div id="gesture-settings" hidden>
+            <div class="input-mapping-grid">
+              <label for="gesture-hold-ms">长按拖拽等待 <output id="gesture-hold-value">300 ms</output>
+                <input id="gesture-hold-ms" type="range" min="150" max="1000" step="50" value="300" />
+              </label>
+              <label for="gesture-pinch-action">双指捏合
+                <select id="gesture-pinch-action"></select>
+              </label>
+            </div>
+            <label><input id="gesture-feedback" type="checkbox" checked /> 显示手势光圈</label>
+            <div class="gesture-legend" aria-label="光圈说明"><span class="halo-example holding"></span>蓄力 <span class="halo-example armed"></span>可拖拽 <span class="halo-example pair"></span>双指</div>
+            <p class="quality-help">轻点点击；直接滑动滚动；光圈变绿后移动可拖拽；双指轻点右键。捏合后松手不触发右键。</p>
+            <p id="gesture-pinch-help" class="quality-help"></p>
+          </div>
           <button id="input-policy-apply" class="button secondary" type="button" disabled>应用转换配置</button>
           <p id="input-policy-status" class="quality-help" role="status">正在读取本机输入能力…</p>
           <p class="quality-help">应用时会释放当前输入并重新协商；接收端可能需要重新开启反控。设置在本次运行期间保留。</p>

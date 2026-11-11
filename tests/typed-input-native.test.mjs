@@ -64,3 +64,15 @@ test('unconfirmed native cleanup keeps lease and contact IDs until explicit rele
   assert.equal(adapter.snapshot().owners,1);
   released=true;await adapter.releaseOwned(owner,'retry');assert.equal(adapter.snapshot().owners,0);
 });
+
+test('zoom and halo feedback keep native owner leases local and cannot bypass prepare',async()=>{
+  const calls=[];
+  const adapter=new NativeInputAdapter({invoke:async(name,args)=>{calls.push([name,args]);return name==='nearcast_input_prepare'?{status:'ready',leaseId:'local-secret'}:{status:'submitted',inputType:'zoom',nativeApi:'CGEventPost'};}});
+  assert.equal((await adapter.apply({inputType:'zoom',steps:1},owner)).status,'rejected');
+  await adapter.prepare(owner,{acceptedInputTypes:['mouse'],mouse:{}});
+  await adapter.apply({inputType:'zoom',steps:1,x:100,y:200},owner);
+  assert.equal(calls.at(-1)[0],'nearcast_input_apply');assert.equal(calls.at(-1)[1].action.inputType,'zoom');
+  await adapter.showGestureFeedback(owner.ownerId,{stage:'armed',x:100,y:200,progress:1});
+  assert.equal(calls.at(-1)[0],'nearcast_input_feedback');assert.equal(calls.at(-1)[1].leaseId,'local-secret');
+  assert.equal(JSON.stringify(adapter.snapshot()).includes('local-secret'),false);
+});

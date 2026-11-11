@@ -1,4 +1,10 @@
 fn main() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref()==Ok("macos") {
+        println!("cargo:rerun-if-changed=src/gesture_halo.m");
+        cc::Build::new().file("src/gesture_halo.m").flag("-fobjc-arc").flag("-fblocks").compile("nearcast_gesture_halo");
+        println!("cargo:rustc-link-lib=framework=AppKit");
+        println!("cargo:rustc-link-lib=framework=QuartzCore");
+    }
     println!("cargo:rerun-if-env-changed=NEARCAST_BUILD_NUMBER");
     println!("cargo:rerun-if-env-changed=NEARCAST_LOGICAL_VERSION");
     let build = std::env::var("NEARCAST_BUILD_NUMBER").unwrap_or_else(|_| "0".into());

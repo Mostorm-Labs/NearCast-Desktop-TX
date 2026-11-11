@@ -57,6 +57,10 @@ macOS 界面顶部提供“本地网络”“录屏与系统录音”“辅助�
 
 Touch→Mouse 点击拖拽在 DOWN 时按下左键、MOVE 时拖动、UP/CANCEL 时释放。Touch→滚动在 DOWN 时只定位，移动超过 6 个本机坐标单位后发送连续滚动；尚未滚动就 UP 才点击，CANCEL 不点击；滚动锚点固定在起点，松手发送结束事件，无惯性，仅支持单点。类型转换位于已认证、校验、坐标映射后的串行原生执行链；线上的 typed input 数据不改写，接收端协商的 inputTypes 描述可接收类型，原生输出类型单独记录。转换后触点仍使用本机 owner、lease 和 ID 池，不恢复已移除的无 owner 注入命令。
 
+“Mouse · 滚动 / 长按拖拽 / 双指右键与缩放”合并日常操作：单指轻点点击，直接滑动滚动，静止达到长按阈值后移动才按住左键拖拽，松手释放。长按默认 300ms，可在 UI 调为 150–1000ms；静止不自动右键。双指在 350ms 内轻点松开产生一次右键，捏合、平移、取消或拖拽中加入第二指均不补右键。捏合按配置输出：Mac 网页缩放使用前台应用的 Command＋/− 快捷键，属于显式兼容策略，不是原生捏合；Ctrl＋滚轮选项适合支持此语义的 Windows 应用，在 Mac 可能触发系统辅助缩放，默认不选。也可关闭缩放。缩放按比例阈值产生有界步数，不做惯性。
+
+合并手势协商最多 2 个 Touch 接触。纯状态机位于 `src/touchback/touch-mouse-gestures.mjs`，显式传入时间与区域，不包含传输或 OS 调用；后续迁移接收端可复用判定规则，再将输出 Mouse 动作编码发送。当前发送端试验版使用到达时钟；最终接收端应使用本地采集时钟并屏蔽重复的兼容鼠标事件。macOS 通过 click-through、不抢焦点的桌面光圈显示蓄力进度（青色）、可拖拽（绿色双环）、拖拽（蓝色）、双指（紫色双环）、捏合（橙色），可关闭，无重复文字提示。光圈 IPC 绑定原生 owner/lease，清理时隐藏，停止刷新后自动消失。Windows 暂未实现光圈原生层或 typed Mouse 注入，需在 Windows 合并后补齐并真机验收。
+
 Windows 分享整个屏幕后，会短暂显示四角随机校验标记，用所选浏览器轨道识别对应的物理屏幕，成功后标记自动消失。主屏、副屏和负坐标均使用 Rust 持有的来源绑定；同分辨率屏幕也不靠尺寸猜测。识别失败时音视频继续，可停止后重新分享；窗口仍仅投屏。视频保持原浏览器轨道，校准只读少量角落像素，不恢复 WGC 视频采集。输出分辨率可等比缩小，输入映射到原始物理坐标。macOS 保留单主屏及辅助功能权限要求。停止、重新选择或显示布局变化时撤销旧输入绑定、释放触点，重新就绪后由接收端开流；拔插屏幕或调整布局后需重新分享。目前不支持旋转屏幕。原生 WGC、缩略图、持续窗口边框及其 IPC 命令已经删除。架构边界见 [浏览器采集架构](docs/architecture/browser-capture.md)。
 
 展开“反控收包诊断”或调用 `globalThis.__nearcastTouchbackDiagnostics()`，可查看 `appReady`、`sourceReady`、`nativeReady`、软件输入类型、streamId、本地 generation、队列、清理状态和错误。`outputPolicy` 记录配置；`nativeInput.lastConversion` 记录收到的类型、输出类型及产生的动作数，`nativeInput.lastSubmission` 记录系统确认的输出类型/API。`receiverEnabled` 为 null，接收端的 effectiveEnabled/lifecycleState 需在接收端查询；RPC 成功本身不证明原生输入生效。诊断不包含配对码或 native lease。typed 合同见 [TI-3 handoff](docs/superpowers/handoffs/2026-11-06-tx-typed-input-ti3.md)，该历史交接中的“仅 native、无转换”限制已由上述显式配置扩展。

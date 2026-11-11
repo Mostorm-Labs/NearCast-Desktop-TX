@@ -53,9 +53,20 @@ pub fn wheel_points(unit:u8,value:i32,extent:f64,remainder:f64)->Result<(i32,f64
     let rounded=points.round();Ok((rounded as i32,points-rounded))
 }
 
+pub fn browser_zoom_key(steps:i32)->Result<u16,String>{
+    if steps==0||!(-4..=4).contains(&steps){return Err("invalid_browser_zoom_steps".into());}
+    Ok(if steps>0{24}else{27})
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn browser_zoom_shortcuts_are_bounded_command_equals_or_minus() {
+        assert_eq!(browser_zoom_key(1).unwrap(),24);
+        assert_eq!(browser_zoom_key(-4).unwrap(),27);
+        for steps in [0,5,-5,i32::MAX]{assert!(browser_zoom_key(steps).is_err());}
+    }
     #[test]
     fn typed_wheel_converts_q16_region_deltas_and_detents_in_display_points() {
         assert_eq!(wheel_points(1,65536,1440.0,0.0).unwrap(),(1439,0.0));

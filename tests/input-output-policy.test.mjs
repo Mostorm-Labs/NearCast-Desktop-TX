@@ -5,7 +5,7 @@ import {peer,openRequest,geometry,turn} from './helpers/typed-peer.mjs';
 import {encodeInputFrame} from '../src/touchback/typed-codec.mjs';
 
 const mouseCaps={inputTypes:['mouse'],nativeTypes:['mouse'],nativeReady:true,maxDataBytes:4096,
-  mouse:{buttonsMask:7,modifierMask:0,allowChords:false,wheelUnits:['regionQ16_16'],continuousScroll:true},geometry};
+  mouse:{buttonsMask:7,modifierMask:15,allowChords:false,wheelUnits:['detent120','regionQ16_16'],continuousScroll:true},zoom:{browser:true},geometry};
 const touchCaps={inputTypes:['touch'],nativeTypes:['touch'],nativeReady:true,maxDataBytes:4096,touch:{maxContacts:10},geometry};
 function platform(caps=mouseCaps){
   const calls=[];let releaseResult={status:'released'};
@@ -143,9 +143,31 @@ test('configuration exposes only supported output choices and does not enable co
       const config=await provider.configuration();
       assert.deepEqual(config.policy,{touch:'native',mouse:'native'});
       const supported=type=>config.options[type].filter(option=>option.supported).map(option=>option.value);
-      assert.deepEqual(supported('touch'),caps===mouseCaps?['mouse-drag','mouse-scroll','disabled']:['native','disabled']);
+      assert.deepEqual(supported('touch'),caps===mouseCaps?['mouse-drag','mouse-scroll','mouse-gestures','disabled']:['native','disabled']);
       assert.deepEqual(supported('mouse'),caps===mouseCaps?['native','disabled']:['touch','disabled']);
       assert.deepEqual((await provider.probe()).inputTypes,caps.inputTypes);
     }
   }
+});
+
+test('combined gestures negotiate two Touch contacts while injecting native right-click Mouse only',async t=>{
+  const p=await session(t,{touch:'mouse-gestures',mouse:'native',gestures:{holdMs:250,pinchAction:'browser-zoom'}});
+  assert.equal(p.source().data.inputCapability.touch.maxContacts,2);
+  const opened=await p.sender.engine.open(openRequest(p.source().data.sourceBindingId),{sessionId:p.sender.server.sessionId});
+  const r=(contactId,phase,x)=>({contactId,phase,x,y:20000});
+  await send(p,opened.streamId,1,{inputType:'touch',records:[r(1,0,10000),r(2,0,20000)]});
+  await send(p,opened.streamId,2,{inputType:'touch',records:[r(1,2,10000),r(2,2,20000)]});
+  assert.deepEqual(p.actions().map(a=>[a.inputType,a.eventKind,a.buttons]),[['mouse',0,0],['mouse',1,2],['mouse',1,0]]);
+  assert.equal(p.provider.snapshot().gestureFeedback,null);
+});
+
+test('policy reconfiguration includes gesture timing and discards an armed contact',async t=>{
+  const p=await session(t,{touch:'mouse-gestures',mouse:'native',gestures:{holdMs:250}});
+  const opened=await p.sender.engine.open(openRequest(p.source().data.sourceBindingId),{sessionId:p.sender.server.sessionId});
+  await send(p,opened.streamId,1,{inputType:'touch',records:[contact(0)]});
+  assert.equal(p.provider.snapshot().gestureFeedback.stage,'holding');
+  await p.sender.setOutputPolicy({touch:'mouse-gestures',mouse:'native',gestures:{holdMs:450}});
+  assert.equal(p.provider.snapshot().gestureFeedback,null);
+  assert.equal(p.provider.snapshot().outputPolicy.gestures.holdMs,450);
+  assert.equal(p.provider.snapshot().owners,0);
 });
