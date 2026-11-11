@@ -64,3 +64,21 @@ test('unconfirmed native cleanup keeps lease and contact IDs until explicit rele
   assert.equal(adapter.snapshot().owners,1);
   released=true;await adapter.releaseOwned(owner,'retry');assert.equal(adapter.snapshot().owners,0);
 });
+
+test('native adapter preserves every explicit Mouse action including wheel fields and zero-coordinate-free cancel/modifiers',async()=>{
+  const calls=[];
+  const adapter=new NativeInputAdapter({invoke:async(name,args)=>{calls.push([name,args]);return name==='nearcast_input_prepare'?{status:'ready',leaseId:'mouse-lease'}:name==='nearcast_input_apply'?{status:'submitted',inputType:'mouse',nativeApi:'SendInput'}:{status:'released'};}});
+  await adapter.prepare(owner,{acceptedInputTypes:['mouse'],mouse:{buttonsMask:31,modifierMask:15,allowChords:true,wheelUnits:['detent120'],continuousScroll:false}});
+  assert.equal(calls[0][1].maxContacts,0);
+  const actions=[
+    {inputType:'mouse',eventKind:0,buttons:0,modifiers:0,x:-1920,y:0},
+    {inputType:'mouse',eventKind:1,buttons:3,modifiers:2,x:-1919,y:1},
+    {inputType:'mouse',eventKind:2,buttons:3,modifiers:2,x:-1919,y:1,wheelUnit:0,wheelPhase:0,wheelX:-120,wheelY:240},
+    {inputType:'mouse',eventKind:4,modifiers:0},
+    {inputType:'mouse',eventKind:3},
+  ];
+  for(const action of actions){assert.equal((await adapter.apply(action,owner)).status,'submitted');assert.deepEqual(calls.at(-1)[1].action,action);}
+  assert.equal(adapter.snapshot().lastSubmission.nativeApi,'SendInput');
+  assert.equal(adapter.snapshot().activeContacts,0);
+  await adapter.releaseOwned(owner,'source changed');assert.equal(calls.at(-1)[1].ownerId,owner.ownerId);
+});

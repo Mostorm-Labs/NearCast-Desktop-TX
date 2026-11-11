@@ -12,6 +12,8 @@ mod display_binding;
 #[cfg(any(windows,test))]
 mod native_audio;
 mod input_native;
+#[cfg(windows)]
+mod windows_mouse;
 #[cfg(all(test,windows))]
 mod input_native_tests;
 #[cfg(all(test,windows))]

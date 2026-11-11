@@ -11,12 +11,60 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 static PREVIOUS: AtomicIsize = AtomicIsize::new(0);
 static DOWN: AtomicU32 = AtomicU32::new(0);
 static UP: AtomicU32 = AtomicU32::new(0);
+static MOUSE_DOWN: AtomicU32 = AtomicU32::new(0);
+static MOUSE_UP: AtomicU32 = AtomicU32::new(0);
+static DRAG: AtomicU32 = AtomicU32::new(0);
+static CTRL_CLICK: AtomicU32 = AtomicU32::new(0);
+static WHEEL_Y: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+static WHEEL_X: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if msg == WM_POINTERDOWN {
         DOWN.fetch_add(1, Ordering::SeqCst);
     }
     if msg == WM_POINTERUP {
         UP.fetch_add(1, Ordering::SeqCst);
+    }
+    let button = match msg {
+        WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK => 1,
+        WM_RBUTTONDOWN | WM_RBUTTONUP | WM_RBUTTONDBLCLK => 2,
+        WM_MBUTTONDOWN | WM_MBUTTONUP | WM_MBUTTONDBLCLK => 4,
+        WM_XBUTTONDOWN | WM_XBUTTONUP | WM_XBUTTONDBLCLK => {
+            if (wp.0 >> 16) & 0xffff == 1 {
+                8
+            } else {
+                16
+            }
+        }
+        _ => 0,
+    };
+    if [
+        WM_LBUTTONDOWN,
+        WM_LBUTTONDBLCLK,
+        WM_RBUTTONDOWN,
+        WM_RBUTTONDBLCLK,
+        WM_MBUTTONDOWN,
+        WM_MBUTTONDBLCLK,
+        WM_XBUTTONDOWN,
+        WM_XBUTTONDBLCLK,
+    ]
+    .contains(&msg)
+    {
+        MOUSE_DOWN.fetch_or(button, Ordering::SeqCst);
+    }
+    if [WM_LBUTTONUP, WM_RBUTTONUP, WM_MBUTTONUP, WM_XBUTTONUP].contains(&msg) {
+        MOUSE_UP.fetch_or(button, Ordering::SeqCst);
+    }
+    if msg == WM_MOUSEMOVE && wp.0 & 1 != 0 {
+        DRAG.fetch_add(1, Ordering::SeqCst);
+    }
+    if [WM_LBUTTONDOWN, WM_LBUTTONDBLCLK].contains(&msg) && wp.0 & 8 != 0 {
+        CTRL_CLICK.fetch_add(1, Ordering::SeqCst);
+    }
+    if msg == WM_MOUSEWHEEL {
+        WHEEL_Y.fetch_add(((wp.0 >> 16) as u16 as i16) as i32, Ordering::SeqCst);
+    }
+    if msg == WM_MOUSEHWHEEL {
+        WHEEL_X.fetch_add(((wp.0 >> 16) as u16 as i16) as i32, Ordering::SeqCst);
     }
     CallWindowProcW(
         std::mem::transmute::<isize, WNDPROC>(PREVIOUS.load(Ordering::SeqCst)),
@@ -40,8 +88,8 @@ fn pump(hwnd: HWND) {
     }
 }
 #[test]
-#[ignore = "creates a temporary foreground window and injects Touch only into it"]
-fn typed_native_touch_and_owned_cleanup_reach_our_window() {
+#[ignore = "creates a temporary foreground window; injects Touch and explicit Mouse only into it"]
+fn typed_native_touch_mouse_and_owned_cleanup_reach_our_window() {
     let probe = input_native::probe();
     eprintln!("typed_native_probe={probe}");
     assert_eq!(probe["nativeReady"], true);
@@ -137,7 +185,7 @@ fn typed_native_touch_and_owned_cleanup_reach_our_window() {
         "capture-test".into(),
         binding["revision"].as_str().unwrap().into(),
         binding["nativeId"].as_str().unwrap().into(),
-        vec!["touch".into()],
+        vec!["touch".into(), "mouse".into()],
         10,
     );
     assert_eq!(prepared["status"], "ready", "{prepared}");
@@ -158,14 +206,83 @@ fn typed_native_touch_and_owned_cleanup_reach_our_window() {
     apply(0);
     apply(1);
     apply(2);
+    // Ensure all Mouse fields enter through the production IPC deserializer,
+    // lease checks and calibrated secondary-monitor binding.
+    let mouse = |action: serde_json::Value| {
+        assert_eq!(unsafe { GetForegroundWindow() }, hwnd);
+        let result = input_native::apply(
+            "owned-touch-test".into(),
+            lease.clone(),
+            binding["revision"].as_str().unwrap().into(),
+            serde_json::from_value(action).unwrap(),
+        );
+        assert_eq!(result["status"], "submitted", "{result}");
+        assert_eq!(result["nativeApi"], "SendInput");
+        pump(hwnd);
+    };
+    let mut cursor_at = point;
+    mouse(
+        json!({"inputType":"mouse","eventKind":0,"buttons":0,"modifiers":0,"x":point.x,"y":point.y}),
+    );
+    unsafe {
+        GetCursorPos(&mut cursor_at).unwrap();
+    }
+    assert_eq!((cursor_at.x, cursor_at.y), (point.x, point.y));
+    MOUSE_DOWN.store(0, Ordering::SeqCst);
+    MOUSE_UP.store(0, Ordering::SeqCst);
+    for button in [1, 2, 4, 8, 16] {
+        let modifiers = if button == 1 { 2 } else { 0 };
+        mouse(
+            json!({"inputType":"mouse","eventKind":1,"buttons":button,"modifiers":modifiers,"x":point.x,"y":point.y}),
+        );
+        if button == 1 {
+            mouse(
+                json!({"inputType":"mouse","eventKind":0,"buttons":1,"modifiers":2,"x":point.x+10,"y":point.y+10}),
+            );
+        }
+        mouse(
+            json!({"inputType":"mouse","eventKind":1,"buttons":0,"modifiers":0,"x":point.x,"y":point.y}),
+        );
+    }
+    mouse(
+        json!({"inputType":"mouse","eventKind":2,"buttons":0,"modifiers":0,"x":point.x,"y":point.y,"wheelUnit":0,"wheelPhase":0,"wheelX":-120,"wheelY":240}),
+    );
+    assert_eq!(MOUSE_DOWN.load(Ordering::SeqCst), 31);
+    assert_eq!(MOUSE_UP.load(Ordering::SeqCst), 31);
+    assert!(DRAG.load(Ordering::SeqCst) > 0);
+    assert!(CTRL_CLICK.load(Ordering::SeqCst) > 0);
+    assert_eq!(WHEEL_X.load(Ordering::SeqCst), -120);
+    assert_eq!(WHEEL_Y.load(Ordering::SeqCst), 240);
+    mouse(
+        json!({"inputType":"mouse","eventKind":1,"buttons":2,"modifiers":2,"x":point.x,"y":point.y}),
+    );
+    mouse(json!({"inputType":"mouse","eventKind":3}));
+    assert_eq!(
+        unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0xA2) } as u16
+            & 0x8000,
+        0
+    );
+    mouse(json!({"inputType":"mouse","eventKind":4,"modifiers":2}));
+    mouse(
+        json!({"inputType":"mouse","eventKind":1,"buttons":2,"modifiers":2,"x":point.x,"y":point.y}),
+    );
+    // A simultaneous Touch is also released on source revocation.
     apply(0);
+    crate::display_binding::release(_guard.source_id.clone()).unwrap();
     let released = input_native::release("owned-touch-test".into(), Some(lease));
     assert_eq!(released["status"], "released", "{released}");
     pump(hwnd);
     assert!(crate::pointer::active_points().is_empty());
+    for key in [0xA2, 0x02] {
+        assert_eq!(
+            unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(key) } as u16
+                & 0x8000,
+            0
+        );
+    }
     assert_eq!(DOWN.load(Ordering::SeqCst), 2);
     assert_eq!(UP.load(Ordering::SeqCst), 2);
     eprintln!(
-        "typed native Touch PASS: Down/Move/Up plus owned cancel; window received 2 down and 2 up"
+        "typed native Touch + Mouse PASS: calibrated secondary pixel, five buttons, Ctrl drag, wheel X/Y, cancel and source-revocation cleanup"
     );
 }

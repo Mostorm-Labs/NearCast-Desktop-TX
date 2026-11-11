@@ -13,6 +13,8 @@ struct Owner {
     max_contacts: u32,
     blocked: bool,
     mouse_buttons: u32,
+    #[cfg(windows)]
+    mouse: crate::windows_mouse::State,
     possible_touch: Vec<TouchRecord>,
 }
 static OWNER: Mutex<Option<Owner>> = Mutex::new(None);
@@ -30,21 +32,42 @@ pub struct TouchRecord {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "inputType", rename_all = "lowercase", deny_unknown_fields)]
 pub enum Action {
-    Touch {
-        records: Vec<TouchRecord>,
-    },
-    Mouse {
-        #[serde(rename = "eventKind")]
-        event_kind: u8,
-        #[serde(default)]
-        buttons: u32,
-        #[serde(default)]
-        modifiers: u16,
-        #[serde(default)]
-        x: f64,
-        #[serde(default)]
-        y: f64,
-    },
+    Touch { records: Vec<TouchRecord> },
+    Mouse(MouseAction),
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MouseAction {
+    pub event_kind: u8,
+    pub buttons: Option<u32>,
+    pub modifiers: Option<u16>,
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+    pub wheel_unit: Option<u8>,
+    pub wheel_phase: Option<u8>,
+    pub wheel_x: Option<i32>,
+    pub wheel_y: Option<i32>,
+}
+impl MouseAction {
+    pub(crate) fn valid_shape(&self) -> bool {
+        let point = self.x.is_some() && self.y.is_some() && self.buttons.is_some();
+        let no_point = self.x.is_none() && self.y.is_none() && self.buttons.is_none();
+        let wheel = self.wheel_unit.is_some()
+            && self.wheel_phase.is_some()
+            && self.wheel_x.is_some()
+            && self.wheel_y.is_some();
+        let no_wheel = self.wheel_unit.is_none()
+            && self.wheel_phase.is_none()
+            && self.wheel_x.is_none()
+            && self.wheel_y.is_none();
+        match self.event_kind {
+            0 | 1 => point && self.modifiers.is_some() && no_wheel,
+            2 => point && self.modifiers.is_some() && wheel,
+            3 => no_point && self.modifiers.is_none() && no_wheel,
+            4 => no_point && self.modifiers.is_some() && no_wheel,
+            _ => false,
+        }
+    }
 }
 fn failure(status: &str, error: impl ToString) -> Value {
     json!({"status":status,"error":error.to_string()})
@@ -59,10 +82,15 @@ fn text(value: &str) -> bool {
 }
 
 pub fn probe() -> Value {
-    let geometry = input_geometry::snapshot().ok().and_then(|g|serde_json::to_value(g).ok()).map(|mut g|{
-        if let Some(binding)=crate::display_binding::snapshot(){g["browserBinding"]=binding;}
-        g
-    });
+    let geometry = input_geometry::snapshot()
+        .ok()
+        .and_then(|g| serde_json::to_value(g).ok())
+        .map(|mut g| {
+            if let Some(binding) = crate::display_binding::snapshot() {
+                g["browserBinding"] = binding;
+            }
+            g
+        });
     // Keep the same lock through readiness initialization. A snapshot of
     // is_none() followed by an unlocked InitializeTouchInjection would race a
     // newly prepared owner and could erase its native contact state.
@@ -85,7 +113,11 @@ pub fn probe() -> Value {
                 ready.unwrap_or(false)
             })
             .unwrap_or(false);
-        return json!({"inputTypes":["touch"],"nativeTypes":["touch"],"maxDataBytes":4096,"touch":{"maxContacts":10},"nativeReady":ready&&!blocked,"cleanupBlocked":blocked,"ownerBusy":busy,"geometry":geometry});
+        let mut types = vec!["mouse"];
+        if ready {
+            types.insert(0, "touch");
+        }
+        return json!({"inputTypes":types,"nativeTypes":types,"maxDataBytes":4096,"touch":{"maxContacts":10},"mouse":crate::windows_mouse::capabilities(),"nativeReady":!blocked,"cleanupBlocked":blocked,"ownerBusy":busy,"geometry":geometry});
     }
     #[cfg(target_os = "macos")]
     {
@@ -100,14 +132,21 @@ pub fn probe() -> Value {
 fn cleanup(owner: &mut Owner) -> Result<(), String> {
     #[cfg(windows)]
     {
-        if owner.possible_touch.is_empty() {
+        let touch_cleanup = if owner.possible_touch.is_empty() {
             if !crate::pointer::reset_all() {
-                return Err("native_touch_cleanup_unconfirmed".into());
+                Err("native_touch_cleanup_unconfirmed".to_string())
+            } else {
+                Ok(())
             }
         } else {
-            crate::pointer::cancel_possible(&owner.possible_touch)?;
-            owner.possible_touch.clear();
-        }
+            crate::pointer::cancel_possible(&owner.possible_touch)
+                .map(|()| owner.possible_touch.clear())
+        };
+        // Attempt both domains even if one reset fails; preserve ownership and
+        // block the next owner until every held input has a confirmed release.
+        let mouse_cleanup = crate::windows_mouse::reset(&mut owner.mouse);
+        touch_cleanup?;
+        mouse_cleanup?;
     }
     #[cfg(target_os = "macos")]
     {
@@ -133,7 +172,15 @@ pub fn prepare(
         return failure("rejected", "INVALID_ARGUMENT native owner/binding");
     }
     #[cfg(windows)]
-    let supported = input_types == ["touch"] && max_contacts >= 1 && max_contacts <= 10;
+    let supported = !input_types.is_empty()
+        && input_types.len() <= 2
+        && input_types.iter().all(|t| t == "touch" || t == "mouse")
+        && (input_types.len() != 2 || input_types[0] != input_types[1])
+        && if input_types.iter().any(|t| t == "touch") {
+            (1..=10).contains(&max_contacts)
+        } else {
+            max_contacts == 0
+        };
     #[cfg(target_os = "macos")]
     let supported = input_types == ["mouse"] && max_contacts == 0;
     #[cfg(not(any(windows, target_os = "macos")))]
@@ -178,6 +225,8 @@ pub fn prepare(
         max_contacts,
         blocked: false,
         mouse_buttons: 0,
+        #[cfg(windows)]
+        mouse: Default::default(),
         possible_touch: Vec::new(),
     };
     if let Err(error) = cleanup(&mut owner) {
@@ -186,7 +235,7 @@ pub fn prepare(
         return json!({"status":"blocked","leaseId":lease,"error":error});
     }
     #[cfg(windows)]
-    if !crate::pointer::initialize(max_contacts) {
+    if owner.input_types.iter().any(|t| t == "touch") && !crate::pointer::initialize(max_contacts) {
         return failure("rejected", "native_touch_initialization_failed");
     }
     #[cfg(target_os = "macos")]
@@ -233,19 +282,18 @@ pub fn apply(
     };
     match action {
         Action::Touch { records } => apply_touch(owner, &display, records),
-        Action::Mouse {
-            event_kind,
-            buttons,
-            modifiers,
-            x,
-            y,
-        } => apply_mouse(owner, &display, event_kind, buttons, modifiers, x, y),
+        Action::Mouse(action) => {
+            if !action.valid_shape() {
+                return failure("rejected", "native_mouse_action_shape");
+            }
+            apply_mouse(owner, &display, action)
+        }
     }
 }
 #[cfg(windows)]
 fn apply_touch(owner: &mut Owner, display: &Display, records: Vec<TouchRecord>) -> Value {
     use std::collections::BTreeSet;
-    if owner.input_types != ["touch"]
+    if !owner.input_types.iter().any(|t| t == "touch")
         || records.is_empty()
         || records.len() > owner.max_contacts as usize
     {
@@ -346,15 +394,14 @@ fn apply_touch(_owner: &mut Owner, _display: &Display, _records: Vec<TouchRecord
 }
 
 #[cfg(target_os = "macos")]
-fn apply_mouse(
-    owner: &mut Owner,
-    display: &Display,
-    kind: u8,
-    buttons: u32,
-    modifiers: u16,
-    x: f64,
-    y: f64,
-) -> Value {
+fn apply_mouse(owner: &mut Owner, display: &Display, action: MouseAction) -> Value {
+    let (kind, buttons, modifiers, x, y) = (
+        action.event_kind,
+        action.buttons.unwrap_or(0),
+        action.modifiers.unwrap_or(0),
+        action.x.unwrap_or(0.0),
+        action.y.unwrap_or(0.0),
+    );
     if owner.input_types != ["mouse"]
         || modifiers != 0
         || buttons & !7 != 0
@@ -417,16 +464,19 @@ fn apply_mouse(
         }
     }
 }
-#[cfg(not(target_os = "macos"))]
-fn apply_mouse(
-    _owner: &mut Owner,
-    _display: &Display,
-    _kind: u8,
-    _buttons: u32,
-    _modifiers: u16,
-    _x: f64,
-    _y: f64,
-) -> Value {
+#[cfg(windows)]
+fn apply_mouse(owner: &mut Owner, display: &Display, action: MouseAction) -> Value {
+    if !owner.input_types.iter().any(|t| t == "mouse") {
+        return failure("rejected", "NOT_SUPPORTED native Mouse");
+    }
+    let result = crate::windows_mouse::apply(&mut owner.mouse, display, &action);
+    if result["cleanupRequired"] == true {
+        owner.blocked = true;
+    }
+    result
+}
+#[cfg(not(any(windows, target_os = "macos")))]
+fn apply_mouse(_owner: &mut Owner, _display: &Display, _action: MouseAction) -> Value {
     failure("rejected", "NOT_SUPPORTED typed native Mouse")
 }
 
@@ -456,11 +506,14 @@ pub fn release(owner_id: String, lease_id: Option<String>) -> Value {
         }
     }
 }
-pub fn release_binding(native_id:&str)->Result<(),String>{
-    let mut guard=OWNER.lock().map_err(|_|"native_owner_lock_poisoned")?;
-    if let Some(owner)=guard.as_mut().filter(|owner|owner.native_id==native_id){
-        if let Err(error)=cleanup(owner){owner.blocked=true;return Err(error);}
-        *guard=None;
+pub fn release_binding(native_id: &str) -> Result<(), String> {
+    let mut guard = OWNER.lock().map_err(|_| "native_owner_lock_poisoned")?;
+    if let Some(owner) = guard.as_mut().filter(|owner| owner.native_id == native_id) {
+        if let Err(error) = cleanup(owner) {
+            owner.blocked = true;
+            return Err(error);
+        }
+        *guard = None;
     }
     Ok(())
 }
@@ -505,6 +558,8 @@ mod tests {
             max_contacts: 10,
             blocked: false,
             mouse_buttons: 0,
+            #[cfg(windows)]
+            mouse: Default::default(),
             possible_touch: vec![],
         });
         assert!(authorized(&mut owner, "two", "secret").is_err());

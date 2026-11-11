@@ -53,7 +53,7 @@ macOS 界面顶部提供“本地网络”“录屏与系统录音”“辅助�
 
 反控采用 `AXTP-TYPED-INPUT-V1` / `input-sample-v1`，固定开发合同为 `0.18.0-dev.feac6fa2a4b9`（尚未发布）。控制通道完成标准 CONTROL 与 Hello/Identify/Identified 握手后，接收端通过 `input.openStream` 请求输入类型集合，发送端按实际软件能力取交集。每包使用完整 Standard Frame、STREAM header、类型字节及 CRC16；不再接受旧 BIND、TouchBatch、wire epoch 或私有文本 RPC。普通输入无应用 ACK，查询和状态变更使用现有 `stream.getState` / `stream.stateChanged`。
 
-发送端投屏页提供“允许接收端反控本机”，默认关闭；接收端也需启用。默认 Native 策略保持输入类型，不把 Touch 猜成鼠标手势。当前 Windows typed 通路支持原生 Touch（最多 10 点）；Windows Mouse 原生注入后端已移除；typed input 的 Touch 和各种 Mouse 事件解码能力保留，未支持的类型不协商、不注入。macOS 目前支持基本原生 Mouse，不支持原生 Touch，不暗转 Mouse；原有手势与滚动代码留作后续明确输出策略的实现材料。
+发送端投屏页提供“允许接收端反控本机”，默认关闭；接收端也需启用。默认 Native 策略保持输入类型，不把 Touch 猜成鼠标手势。Windows typed 通路支持原生 Touch（最多 10 点，InjectTouchInput）及原生 Mouse（SendInput）：移动、左/右/中/后退/前进键及组合、拖拽、Shift/Ctrl/Alt/Meta 修饰键、横纵 detent120 滚轮、取消和修饰键状态更新。Mouse 复用整屏来源绑定，支持副屏负坐标；不协商 regionQ16_16 连续滚动，不提供普通键盘输入。收到完整类型事件后只执行平台映射，点击/长按/多指手势转换由 RX 完成。断流、切屏、关闭/退出时释放本租约持有的鼠标键和注入的修饰键；已在本地按住的修饰键不由远端 reset 释放。SendInput 部分失败保留已提交前缀的状态并阻止复用，清理确认后才可重新开流。Mouse 和 Touch 均受当前进程权限及输入桌面约束，没有新增提权 Agent。macOS 目前仍支持基本原生 Mouse，不支持原生 Touch，不暗转 Mouse。
 
 Windows 分享整个屏幕后，会短暂显示四角随机校验标记，用所选浏览器轨道识别对应的物理屏幕，成功后标记自动消失。主屏、副屏和负坐标均使用 Rust 持有的来源绑定；同分辨率屏幕也不靠尺寸猜测。识别失败时音视频继续，可停止后重新分享；窗口仍仅投屏。视频保持原浏览器轨道，校准只读少量角落像素，不恢复 WGC 视频采集。输出分辨率可等比缩小，输入映射到原始物理坐标。macOS 保留单主屏及辅助功能权限要求。停止、重新选择或显示布局变化时撤销旧输入绑定、释放触点，重新就绪后由接收端开流；拔插屏幕或调整布局后需重新分享。目前不支持旋转屏幕。原生 WGC、缩略图、持续窗口边框及其 IPC 命令已经删除。架构边界见 [浏览器采集架构](docs/architecture/browser-capture.md)。
 
@@ -89,7 +89,7 @@ TXT HTTPS endpoint 只用于显示码，选择设备不会覆盖 Launcher 配对
 
 Windows 仅构建 x64。日志写入 Tauri 应用日志目录，最多三个 1 MiB JSONL 文件轮转；每 30 秒采集一次数值性能指标及会话状态，不记录配对码、SDP/ICE 或音视频内容。底部“导出诊断”生成本机 JSON 报告，最多保留五份。系统声音仍为独立 WASAPI 采集，不采集麦克风；更新签名验证与 mDNS 发现保持。
 
-Release 使用速度优化等级 3、ThinLTO、单编译单元及符号裁剪。Windows updater 仅处理当前 NSIS/MSI 原始包，移除旧 ZIP 更新包兼容；macOS updater 仍保留 `.app.tar.gz` 支持。WGC、窗口缩略图、原生边框和 Windows Mouse 注入源码已删除；协议解码仍保留全部已定义输入记录。
+Release 使用速度优化等级 3、ThinLTO、单编译单元及符号裁剪。Windows updater 仅处理当前 NSIS/MSI 原始包，移除旧 ZIP 更新包兼容；macOS updater 仍保留 `.app.tar.gz` 支持。WGC、窗口缩略图、持续原生边框和旧 TouchBatch Mouse 实现已删除；新的 Windows Mouse 直接接入 typed input，协议解码仍保留全部已定义输入记录。
 
 `src-tauri/tauri.conf.json` 已开启 `nsis`、`msi`、macOS `.app` 和 `.dmg` bundle；macOS 最低版本固定为 13.0。`.github/workflows/build.yml` 使用 Windows runner、macOS 15 Intel runner（部署目标 13.0）和 macOS 15 Apple Silicon runner 构建。当前开发机是 Windows，不能在本机编译或验收 macOS bundle，macOS 产物需要使用 GitHub Actions 或真实 macOS 主机。
 
