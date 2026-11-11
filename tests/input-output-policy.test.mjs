@@ -151,13 +151,27 @@ test('configuration exposes only supported output choices and does not enable co
 });
 
 test('combined gestures negotiate two Touch contacts while injecting native right-click Mouse only',async t=>{
-  const p=await session(t,{touch:'mouse-gestures',mouse:'native',gestures:{holdMs:250,pinchAction:'browser-zoom'}});
+  const p=await session(t,{touch:'mouse-gestures',mouse:'native',gestures:{holdMs:250,rightClick:'two-finger',pinchAction:'browser-zoom'}});
   assert.equal(p.source().data.inputCapability.touch.maxContacts,2);
   const opened=await p.sender.engine.open(openRequest(p.source().data.sourceBindingId),{sessionId:p.sender.server.sessionId});
   const r=(contactId,phase,x)=>({contactId,phase,x,y:20000});
   await send(p,opened.streamId,1,{inputType:'touch',records:[r(1,0,10000),r(2,0,20000)]});
   await send(p,opened.streamId,2,{inputType:'touch',records:[r(1,2,10000),r(2,2,20000)]});
   assert.deepEqual(p.actions().map(a=>[a.inputType,a.eventKind,a.buttons]),[['mouse',0,0],['mouse',1,2],['mouse',1,0]]);
+  assert.equal(p.provider.snapshot().gestureFeedback.stage,'right-released');
+});
+
+test('default long-hold right click uses configured timing through the typed input owner',async t=>{
+  const p=await session(t,{touch:'mouse-gestures',mouse:'native'});
+  let time=0;p.provider.now=()=>time;
+  const opened=await p.sender.engine.open(openRequest(p.source().data.sourceBindingId),{sessionId:p.sender.server.sessionId});
+  await send(p,opened.streamId,1,{inputType:'touch',records:[contact(0)]});
+  time=500;assert.equal(p.provider.snapshot().gestureFeedback.stage,'right-wait');
+  time=750;await send(p,opened.streamId,2,{inputType:'touch',records:[contact(2)]});
+  assert.deepEqual(p.actions().filter(a=>a.eventKind===1).map(a=>a.buttons),[2,0]);
+  assert.equal(p.provider.snapshot().gestureFeedback.stage,'right-released');
+  await assert.rejects(p.sender.setOutputPolicy({touch:'mouse-gestures',mouse:'native',gestures:{holdMs:800,rightHoldMs:700}}),/Right-click/);
+  assert.equal(p.provider.snapshot().outputPolicy.gestures.rightHoldMs,700);
   assert.equal(p.provider.snapshot().gestureFeedback,null);
 });
 

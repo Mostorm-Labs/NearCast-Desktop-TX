@@ -76,13 +76,20 @@
               <label for="gesture-hold-ms">长按拖拽等待 <output id="gesture-hold-value">300 ms</output>
                 <input id="gesture-hold-ms" type="range" min="150" max="1000" step="50" value="300" />
               </label>
+              <label for="gesture-right-click">右键触发方式
+                <select id="gesture-right-click"><option value="hold">单指长按后松手</option><option value="two-finger">双指轻点</option></select>
+              </label>
+              <label id="gesture-right-hold-label" for="gesture-right-hold-ms">右键长按等待 <output id="gesture-right-hold-value">700 ms</output>
+                <input id="gesture-right-hold-ms" type="range" min="300" max="2000" step="50" value="700" />
+              </label>
               <label for="gesture-pinch-action">双指捏合
                 <select id="gesture-pinch-action"></select>
               </label>
             </div>
             <label><input id="gesture-feedback" type="checkbox" checked /> 显示手势光圈</label>
-            <div class="gesture-legend" aria-label="光圈说明"><span class="halo-example holding"></span>蓄力 <span class="halo-example armed"></span>可拖拽 <span class="halo-example pair"></span>双指</div>
-            <p class="quality-help">轻点点击；直接滑动滚动；光圈变绿后移动可拖拽；双指轻点右键。捏合后松手不触发右键。</p>
+            <div class="gesture-legend" aria-label="光圈说明"><span class="halo-example holding"></span>蓄力 <span class="halo-example armed"></span>可拖拽 <span class="halo-example right-wait"></span>右键等待 <span class="halo-example right-ready"></span>松手右键 <span class="halo-example released"></span>松手确认</div>
+            <p id="gesture-right-help" class="quality-help"></p>
+            <p class="quality-help">轻点点击；直接滑动滚动；光圈变绿后移动可拖拽。捏合后松手不触发右键。</p>
             <p id="gesture-pinch-help" class="quality-help"></p>
           </div>
           <button id="input-policy-apply" class="button secondary" type="button" disabled>应用转换配置</button>

@@ -54,6 +54,9 @@ h1 { margin: 10px 0 0; color: #fff; font-size: clamp(28px, 4vw, 38px); line-heig
 .halo-example.holding { border-right-color: #ffffff30; border-bottom-color: #ffffff30; }
 .halo-example.armed { border-color: #4dff8c; box-shadow: inset 0 0 0 3px #10121c,inset 0 0 0 4px #4dff8c; }
 .halo-example.pair { border-color: #cc80ff; box-shadow: inset 0 0 0 3px #10121c,inset 0 0 0 4px #cc80ff; }
+.halo-example.right-wait { border-color: #4dff8c; border-right-color: #cc80ff; border-bottom-color: #cc80ff; }
+.halo-example.right-ready { border-color: #cc80ff; box-shadow: inset 0 0 0 3px #10121c,inset 0 0 0 4px #cc80ff; }
+.halo-example.released { border-color: #7adfff; border-right-color: transparent; opacity: .7; }
 .touchback-diagnostics pre { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .casting-panel .platform-status { margin: 16px auto 0; }
 .update-heading {display:flex;align-items:center;gap:12px;color:#8d9ab1;font-size:11px}

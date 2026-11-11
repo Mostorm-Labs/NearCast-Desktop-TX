@@ -1,0 +1,43 @@
+{
+  "date": "2026-11-11",
+  "baseCommit": "610c303825d036e68c82d83448f25e2f203d4384",
+  "testedBuildIncludesRightClickChanges": true,
+  "gestureCoreSha256": "137b9781ba6f094418aa6a6655e45ff756b95d9c52ede812ff3a9ba61541db1a",
+  "signedExecutableSha256": "a7143494c71fe61fad386fa71617beb7762444e4c32f31424a337507fdbc868c",
+  "rightClick": {
+    "methods": ["hold", "two-finger"],
+    "defaultMethod": "hold",
+    "defaultDelayMs": 700,
+    "uiDelayMaxMs": 2000,
+    "constraint": "rightHoldMs >= holdMs; equal thresholds allowed",
+    "holdTrigger": "Stationary Up after the threshold, exactly one right-button Down and Up",
+    "movementAfterReady": "Drag instead of right click",
+    "cancellation": "No click or release confirmation"
+  },
+  "feedback": {
+    "holding": "Cyan progress to drag threshold",
+    "right-wait": "Green drag-ready outer circle plus purple progress toward right threshold",
+    "right-ready": "Purple circle with rotating inner arc; release triggers right click",
+    "released": "280ms cyan expanding rotating fade-out",
+    "right-released": "280ms purple expanding rotating fade-out",
+    "newDownReplacesReleaseFeedback": true,
+    "cleanupClearsFeedback": true
+  },
+  "checks": {
+    "nodeTests": {"passed": 198, "failed": 0},
+    "rustTests": {"passed": 39, "failed": 0, "ignored": 1},
+    "macosSignedBuild": "passed",
+    "codesignVerification": "passed",
+    "sourceDistParity": "passed"
+  },
+  "deviceAcceptance": {
+    "appStarted": true,
+    "permissionsGranted": true,
+    "receiverDiscovered": "nearcast-500q",
+    "rightClickMethodsVerified": true,
+    "waitingAndReleaseHaloVerified": true,
+    "operatorConfirmation": "Both right-click methods and halo feedback work",
+    "verificationMethod": "Operator confirmed the requested real-device checks; no independent native event trace captured",
+    "operatorQuestionPending": false
+  }
+}

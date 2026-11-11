@@ -7,7 +7,7 @@ export function outputPolicyOptions(native){
   return {
     touch:[{value:'native',label:'原生 Touch（保持类型）',supported:touch},{value:'mouse-drag',label:'Mouse · 点击与拖拽',supported:mouse&&Boolean(native.mouse?.buttonsMask&1)},
       {value:'mouse-scroll',label:'Mouse · 轻点点击 / 滑动滚动',supported:mouse&&Boolean(native.mouse?.buttonsMask&1)&&native.mouse?.continuousScroll===true&&native.mouse?.wheelUnits.includes('regionQ16_16')},
-      {value:'mouse-gestures',label:'Mouse · 滚动 / 长按拖拽 / 双指右键与缩放',supported:mouse&&(native.mouse?.buttonsMask&3)===3&&native.mouse?.continuousScroll===true&&native.mouse?.wheelUnits.includes('regionQ16_16')},
+      {value:'mouse-gestures',label:'Mouse · 组合手势（滚动 / 拖拽 / 右键 / 缩放）',supported:mouse&&(native.mouse?.buttonsMask&3)===3&&native.mouse?.continuousScroll===true&&native.mouse?.wheelUnits.includes('regionQ16_16')},
       {value:'disabled',label:'禁用 Touch 输入',supported:true}],
     mouse:[{value:'native',label:'原生 Mouse（保持类型）',supported:mouse},{value:'touch',label:'Touch · 左键单点触控',supported:touch},
       {value:'disabled',label:'禁用 Mouse 输入',supported:true}],

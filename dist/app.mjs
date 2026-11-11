@@ -69,6 +69,11 @@ const mouseOutputHelp=document.querySelector('#input-mouse-help');
 const gestureSettings=document.querySelector('#gesture-settings');
 const gestureHold=document.querySelector('#gesture-hold-ms');
 const gestureHoldValue=document.querySelector('#gesture-hold-value');
+const gestureRightClick=document.querySelector('#gesture-right-click');
+const gestureRightHold=document.querySelector('#gesture-right-hold-ms');
+const gestureRightHoldValue=document.querySelector('#gesture-right-hold-value');
+const gestureRightHoldLabel=document.querySelector('#gesture-right-hold-label');
+const gestureRightHelp=document.querySelector('#gesture-right-help');
 const gesturePinch=document.querySelector('#gesture-pinch-action');
 const gesturePinchHelp=document.querySelector('#gesture-pinch-help');
 const gestureFeedback=document.querySelector('#gesture-feedback');
@@ -78,19 +83,28 @@ const outputLabels={touch:'Touch',mouse:'Mouse'};
 const outputHelp={
   touch:{native:'Touch 直接输出为原生触控；不支持时不会自动转换。','mouse-drag':'单指按下立即按住鼠标左键，移动拖拽，抬手释放；可选中文字和拖动物体。',
     'mouse-scroll':'轻点松开时点击；移动超过 6 个本机坐标单位后开始滚动，不会按住鼠标；只支持单点。',
-    'mouse-gestures':'轻点点击、滑动滚动、长按后拖拽；双指轻点右键，双指捏合按下方配置缩放。',disabled:'不协商和执行接收到的 Touch 输入。'},
+    'mouse-gestures':'轻点点击、滑动滚动、长按后拖拽；右键方式和捏合缩放可在下方配置。',disabled:'不协商和执行接收到的 Touch 输入。'},
   mouse:{native:'保持 Mouse 语义，包括本机支持的按钮与滚轮。',touch:'只将左键按下、移动、释放转换成单点 Touch；不转换悬停、右键或滚轮。',disabled:'不协商和执行接收到的 Mouse 输入。'},
 };
 const updatePolicyHelp=()=>{
   touchOutputHelp.textContent=outputHelp.touch[inputTouchOutput.value]??'';mouseOutputHelp.textContent=outputHelp.mouse[inputMouseOutput.value]??'';
   gestureSettings.hidden=inputTouchOutput.value!=='mouse-gestures';
   gestureHoldValue.value=`${gestureHold.value} ms`;
+  gestureRightHold.min=gestureHold.value;
+  if(Number(gestureRightHold.value)<Number(gestureHold.value))gestureRightHold.value=gestureHold.value;
+  gestureRightHoldValue.value=`${gestureRightHold.value} ms`;
+  gestureRightHoldLabel.hidden=gestureRightClick.value!=='hold';
+  gestureRightHelp.textContent=gestureRightClick.value==='hold'
+    ?`静止长按 ${gestureRightHold.value}ms 后，光圈变紫，松手触发右键；移动开始拖拽后不会触发右键。右键等待不能短于拖拽等待。`
+    :'双指轻点并松手触发右键；单指长按只准备拖拽，不触发右键。';
   gesturePinchHelp.textContent=gesturePinch.value==='browser-zoom'?'网页缩放使用前台应用的 ⌘＋/− 快捷键，非原生触控捏合；请先点按目标网页。':
     gesturePinch.value==='ctrl-wheel'?'Ctrl＋滚轮：适合 Windows 网页；Mac 可能按系统设置触发整屏缩放，请谨慎选择。':'捏合不输出缩放；不会误触双指右键。';
 };
 inputTouchOutput.addEventListener('change',updatePolicyHelp);
 inputMouseOutput.addEventListener('change',updatePolicyHelp);
 gestureHold.addEventListener('input',updatePolicyHelp);
+gestureRightClick.addEventListener('change',updatePolicyHelp);
+gestureRightHold.addEventListener('input',updatePolicyHelp);
 gesturePinch.addEventListener('change',updatePolicyHelp);
 async function renderPolicyConfiguration(){
   const config=await inputProvider.configuration();
@@ -103,6 +117,7 @@ async function renderPolicyConfiguration(){
   }
   inputPolicyApply.disabled=policyPending;
   gestureHold.value=String(config.gestureSettings.holdMs);gestureFeedback.checked=config.gestureSettings.feedback;
+  gestureRightClick.value=config.gestureSettings.rightClick;gestureRightHold.min=String(config.gestureSettings.holdMs);gestureRightHold.value=String(config.gestureSettings.rightHoldMs);
   const pinchLabels={disabled:'关闭缩放','browser-zoom':'网页缩放 · ⌘＋/−','ctrl-wheel':'兼容缩放 · Ctrl＋滚轮'};
   gesturePinch.replaceChildren(...config.pinchActions.map(value=>{const option=document.createElement('option');option.value=value;option.textContent=pinchLabels[value];return option;}));
   gesturePinch.value=config.policy.gestures?.pinchAction??(config.pinchActions.includes('browser-zoom')?'browser-zoom':'disabled');
@@ -222,8 +237,9 @@ touchback = buildTouchback();
 inputPolicyApply.addEventListener('click',async()=>{
   if(policyPending)return;
   const requested={touch:inputTouchOutput.value,mouse:inputMouseOutput.value,
-    ...(inputTouchOutput.value==='mouse-gestures'?{gestures:{holdMs:Number(gestureHold.value),pinchAction:gesturePinch.value,feedback:gestureFeedback.checked}}:{})};
+    ...(inputTouchOutput.value==='mouse-gestures'?{gestures:{holdMs:Number(gestureHold.value),rightClick:gestureRightClick.value,rightHoldMs:Number(gestureRightHold.value),pinchAction:gesturePinch.value,feedback:gestureFeedback.checked}}:{})};
   policyPending=true;inputPolicyApply.disabled=true;inputTouchOutput.disabled=true;inputMouseOutput.disabled=true;
+  for(const control of [gestureHold,gestureRightClick,gestureRightHold,gesturePinch,gestureFeedback])control.disabled=true;
   inputPolicyStatus.textContent='正在释放当前输入并应用转换配置…';
   try{
     await touchback.setOutputPolicy(requested);
@@ -232,7 +248,8 @@ inputPolicyApply.addEventListener('click',async()=>{
   }catch(error){
     await renderPolicyConfiguration().catch(()=>{});
     inputPolicyStatus.textContent=`未应用配置：${error.message||error}`;
-  }finally{policyPending=false;inputTouchOutput.disabled=false;inputMouseOutput.disabled=false;inputPolicyApply.disabled=touchback.diagnostics().cleanupPending;}
+  }finally{policyPending=false;inputTouchOutput.disabled=false;inputMouseOutput.disabled=false;inputPolicyApply.disabled=touchback.diagnostics().cleanupPending;
+    for(const control of [gestureHold,gestureRightClick,gestureRightHold,gesturePinch,gestureFeedback])control.disabled=false;}
 });
 inputEnabled.addEventListener('change', () => { void touchback.setEnabled(inputEnabled.checked); });
 let haloPending=false;

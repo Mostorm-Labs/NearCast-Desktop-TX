@@ -1,5 +1,31 @@
 # Combined touch-to-mouse gestures
 
+## Configurable right-click follow-up
+
+The current follow-up adds `gestures.rightClick` (`hold` or `two-finger`) and
+`gestures.rightHoldMs`. Default right-click is single-finger hold for 700 ms,
+then release; no timer emits a mouse event by itself. `rightHoldMs >= holdMs`
+is enforced in both settings validation and UI. Raising the drag slider raises
+the right-click slider minimum and current value when necessary. Both settings
+are applied through the existing owned cleanup/rebinding transaction.
+
+In hold mode, reaching the drag threshold changes the halo to green with a
+purple progress arc for the additional right-click wait. At the right threshold
+it becomes a purple rotating ready ring. Motion still starts a drag, even after
+right readiness; only a stationary Up produces right Down+Up. Cancel, scrolling,
+dragging, pinch and two-finger groups do not produce hold right-clicks. In
+two-finger mode single-finger holds never right-click. Pinch remains available
+in both modes.
+
+Successful release shows a bounded 280 ms expanding rotating pulse, purple for
+a right click and cyan for other completed gestures. Cancel shows no release
+confirmation. A new Down replaces any old pulse; owner cleanup clears it. The
+core still performs no timer-based input injection. The original two-finger-only
+acceptance below describes `610c303`. On 2026-11-11 the operator confirmed both
+right-click methods and the waiting/release halo feedback work on the actual
+receiver. This follow-up's artifact hashes and acceptance record are in
+`docs/verification/2026-11-11-right-click-configuration.json`.
+
 This implementation extends the explicit output-policy work committed and pushed
 as `5d17fcc36c93a93953d951c200dc638076e3721d`. It adds an opt-in `mouse-gestures`
 Touch policy. The existing native / separate drag / separate scroll policies

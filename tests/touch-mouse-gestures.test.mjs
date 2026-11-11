@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 const {TouchMouseGestures,normalizeGestureSettings}=await import('../src/touchback/touch-mouse-gestures.mjs');
 const region={x:0,y:0,width:1001,height:1001};
 const r=(id,phase,x=100,y=100)=>({contactId:id,phase,x,y});
-const make=(settings={})=>new TouchMouseGestures({region,settings:{holdMs:300,pinchAction:'browser-zoom',...settings}});
+const make=(settings={})=>new TouchMouseGestures({region,settings:{holdMs:300,rightClick:'two-finger',pinchAction:'browser-zoom',...settings}});
 
 test('single touch taps click, early motion scrolls, and cancel never clicks',()=>{
   const g=make();g.accept([r(1,0)],0);assert.deepEqual(g.accept([r(1,2)],100).map(a=>[a.eventKind,a.buttons]),[[1,1],[1,0]]);
@@ -20,7 +20,7 @@ test('adjustable hold arms without pressing, then motion starts a drag that cann
   assert.deepEqual(g.accept([r(1,1,110,100)],210).map(a=>[a.eventKind,a.buttons]),[[1,1],[0,1]]);
   assert.equal(g.tick(1500).stage,'dragging');
   assert.deepEqual(g.accept([r(1,2,130,100)],1600).map(a=>[a.eventKind,a.buttons]),[[1,0]]);
-  assert.equal(g.feedback(),null);
+  assert.equal(g.feedback().stage,'released');assert.equal(g.tick(1900),null);
 });
 
 test('two-finger tap produces exactly one right click after both contacts end and never left clicks',()=>{
@@ -28,7 +28,7 @@ test('two-finger tap produces exactly one right click after both contacts end an
   assert.equal(g.feedback().stage,'two-finger');
   assert.deepEqual(g.accept([r(1,2),r(2,1,200,100)],90),[]);
   assert.deepEqual(g.accept([r(2,2,200,100)],100).map(a=>[a.eventKind,a.buttons]),[[1,2],[1,0]]);
-  assert.equal(g.feedback(),null);
+  assert.equal(g.feedback().stage,'right-released');assert.equal(g.tick(400),null);
 });
 
 test('pinch emits bounded zoom steps, suppresses the right click, and consumes the remaining finger',()=>{
@@ -91,4 +91,49 @@ test('sequential contacts and replacing a finger are not a two-finger right clic
   const h=make();h.accept([r(1,0),r(2,0,200)],0);h.accept([r(1,2),r(2,1,200)],30);
   h.accept([r(2,1,200),r(3,0,300)],50);
   assert.deepEqual(h.accept([r(2,2,200),r(3,2,300)],70),[]);
+});
+
+test('right-click defaults to 700ms hold and cannot precede the drag hold',()=>{
+  const defaults=normalizeGestureSettings();assert.equal(defaults.rightClick,'hold');assert.equal(defaults.rightHoldMs,700);
+  assert.equal(normalizeGestureSettings({holdMs:900}).rightHoldMs,900);
+  assert.throws(()=>normalizeGestureSettings({holdMs:450,rightHoldMs:400}),/right|右键/i);
+  assert.equal(normalizeGestureSettings({holdMs:450,rightHoldMs:450}).rightHoldMs,450);
+  for(const rightHoldMs of [100,3001,NaN])assert.throws(()=>normalizeGestureSettings({rightHoldMs}));
+  assert.throws(()=>normalizeGestureSettings({rightClick:'unknown'}));
+});
+
+test('hold feedback progresses to right-ready and only release triggers one right click',()=>{
+  const g=make({rightClick:'hold'});g.accept([r(1,0)],0);
+  assert.equal(g.tick(150).stage,'holding');
+  assert.equal(g.tick(300).stage,'right-wait');assert.equal(g.tick(500).progress,0.5);
+  assert.equal(g.tick(699).stage,'right-wait');assert.equal(g.tick(700).stage,'right-ready');
+  assert.deepEqual(g.accept([r(1,1)],900),[]);
+  assert.deepEqual(g.accept([r(1,2)],950).map(a=>[a.eventKind,a.buttons]),[[1,2],[1,0]]);
+  assert.equal(g.feedback().stage,'right-released');assert.ok(g.tick(1050).progress>0);
+  assert.equal(g.tick(1300),null);
+});
+
+test('release just before threshold stays a left click while drag and cancel suppress hold right-click',()=>{
+  const g=make({rightClick:'hold'});g.accept([r(1,0)],0);
+  assert.deepEqual(g.accept([r(1,2)],699).map(a=>a.buttons),[1,0]);
+  assert.equal(g.feedback().stage,'released');
+  g.accept([r(1,0)],1000);assert.equal(g.feedback().stage,'holding');
+  assert.deepEqual(g.accept([r(1,1,130)],1800).map(a=>[a.eventKind,a.buttons]),[[1,1],[0,1]]);
+  assert.deepEqual(g.accept([r(1,2,150)],2500).map(a=>a.buttons),[0]);
+  g.accept([r(1,0)],3000);assert.deepEqual(g.accept([r(1,3)],4000),[]);assert.equal(g.feedback(),null);
+});
+
+test('two-finger right-click choice disables hold right-click and hold choice still permits pinch',()=>{
+  const g=make({rightClick:'two-finger'});g.accept([r(1,0)],0);assert.equal(g.tick(1000).stage,'armed');
+  assert.deepEqual(g.accept([r(1,2)],1100).map(a=>a.buttons),[1,0]);
+  const h=make({rightClick:'hold'});h.accept([r(1,0),r(2,0,200)],0);
+  assert.deepEqual(h.accept([r(1,2),r(2,2,200)],100),[]);
+  h.accept([r(1,0),r(2,0,200)],200);assert.equal(h.accept([r(1,1,50),r(2,1,250)],230)[0].inputType,'zoom');
+});
+
+test('equal hold delays enter right-ready with finite progress and feedback disabled never leaves a release halo',()=>{
+  const g=make({rightClick:'hold',holdMs:300,rightHoldMs:300});g.accept([r(1,0)],0);
+  assert.deepEqual(g.tick(300),{stage:'right-ready',x:100,y:100,progress:1});
+  const h=make({rightClick:'hold',feedback:false});h.accept([r(1,0)],0);
+  assert.deepEqual(h.accept([r(1,2)],800).map(a=>a.buttons),[2,0]);assert.equal(h.feedback(),null);
 });

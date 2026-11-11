@@ -24,7 +24,7 @@ static TOUCH_READY: Mutex<Option<bool>> = Mutex::new(None);
 pub struct GestureFeedback{stage:String,x:f64,y:f64,progress:f64}
 impl GestureFeedback{
     fn valid(&self,display:&Display)->bool{
-        ["holding","armed","dragging","two-finger","pinching","scrolling"].contains(&self.stage.as_str())&&
+        ["holding","armed","dragging","two-finger","pinching","scrolling","right-wait","right-ready","released","right-released"].contains(&self.stage.as_str())&&
             self.progress.is_finite()&&(0.0..=1.0).contains(&self.progress)&&display.contains(self.x,self.y)
     }
 }
@@ -561,6 +561,9 @@ mod tests {
             region:input_geometry::Region{x:0.0,y:0.0,width:1000.0,height:800.0},capture_width:2000,capture_height:1600};
         let feedback=|stage:&str,x,progress|GestureFeedback{stage:stage.into(),x,y:100.0,progress};
         assert!(feedback("armed",500.0,1.0).valid(&display));
+        for stage in ["right-wait","right-ready","released","right-released"] {
+            assert!(feedback(stage,500.0,0.5).valid(&display));
+        }
         assert!(!feedback("unknown",500.0,1.0).valid(&display));
         assert!(!feedback("armed",1000.0,1.0).valid(&display));
         assert!(!feedback("armed",f64::NAN,1.0).valid(&display));
