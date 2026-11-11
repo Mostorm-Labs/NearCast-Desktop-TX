@@ -1,0 +1,47 @@
+{
+  "date": "2026-11-11",
+  "baseCommit": "6e9e022b49650b2d91074c9922d2864df88690ad",
+  "branch": "codex/macos-input-control",
+  "changesCommitted": false,
+  "scope": "Explicit typed input output policy using the existing authenticated input engine and owned native adapter",
+  "defaultPolicy": {"touch": "native", "mouse": "native"},
+  "supportedMappings": {
+    "macos": ["touch to mouse-drag", "touch to mouse-scroll", "mouse to native mouse", "disable either received type"],
+    "windows": ["touch to native touch", "mouse left button to single touch", "disable either received type"]
+  },
+  "touchScrollRules": {
+    "down": "Locate pointer without pressing a button",
+    "movementThreshold": "6 native coordinate units from touch down",
+    "moveAfterThreshold": "Continuous regionQ16_16 scrolling anchored at touch down",
+    "upBeforeScrolling": "Primary mouse button down and up at touch-down location",
+    "upAfterScrolling": "Zero-delta Ended event",
+    "cancel": "Cancel active scrolling without clicking",
+    "maxContacts": 1,
+    "inertia": false
+  },
+  "ownership": {
+    "wireTypePreserved": true,
+    "conversionAfterValidationAndGeometryMapping": true,
+    "nativeOwnerLeaseAndIdPoolRetained": true,
+    "policyChangeWaitsForCleanup": true,
+    "cleanupFailurePreservesOldPolicy": true,
+    "freshSourceBindingAfterPolicyChange": true,
+    "oldFramesCannotReachNewOwner": true
+  },
+  "checks": {
+    "javascriptTests": {"passed": 178, "failed": 0},
+    "rustTests": {"passed": 36, "failed": 0, "ignored": 1},
+    "macosBuild": "passed",
+    "stableSignatureVerification": "passed",
+    "sourceDistPolicySha256": "16f1e1dce92e7d8234bc90c8981b78c00e581bd9e95c1ac1e0d837a1312b3730",
+    "signedExecutableSha256": "31a5f3a24f1054d965d2b9cf92ed48980c3bfd8de815553dcf0a575f95fd55a9"
+  },
+  "realDevice": {
+    "receiver": "nearcast-500q",
+    "operatorConfirmed": "Both Touch conversions work",
+    "observedUi": {"localInputEnabled": true, "touchOutput": "mouse-scroll", "streamState": "active", "acceptedInputTypes": ["touch"], "streamId": 4},
+    "mouseToTouchOnWindowsHardwareVerified": false,
+    "rawNativeSubmissionTraceCaptured": false
+  },
+  "limitations": ["No native macOS Touch injection", "Mouse to Touch supports only left-button single-contact lifecycle, without hover, wheel or right click", "Simultaneous Touch and Mouse gestures sharing one native domain are rejected and cleaned up", "macOS retains the single primary display capture requirement", "Windows hardware verification remains required"]
+}

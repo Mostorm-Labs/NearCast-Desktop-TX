@@ -14,7 +14,7 @@
 | `calibrateDisplayBinding` / Rust `display_binding` | 短暂显示四角随机标记，仅本地识别所选屏幕；Rust 持有布局与来源绑定及释放责任 |
 | `WebCastTouchbackSender` / InputEngine | AXTP 会话、输入流、坐标映射、按住状态和释放 |
 | Rust `native_audio` | 独立音频会话及有界 PCM 队列，全部 COM 音频接口由专属线程拥有 |
-| Rust `input_geometry/input_native` / `windows_mouse` | 当前物理屏幕几何、原生 Touch/Mouse 注入与租约校验、输入状态释放 |
+| Rust `input_geometry/input_native` / `windows_mouse_model/windows_mouse` | 当前物理屏幕几何、Windows Touch/Mouse 与 macOS Mouse 注入、租约校验及状态释放 |
 
 默认媒体路径：
 
@@ -48,7 +48,7 @@ provider 在 WebRTC 应用输出分辨率前保留原始来源事实，不伪造
 
 WGC 原生反控绑定和桌面提示层已经移除；整屏 Touch 不依赖任何原生视频采集租约。
 
-Windows Mouse 使用同一屏幕绑定与串行 InputEngine，接收明确的 typed Mouse move/buttons/wheel/cancel/modifiers 记录，通过 SendInput 执行；不做 Touch 到 Mouse 转换。物理坐标在原生端转换为整个虚拟桌面的绝对坐标，并设置 VIRTUALDESK，支持主屏和负坐标副屏。能力声明为五键、修饰键、chords、detent120 双轴滚轮；连续滚动不协商。每个租约独立记录鼠标状态，部分提交只确认已插入的前缀，失败清理阻止新租约。撤销屏幕绑定、stream 关闭或退出同时清理 Touch 和 Mouse；清理其中一类失败时仍尝试清理另一类。
+Windows Mouse 复用整屏绑定，将物理坐标在 PMv2 DPI 上下文中映射至虚拟桌面，使用 ABSOLUTE|VIRTUALDESK 并定位至物理像素中点。支持五键及组合、修饰键、detent120 和 regionQ16_16 双轴滚动；每个输出都有状态检查点，部分提交和失败清理保留 owner。Touch/Mouse 共用串行执行链并拒绝活动手势重叠。详情见 [Windows typed Mouse](windows-typed-mouse.md)。默认策略保持类型，显式转换由 OutputPolicyAdapter 在已认证和映射后的本机边界执行，原生后端不推断手势。
 
 ## 生命周期
 
@@ -64,6 +64,6 @@ Windows Mouse 使用同一屏幕绑定与串行 InputEngine，接收明确的 ty
 
 单元测试覆盖原轨道身份、同步选择器调用、音频失败保视频、取消/迟到/停止、清理失败、平台音频策略及降分辨率坐标映射。
 
-`tests/webcast-browser.integration.mjs` 用 Edge 的真实 SDP/ICE/DTLS/SCTP/RTP，通过合成视频代替系统选择器、合成 PCM 代替 WASAPI。真实浏览器 video/canvas 上运行生产标记识别，原生 IPC 使用 fixture；覆盖原视频轨道直送、Opus 有能量、同分辨率副屏识别、负坐标 Touch、主副屏停止重选、布局变化禁用输入而媒体继续、Touch→Mouse→Touch 切换及滚轮/取消，以及无绑定多屏/窗口拒绝反控。Rust 显式忽略测试可检查实际标记，另一个原生输入测试仅在自有测试窗口验证副屏 Mouse 精确落点、五键、Ctrl 拖拽、双轴滚轮、取消和屏幕撤销释放，以及 Touch 回归。上述测试不代表真实 RX Mouse 生产者、Windows 10、硬件性能或听感已验收。
+`tests/webcast-browser.integration.mjs` 用 Edge 的真实 SDP/ICE/DTLS/SCTP/RTP，通过合成视频代替系统选择器、合成 PCM 代替 WASAPI。真实浏览器 video/canvas 上运行生产标记识别，原生 IPC 使用 fixture；覆盖原视频轨道直送、Opus 有能量、同分辨率副屏识别、负坐标 Touch、主副屏停止重选、布局变化禁用输入而媒体继续，以及无绑定多屏/窗口拒绝反控。Rust 显式忽略测试可在本机短暂显示实际标记并采样标记中心，检查物理定位、绑定及撤销。上述测试不代表真实 Windows 选择器到 WebView2 的校准、硬件性能、听感和物理触控已验收。
 
 实机对比应在同一分辨率、码率、内容、网络和 RX 版本下比较浏览器路径与先前原生路径，查看诊断 `capture.backend=browser`、`media.video.framesPerSecond`、编码数和 `qualityLimitationReason`，并观察 RX 呈现帧率。

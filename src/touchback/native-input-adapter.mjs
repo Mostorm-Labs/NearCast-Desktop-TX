@@ -57,6 +57,10 @@ export class NativeInputAdapter{
       return{status:'blocked',error:result?.error??'Native cleanup unconfirmed'};
     }catch(error){return{status:'blocked',error:String(error?.message??error)};}
   }
+  async showGestureFeedback(ownerId,feedback){
+    const owner=this.owners.get(ownerId);if(!owner)return;
+    return this.invoke('nearcast_input_feedback',{ownerId,leaseId:owner.leaseId,feedback});
+  }
   snapshot(){return{owners:this.owners.size,activeContacts:[...this.owners.values()].reduce((sum,owner)=>sum+owner.slots.size,0),lastSubmission:structuredClone(this.lastSubmission)};}
   owns(ownerId){return this.owners.has(ownerId);}
 }

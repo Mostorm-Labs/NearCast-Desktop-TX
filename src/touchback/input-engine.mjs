@@ -46,7 +46,7 @@ export class InputEngine{
     }catch{/* Visual feedback is bounded observability, never input authority. */}
   }
   snapshot(){return{state:this.state,streamId:this.stream?.streamId??this.owner?.streamId??this.lastClosedId??null,generation:this.generation,
-    contractFingerprint:INPUT_CONTRACT.fingerprint,acceptedInputTypes:[...(this.stream?.acceptedInputTypes??[])],outputPolicy:'native',
+    contractFingerprint:INPUT_CONTRACT.fingerprint,acceptedInputTypes:[...(this.stream?.acceptedInputTypes??[])],outputPolicy:this.provider.snapshot?.().outputPolicy??'native',
     geometryRevision:this.binding?.geometry?.revision??null,receivedSeqId:this.ingress.seqId,submittedSeqId:this.input.seqId,queueLength:this.queue.length,touchContacts:this.input.contacts.size,
     mouseButtons:this.input.buttons,mouseModifiers:this.input.modifiers,scrollActive:Boolean(this.input.scroll),cleanupPending:['closing','cleanup_blocked'].includes(this.state),
     lastError:this.lastError,...this.stats};}

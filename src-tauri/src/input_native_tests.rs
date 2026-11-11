@@ -266,8 +266,49 @@ fn typed_native_touch_mouse_and_owned_cleanup_reach_our_window() {
     mouse(
         json!({"inputType":"mouse","eventKind":1,"buttons":2,"modifiers":2,"x":point.x,"y":point.y}),
     );
-    // A simultaneous Touch is also released on source revocation.
-    apply(0);
+    // Shared routing rejects cross-type overlap while Mouse is held.
+    let overlap=input_native::apply("owned-touch-test".into(),lease.clone(),binding["revision"].as_str().unwrap().into(),
+        serde_json::from_value(json!({"inputType":"touch","records":[{"contactId":1,"phase":0,"x":point.x,"y":point.y}]})).unwrap());
+    assert_eq!(overlap["status"], "rejected");
+    assert_eq!(overlap["error"], "overlapping_touch_mouse_output");
+    mouse(json!({"inputType":"mouse","eventKind":3}));
+    mouse(
+        json!({"inputType":"mouse","eventKind":2,"buttons":0,"modifiers":0,"x":point.x,"y":point.y,"wheelUnit":1,"wheelPhase":1,"wheelX":0,"wheelY":4096}),
+    );
+    mouse(
+        json!({"inputType":"mouse","eventKind":2,"buttons":0,"modifiers":0,"x":point.x,"y":point.y,"wheelUnit":1,"wheelPhase":2,"wheelX":512,"wheelY":4096}),
+    );
+    mouse(
+        json!({"inputType":"mouse","eventKind":2,"buttons":0,"modifiers":0,"x":point.x,"y":point.y,"wheelUnit":1,"wheelPhase":3,"wheelX":0,"wheelY":0}),
+    );
+    // Releasing an owner with held Mouse state must release Ctrl and buttons.
+    mouse(
+        json!({"inputType":"mouse","eventKind":1,"buttons":2,"modifiers":2,"x":point.x,"y":point.y}),
+    );
+    let closed = input_native::release("owned-touch-test".into(), Some(lease.clone()));
+    assert_eq!(closed["status"], "released");
+    pump(hwnd);
+    for key in [0xA2, 0x02] {
+        assert_eq!(
+            unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(key) } as u16
+                & 0x8000,
+            0
+        );
+    }
+    let prepared = input_native::prepare(
+        "owned-touch-test".into(),
+        "capture-test".into(),
+        binding["revision"].as_str().unwrap().into(),
+        binding["nativeId"].as_str().unwrap().into(),
+        vec!["touch".into(), "mouse".into()],
+        10,
+    );
+    assert_eq!(prepared["status"], "ready");
+    let lease = prepared["leaseId"].as_str().unwrap().to_owned();
+    let result=input_native::apply("owned-touch-test".into(),lease.clone(),binding["revision"].as_str().unwrap().into(),
+        serde_json::from_value(json!({"inputType":"touch","records":[{"contactId":1,"phase":0,"x":point.x,"y":point.y}]})).unwrap());
+    assert_eq!(result["status"], "submitted");
+    pump(hwnd);
     crate::display_binding::release(_guard.source_id.clone()).unwrap();
     let released = input_native::release("owned-touch-test".into(), Some(lease));
     assert_eq!(released["status"], "released", "{released}");
@@ -283,6 +324,6 @@ fn typed_native_touch_mouse_and_owned_cleanup_reach_our_window() {
     assert_eq!(DOWN.load(Ordering::SeqCst), 2);
     assert_eq!(UP.load(Ordering::SeqCst), 2);
     eprintln!(
-        "typed native Touch + Mouse PASS: calibrated secondary pixel, five buttons, Ctrl drag, wheel X/Y, cancel and source-revocation cleanup"
+        "typed native Touch + Mouse PASS: calibrated secondary pixel, five buttons, Ctrl drag, detent/continuous wheel, overlap rejection, cancel and source-revocation cleanup"
     );
 }

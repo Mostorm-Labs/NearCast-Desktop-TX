@@ -60,6 +60,70 @@ const inputEnabled = document.querySelector('#input-enabled');
 const inputState = document.querySelector('#input-state');
 const inputReconnect = document.querySelector('#input-reconnect');
 const inputCleanup = document.querySelector('#input-cleanup');
+const inputTouchOutput=document.querySelector('#input-touch-output');
+const inputMouseOutput=document.querySelector('#input-mouse-output');
+const inputPolicyApply=document.querySelector('#input-policy-apply');
+const inputPolicyStatus=document.querySelector('#input-policy-status');
+const touchOutputHelp=document.querySelector('#input-touch-help');
+const mouseOutputHelp=document.querySelector('#input-mouse-help');
+const gestureSettings=document.querySelector('#gesture-settings');
+const gestureHold=document.querySelector('#gesture-hold-ms');
+const gestureHoldValue=document.querySelector('#gesture-hold-value');
+const gestureRightClick=document.querySelector('#gesture-right-click');
+const gestureRightHold=document.querySelector('#gesture-right-hold-ms');
+const gestureRightHoldValue=document.querySelector('#gesture-right-hold-value');
+const gestureRightHoldLabel=document.querySelector('#gesture-right-hold-label');
+const gestureRightHelp=document.querySelector('#gesture-right-help');
+const gesturePinch=document.querySelector('#gesture-pinch-action');
+const gesturePinchHelp=document.querySelector('#gesture-pinch-help');
+const gestureFeedback=document.querySelector('#gesture-feedback');
+const inputProvider=createPlatformInputAdapter({}, {invoke});
+let policyPending=false;
+const outputLabels={touch:'Touch',mouse:'Mouse'};
+const outputHelp={
+  touch:{native:'Touch 直接输出为原生触控；不支持时不会自动转换。','mouse-drag':'单指按下立即按住鼠标左键，移动拖拽，抬手释放；可选中文字和拖动物体。',
+    'mouse-scroll':'轻点松开时点击；移动超过 6 个本机坐标单位后开始滚动，不会按住鼠标；只支持单点。',
+    'mouse-gestures':'轻点点击、滑动滚动、长按后拖拽；右键方式和捏合缩放可在下方配置。',disabled:'不协商和执行接收到的 Touch 输入。'},
+  mouse:{native:'保持 Mouse 语义，包括本机支持的按钮与滚轮。',touch:'只将左键按下、移动、释放转换成单点 Touch；不转换悬停、右键或滚轮。',disabled:'不协商和执行接收到的 Mouse 输入。'},
+};
+const updatePolicyHelp=()=>{
+  touchOutputHelp.textContent=outputHelp.touch[inputTouchOutput.value]??'';mouseOutputHelp.textContent=outputHelp.mouse[inputMouseOutput.value]??'';
+  gestureSettings.hidden=inputTouchOutput.value!=='mouse-gestures';
+  gestureHoldValue.value=`${gestureHold.value} ms`;
+  gestureRightHold.min=gestureHold.value;
+  if(Number(gestureRightHold.value)<Number(gestureHold.value))gestureRightHold.value=gestureHold.value;
+  gestureRightHoldValue.value=`${gestureRightHold.value} ms`;
+  gestureRightHoldLabel.hidden=gestureRightClick.value!=='hold';
+  gestureRightHelp.textContent=gestureRightClick.value==='hold'
+    ?`静止长按 ${gestureRightHold.value}ms 后，光圈变紫，松手触发右键；移动开始拖拽后不会触发右键。右键等待不能短于拖拽等待。`
+    :'双指轻点并松手触发右键；单指长按只准备拖拽，不触发右键。';
+  gesturePinchHelp.textContent=gesturePinch.value==='browser-zoom'?'网页缩放使用前台应用的 ⌘＋/− 快捷键，非原生触控捏合；请先点按目标网页。':
+    gesturePinch.value==='ctrl-wheel'?'Ctrl＋滚轮：适合 Windows 网页；Mac 可能按系统设置触发整屏缩放，请谨慎选择。':'捏合不输出缩放；不会误触双指右键。';
+};
+inputTouchOutput.addEventListener('change',updatePolicyHelp);
+inputMouseOutput.addEventListener('change',updatePolicyHelp);
+gestureHold.addEventListener('input',updatePolicyHelp);
+gestureRightClick.addEventListener('change',updatePolicyHelp);
+gestureRightHold.addEventListener('input',updatePolicyHelp);
+gesturePinch.addEventListener('change',updatePolicyHelp);
+async function renderPolicyConfiguration(){
+  const config=await inputProvider.configuration();
+  for(const [type,select]of [['touch',inputTouchOutput],['mouse',inputMouseOutput]]){
+    select.replaceChildren(...config.options[type].map(item=>{
+      const option=document.createElement('option');option.value=item.value;option.disabled=!item.supported;
+      option.textContent=item.label+(item.supported?'':' · 本机不支持');return option;
+    }));
+    select.value=config.policy[type];select.disabled=policyPending;
+  }
+  inputPolicyApply.disabled=policyPending;
+  gestureHold.value=String(config.gestureSettings.holdMs);gestureFeedback.checked=config.gestureSettings.feedback;
+  gestureRightClick.value=config.gestureSettings.rightClick;gestureRightHold.min=String(config.gestureSettings.holdMs);gestureRightHold.value=String(config.gestureSettings.rightHoldMs);
+  const pinchLabels={disabled:'关闭缩放','browser-zoom':'网页缩放 · ⌘＋/−','ctrl-wheel':'兼容缩放 · Ctrl＋滚轮'};
+  gesturePinch.replaceChildren(...config.pinchActions.map(value=>{const option=document.createElement('option');option.value=value;option.textContent=pinchLabels[value];return option;}));
+  gesturePinch.value=config.policy.gestures?.pinchAction??(config.pinchActions.includes('browser-zoom')?'browser-zoom':'disabled');
+  updatePolicyHelp();
+  inputPolicyStatus.textContent=`本机原生输出：${config.nativeInputTypes.map(type=>outputLabels[type]).join(' / ')||'暂无可用类型'}。转换仅在选择并应用后生效。`;
+}
 let permissionActionPending = false;
 let permissionSettingsOpened = null;
 
@@ -158,18 +222,44 @@ digits.forEach((input, index) => {
 });
 
 const buildTouchback = () => new WebCastTouchbackSender({
-  provider: createPlatformInputAdapter({}, {invoke}),
+  provider: inputProvider,
   onStatus: (_status, state) => {
     const reasons = {LOCAL_INPUT_DISABLED:'反控未启用', APP_NOT_READY:'等待接收端建立反控会话', TARGET_UNBOUND:'等待接收端绑定投屏来源', CAPTURE_UNAVAILABLE:'请先分享整个屏幕', CAPTURE_CHANGED:'分享已停止，重新分享后等待接收端恢复反控', CAPTURE_GEOMETRY_CHANGED:'正在更新分享范围，反控暂时暂停', CAPTURE_MUTED:'采集已暂停', NATIVE_CLEANUP_PENDING:'等待释放上一次输入', NATIVE_PERMISSION_UNAVAILABLE:'本机输入不可用，请检查系统权限', NATIVE_DOMAIN_BUSY:'本机输入正由其他会话使用', NATIVE_GEOMETRY_UNAVAILABLE:'无法确认当前分享范围的坐标映射，请查看反控诊断', TARGET_CONTRACT_MISMATCH:'接收端反控协议版本不匹配', INPUT_SESSION_FAULT:'反控连接异常，可重建连接'};
     inputState.textContent = !state.localEnabled ? '反控未启用' : state.state === 'active' && state.sourceReady ? `反控已开启 · ${state.acceptedInputTypes.join(' / ')} · stream ${state.streamId}` : state.sourceReady ? '本机已就绪，等待接收端开启反控' : state.detail?.includes('BROWSER_WINDOW_INPUT_UNSUPPORTED') ? '窗口投屏可用；反控请改为分享整个屏幕' : state.detail?.includes('BROWSER_MULTIPLE_DISPLAYS_UNPROVEN') ? '未完成屏幕识别，反控暂不可用；请停止后重新分享整个屏幕' : state.detail?.includes('BROWSER_DISPLAY_LAYOUT_CHANGED') ? '显示布局已变化，请停止后重新分享以校验屏幕' : state.detail?.includes('BROWSER_DISPLAY_BINDING_RETIRED') ? '屏幕绑定已失效，请停止后重新分享' : state.detail?.includes('BROWSER_SOURCE_SIZE_UNPROVEN') ? '无法确认原始屏幕尺寸，反控暂不可用' : state.detail?.includes('capture_window_not_foreground') ? '窗口反控已暂停，请切回正在分享的窗口' : state.detail?.includes('minimized') ? '窗口已最小化，反控已暂停' : state.disabledReason === 'NATIVE_PROBE_FAILED' ? '无法读取本机输入能力，请重试或检查系统权限' : captureProvider && state.disabledReason === 'NATIVE_GEOMETRY_UNAVAILABLE' ? '正在确认分享范围，反控暂不可用' : state.disabledReason === 'INPUT_SESSION_FAULT' && state.detail?.includes('Input queue age') ? '输入处理积压，已释放触点；可重建反控连接' : reasons[state.disabledReason] || '正在准备反控';
     inputCleanup.hidden = !state.cleanupPending;
     inputReconnect.disabled = state.cleanupPending || !['connected','sharing'].includes(currentStatus);
+    inputPolicyApply.disabled=policyPending||state.cleanupPending;
     touchbackStatus.textContent = touchbackSummary(platformInfo ?? {});
     renderControlDiagnostics();
   },
 });
 touchback = buildTouchback();
+inputPolicyApply.addEventListener('click',async()=>{
+  if(policyPending)return;
+  const requested={touch:inputTouchOutput.value,mouse:inputMouseOutput.value,
+    ...(inputTouchOutput.value==='mouse-gestures'?{gestures:{holdMs:Number(gestureHold.value),rightClick:gestureRightClick.value,rightHoldMs:Number(gestureRightHold.value),pinchAction:gesturePinch.value,feedback:gestureFeedback.checked}}:{})};
+  policyPending=true;inputPolicyApply.disabled=true;inputTouchOutput.disabled=true;inputMouseOutput.disabled=true;
+  for(const control of [gestureHold,gestureRightClick,gestureRightHold,gesturePinch,gestureFeedback])control.disabled=true;
+  inputPolicyStatus.textContent='正在释放当前输入并应用转换配置…';
+  try{
+    await touchback.setOutputPolicy(requested);
+    await renderPolicyConfiguration();
+    inputPolicyStatus.textContent='配置已应用。请在接收端重新开启反控；投屏保持连接。';
+  }catch(error){
+    await renderPolicyConfiguration().catch(()=>{});
+    inputPolicyStatus.textContent=`未应用配置：${error.message||error}`;
+  }finally{policyPending=false;inputTouchOutput.disabled=false;inputMouseOutput.disabled=false;inputPolicyApply.disabled=touchback.diagnostics().cleanupPending;
+    for(const control of [gestureHold,gestureRightClick,gestureRightHold,gesturePinch,gestureFeedback])control.disabled=false;}
+});
 inputEnabled.addEventListener('change', () => { void touchback.setEnabled(inputEnabled.checked); });
+let haloPending=false;
+const haloTimer=setInterval(async()=>{
+  if(haloPending||inputProvider.policy.touch!=='mouse-gestures')return;
+  haloPending=true;
+  try{await inputProvider.refreshGestureFeedback();}catch{/* Feedback never controls input. */}
+  finally{haloPending=false;}
+},40);
+window.addEventListener('beforeunload',()=>clearInterval(haloTimer));
 inputCleanup.addEventListener('click', async () => {
   inputCleanup.disabled = true;
   try { await touchback.retryCleanup(); } finally { inputCleanup.disabled = false; }
@@ -388,6 +478,7 @@ platformReady = loadPlatformInfo(invoke).then(info => {
   platformStatus.textContent = platformSummary(info);
   touchbackStatus.textContent = touchbackSummary(info);
   touchback.status();
+  void renderPolicyConfiguration().catch(error=>{inputPolicyStatus.textContent=`无法读取输入能力：${error.message||error}`;});
   return info;
 }).catch(() => ({os: 'unknown', touchback: false, inputControl: 'none'}));
 startDiscovery();
