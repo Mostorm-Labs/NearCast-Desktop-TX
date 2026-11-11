@@ -53,11 +53,13 @@ macOS 界面顶部提供“本地网络”“录屏与系统录音”“辅助�
 
 反控采用 `AXTP-TYPED-INPUT-V1` / `input-sample-v1`，固定开发合同为 `0.18.0-dev.feac6fa2a4b9`（尚未发布）。控制通道完成标准 CONTROL 与 Hello/Identify/Identified 握手后，接收端通过 `input.openStream` 请求输入类型集合，发送端按实际软件能力取交集。每包使用完整 Standard Frame、STREAM header、类型字节及 CRC16；不再接受旧 BIND、TouchBatch、wire epoch 或私有文本 RPC。普通输入无应用 ACK，查询和状态变更使用现有 `stream.getState` / `stream.stateChanged`。
 
-发送端投屏页提供“允许接收端反控本机”，默认关闭；接收端也需启用。默认 Native 策略保持输入类型，不把 Touch 猜成鼠标手势。当前 Windows typed 通路支持原生 Touch（最多 10 点）；Windows Mouse 原生注入后端已移除；typed input 的 Touch 和各种 Mouse 事件解码能力保留，未支持的类型不协商、不注入。macOS 目前支持基本原生 Mouse，不支持原生 Touch，不暗转 Mouse；原有手势与滚动代码留作后续明确输出策略的实现材料。
+发送端投屏页提供“允许接收端反控本机”，默认关闭；接收端也需启用。“输入转换配置”分别选择收到 Touch/Mouse 后的本机输出，默认保持原生类型，不支持的组合会禁用。Mac 可将 Touch 配置为 Mouse 点击拖拽，或轻点点击／滑动滚动；Windows 可将 Mouse 左键生命周期配置为单点 Touch，不转换悬停、右键和滚轮。Windows 仍支持原生 Touch（最多 10 点），Mac 不提供原生 Touch。设置只在本次运行期间保留，应用时先撤销输入来源、释放当前原生 owner，再以新绑定重新协商；清理失败不应用设置，投屏继续。
+
+Touch→Mouse 点击拖拽在 DOWN 时按下左键、MOVE 时拖动、UP/CANCEL 时释放。Touch→滚动在 DOWN 时只定位，移动超过 6 个本机坐标单位后发送连续滚动；尚未滚动就 UP 才点击，CANCEL 不点击；滚动锚点固定在起点，松手发送结束事件，无惯性，仅支持单点。类型转换位于已认证、校验、坐标映射后的串行原生执行链；线上的 typed input 数据不改写，接收端协商的 inputTypes 描述可接收类型，原生输出类型单独记录。转换后触点仍使用本机 owner、lease 和 ID 池，不恢复已移除的无 owner 注入命令。
 
 Windows 分享整个屏幕后，会短暂显示四角随机校验标记，用所选浏览器轨道识别对应的物理屏幕，成功后标记自动消失。主屏、副屏和负坐标均使用 Rust 持有的来源绑定；同分辨率屏幕也不靠尺寸猜测。识别失败时音视频继续，可停止后重新分享；窗口仍仅投屏。视频保持原浏览器轨道，校准只读少量角落像素，不恢复 WGC 视频采集。输出分辨率可等比缩小，输入映射到原始物理坐标。macOS 保留单主屏及辅助功能权限要求。停止、重新选择或显示布局变化时撤销旧输入绑定、释放触点，重新就绪后由接收端开流；拔插屏幕或调整布局后需重新分享。目前不支持旋转屏幕。原生 WGC、缩略图、持续窗口边框及其 IPC 命令已经删除。架构边界见 [浏览器采集架构](docs/architecture/browser-capture.md)。
 
-展开“反控收包诊断”或调用 `globalThis.__nearcastTouchbackDiagnostics()`，可查看 `appReady`、`sourceReady`、`nativeReady`、软件输入类型、streamId、本地 generation、队列、清理状态和错误。`receiverEnabled` 为 null，接收端的 effectiveEnabled/lifecycleState 需在接收端查询；RPC 成功本身不证明原生输入生效。诊断不包含配对码或 native lease。详细模块边界与精确合同 SHA 见 [TI-3 handoff](docs/superpowers/handoffs/2026-11-06-tx-typed-input-ti3.md)。
+展开“反控收包诊断”或调用 `globalThis.__nearcastTouchbackDiagnostics()`，可查看 `appReady`、`sourceReady`、`nativeReady`、软件输入类型、streamId、本地 generation、队列、清理状态和错误。`outputPolicy` 记录配置；`nativeInput.lastConversion` 记录收到的类型、输出类型及产生的动作数，`nativeInput.lastSubmission` 记录系统确认的输出类型/API。`receiverEnabled` 为 null，接收端的 effectiveEnabled/lifecycleState 需在接收端查询；RPC 成功本身不证明原生输入生效。诊断不包含配对码或 native lease。typed 合同见 [TI-3 handoff](docs/superpowers/handoffs/2026-11-06-tx-typed-input-ti3.md)，该历史交接中的“仅 native、无转换”限制已由上述显式配置扩展。
 
 WebSocket 地址默认为 `wss://cast.nearhub.us`，也可以通过 Tauri 页面 URL 的 `?ws=` 参数覆盖，例如 `?ws=wss%3A%2F%2Flocalhost%3A8888`。
 

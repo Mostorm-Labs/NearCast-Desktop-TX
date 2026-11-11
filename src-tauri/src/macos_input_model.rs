@@ -46,9 +46,24 @@ pub fn scroll_phase(phase: &str) -> Result<u32, String> {
     }
 }
 
+pub fn wheel_points(unit:u8,value:i32,extent:f64,remainder:f64)->Result<(i32,f64),String>{
+    if !extent.is_finite()||extent<1.0||!remainder.is_finite()||remainder.abs()>0.5{return Err("invalid_state".into());}
+    let points=match unit {0=>f64::from(value)/120.0*40.0,1=>f64::from(value)/65536.0*(extent-1.0),_=>return Err("unsupported_wheel_unit".into())}+remainder;
+    if !points.is_finite()||points.abs()>1_000_000.0{return Err("wheel_delta_out_of_range".into());}
+    let rounded=points.round();Ok((rounded as i32,points-rounded))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn typed_wheel_converts_q16_region_deltas_and_detents_in_display_points() {
+        assert_eq!(wheel_points(1,65536,1440.0,0.0).unwrap(),(1439,0.0));
+        assert_eq!(wheel_points(1,-32768,901.0,0.0).unwrap(),(-450,0.0));
+        assert_eq!(wheel_points(0,120,1440.0,0.0).unwrap(),(40,0.0));
+        assert!(wheel_points(2,1,1440.0,0.0).is_err());
+        assert!(wheel_points(1,i32::MAX,1440.0,0.0).is_err());
+    }
 
     #[test]
     fn scroll_deltas_use_display_points_and_accumulate_small_movements() {

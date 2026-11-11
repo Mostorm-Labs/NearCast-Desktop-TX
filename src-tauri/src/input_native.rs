@@ -44,7 +44,25 @@ pub enum Action {
         x: f64,
         #[serde(default)]
         y: f64,
+        #[serde(rename="wheelUnit")]
+        wheel_unit: Option<u8>,
+        #[serde(rename="wheelPhase")]
+        wheel_phase: Option<u8>,
+        #[serde(rename="wheelX")]
+        wheel_x: Option<i32>,
+        #[serde(rename="wheelY")]
+        wheel_y: Option<i32>,
     },
+}
+#[derive(Clone, Copy)]
+struct MouseWheel {unit:u8,phase:u8,x:i32,y:i32}
+fn mouse_wheel(kind:u8,unit:Option<u8>,phase:Option<u8>,x:Option<i32>,y:Option<i32>)->Result<Option<MouseWheel>,String>{
+    if kind!=2 {
+        return if unit.is_none()&&phase.is_none()&&x.is_none()&&y.is_none(){Ok(None)}else{Err("unexpected_mouse_wheel_fields".into())};
+    }
+    let (unit,phase,x,y)=(unit.ok_or("missing_mouse_wheel_unit")?,phase.ok_or("missing_mouse_wheel_phase")?,x.ok_or("missing_mouse_wheel_x")?,y.ok_or("missing_mouse_wheel_y")?);
+    if unit>1 || (unit==0&&(phase!=0||(x==0&&y==0))) || (unit==1&&(!(1..=4).contains(&phase)||(phase>=3&&(x!=0||y!=0)))) {return Err("invalid_mouse_wheel".into());}
+    Ok(Some(MouseWheel{unit,phase,x,y}))
 }
 fn failure(status: &str, error: impl ToString) -> Value {
     json!({"status":status,"error":error.to_string()})
@@ -89,7 +107,7 @@ pub fn probe() -> Value {
     }
     #[cfg(target_os = "macos")]
     {
-        return json!({"inputTypes":["mouse"],"nativeTypes":["mouse"],"maxDataBytes":4096,"mouse":{"buttonsMask":7,"modifierMask":0,"allowChords":false,"wheelUnits":[],"continuousScroll":false},"nativeReady":crate::macos_input::initialize()&&!blocked,"cleanupBlocked":blocked,"ownerBusy":busy,"geometry":geometry});
+        return json!({"inputTypes":["mouse"],"nativeTypes":["mouse"],"maxDataBytes":4096,"mouse":{"buttonsMask":7,"modifierMask":15,"allowChords":false,"wheelUnits":["detent120","regionQ16_16"],"continuousScroll":true},"nativeReady":crate::macos_input::initialize()&&!blocked,"cleanupBlocked":blocked,"ownerBusy":busy,"geometry":geometry});
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
@@ -239,7 +257,11 @@ pub fn apply(
             modifiers,
             x,
             y,
-        } => apply_mouse(owner, &display, event_kind, buttons, modifiers, x, y),
+            wheel_unit,wheel_phase,wheel_x,wheel_y,
+        } => match mouse_wheel(event_kind,wheel_unit,wheel_phase,wheel_x,wheel_y){
+            Ok(wheel)=>apply_mouse(owner, &display, event_kind, buttons, modifiers, x, y,wheel),
+            Err(error)=>failure("rejected",error),
+        },
     }
 }
 #[cfg(windows)]
@@ -354,15 +376,16 @@ fn apply_mouse(
     modifiers: u16,
     x: f64,
     y: f64,
+    wheel: Option<MouseWheel>,
 ) -> Value {
     if owner.input_types != ["mouse"]
-        || modifiers != 0
+        || modifiers & !15 != 0
         || buttons & !7 != 0
         || buttons & (buttons.wrapping_sub(1)) != 0
     {
         return failure("rejected", "NOT_SUPPORTED native Mouse features");
     }
-    if ![0, 1, 3, 4].contains(&kind) || (kind != 3 && kind != 4 && !display.contains(x, y)) {
+    if ![0, 1, 2, 3, 4].contains(&kind) || (kind != 3 && kind != 4 && !display.contains(x, y)) {
         return failure("rejected", "native_mouse_action_invalid");
     }
     let mut submitted = 0;
@@ -371,7 +394,7 @@ fn apply_mouse(
             if buttons != owner.mouse_buttons {
                 return failure("rejected", "native_mouse_implicit_buttons");
             }
-            crate::macos_input::move_at_point(x, y, 0)
+            crate::macos_input::move_at_point(x, y, modifiers)
         }
         1 => {
             if buttons == owner.mouse_buttons {
@@ -379,7 +402,7 @@ fn apply_mouse(
             }
             if owner.mouse_buttons != 0 {
                 if let Err(error) =
-                    crate::macos_input::button_at_point(owner.mouse_buttons as u8, false, x, y, 0)
+                    crate::macos_input::button_at_point(owner.mouse_buttons as u8, false, x, y, modifiers)
                 {
                     owner.blocked = true;
                     return failure("unknown", error);
@@ -388,7 +411,7 @@ fn apply_mouse(
                 submitted += 1;
             }
             if buttons != 0 {
-                match crate::macos_input::button_at_point(buttons as u8, true, x, y, 0) {
+                match crate::macos_input::button_at_point(buttons as u8, true, x, y, modifiers) {
                     Ok(()) => {
                         owner.mouse_buttons = buttons;
                         submitted += 1;
@@ -400,6 +423,11 @@ fn apply_mouse(
                 Ok(())
             }
         }
+        2 => {
+            if buttons!=owner.mouse_buttons{return failure("rejected","native_mouse_implicit_buttons");}
+            let Some(wheel)=wheel else{return failure("rejected","native_mouse_wheel_missing");};
+            crate::macos_input::scroll_at_point(x,y,wheel.x,wheel.y,wheel.unit,wheel.phase,display.region.width,display.region.height,modifiers)
+        },
         3 => crate::macos_input::reset(),
         4 => Ok(()),
         _ => unreachable!(),
@@ -409,7 +437,7 @@ fn apply_mouse(
             if kind == 3 {
                 owner.mouse_buttons = 0;
             }
-            json!({"status":"submitted","submittedActions":submitted.max(1)})
+            json!({"status":"submitted","submittedActions":submitted.max(1),"inputType":"mouse","nativeApi":"CGEventPost","eventKind":kind})
         }
         Err(error) => {
             owner.blocked = true;
@@ -426,6 +454,7 @@ fn apply_mouse(
     _modifiers: u16,
     _x: f64,
     _y: f64,
+    _wheel: Option<MouseWheel>,
 ) -> Value {
     failure("rejected", "NOT_SUPPORTED typed native Mouse")
 }
@@ -493,6 +522,22 @@ pub fn ensure_released_for_update() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn typed_mouse_wheel_fields_reach_native_with_exact_units_and_terminal_rules() {
+        let action:Action=serde_json::from_value(json!({"inputType":"mouse","eventKind":2,"buttons":0,"modifiers":0,"x":10.0,"y":20.0,
+            "wheelUnit":1,"wheelPhase":1,"wheelX":0,"wheelY":-4096})).unwrap();
+        match action {Action::Mouse {wheel_unit,wheel_phase,wheel_x,wheel_y,..}=>{
+            let wheel=mouse_wheel(2,wheel_unit,wheel_phase,wheel_x,wheel_y).unwrap().unwrap();
+            assert_eq!((wheel.unit,wheel.phase,wheel.x,wheel.y),(1,1,0,-4096));
+        },_=>panic!("expected Mouse")}
+        assert!(mouse_wheel(2,Some(1),Some(3),Some(0),Some(1)).is_err());
+        assert!(mouse_wheel(2,Some(0),Some(1),Some(0),Some(120)).is_err());
+        assert!(mouse_wheel(2,Some(0),Some(0),Some(0),Some(0)).is_err());
+        assert!(mouse_wheel(2,None,None,None,None).is_err());
+        assert!(mouse_wheel(0,Some(1),Some(1),Some(0),Some(1)).is_err());
+        assert!(mouse_wheel(0,None,None,None,None).unwrap().is_none());
+        assert!(mouse_wheel(2,Some(0),Some(0),Some(0),Some(120)).is_ok());
+    }
     #[test]
     fn native_owner_mismatch_and_blocked_state_cannot_be_bypassed() {
         let mut owner = Some(Owner {

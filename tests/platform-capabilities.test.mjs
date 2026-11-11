@@ -46,7 +46,7 @@ test('normalizes macOS 13+ capabilities and calls out Screen Recording permissio
   assert.match(platformSummary(info), /屏幕录制/);
   assert.match(touchbackSummary(info), /主屏幕/);
   assert.match(touchbackSummary(info), /Mouse/);
-  assert.match(touchbackSummary(info), /不转换 Touch/);
+  assert.match(touchbackSummary(info), /可配置 Touch 转鼠标或滚动/);
   assert.match(touchbackError('not_authorized', info).message, /隐私与安全性 → 辅助功能/);
   assert.match(screenCaptureError(new DOMException('denied', 'NotAllowedError'), info).message, /屏幕录制/);
 });

@@ -111,13 +111,24 @@ export class WebCastTouchbackSender{
     this.status();return cleanup;
   }
   async captureGeometryChanged(){await this.invalidateSource('CAPTURE_GEOMETRY_CHANGED');await this.refreshSource();}
+  async setOutputPolicy(policy){
+    if(typeof this.provider.setOutputPolicy!=='function')throw new InputError('NOT_SUPPORTED','Output policy unavailable');
+    if(this.policyChanging)throw new InputError('BUSY','Output policy change in progress');
+    this.policyChanging=true;
+    try{
+      await this.invalidateSource('CAPTURE_CHANGED');
+      if(this.engine?.state!=='closed'&&this.engine)throw new InputError('UNAVAILABLE','Input cleanup pending');
+      if(this.retiring.size)throw new InputError('UNAVAILABLE','Input cleanup pending');
+      await this.provider.setOutputPolicy(policy);
+    }finally{this.policyChanging=false;await this.refreshSource();this.status();}
+  }
   async refreshSource(){
     if(!this.server||!this.identity)return;
     const version=++this.refreshVersion,generation=this.generation,engine=this.engine;
     try{
       const probe=await this.provider.probe();if(version!==this.refreshVersion||generation!==this.generation)return;
       this.lastProbe=probe;
-      let reason=!this.enabled?'LOCAL_INPUT_DISABLED':!this.server?.ready?'APP_NOT_READY':!this.target?'TARGET_UNBOUND':
+      let reason=this.policyChanging?'CAPTURE_CHANGED':!this.enabled?'LOCAL_INPUT_DISABLED':!this.server?.ready?'APP_NOT_READY':!this.target?'TARGET_UNBOUND':
         !this.track||this.track.readyState!=='live'?(this.captureSeen?'CAPTURE_CHANGED':'CAPTURE_UNAVAILABLE'):this.track.muted?'CAPTURE_MUTED':
         this.retiring.size>0||probe.cleanupBlocked?'NATIVE_CLEANUP_PENDING':probe.nativeReady===false?'NATIVE_PERMISSION_UNAVAILABLE':null;
       if(!reason&&probe.ownerBusy&&!this.provider.owns?.(engine.owner?.ownerId)&&engine.state!=='opening')reason='NATIVE_DOMAIN_BUSY';
@@ -173,7 +184,7 @@ export class WebCastTouchbackSender{
   diagnostics(){
     const state=this.engine?.snapshot()??{};
     return{controlChannelReady:this.channel?.readyState==='open',appReady:this.server?.ready===true,nativeReady:this.lastProbe?.nativeReady===true,
-      sourceReady:Boolean(this.source),localEnabled:this.enabled,receiverEnabled:null,nativeInputTypes:[...(this.lastProbe?.inputTypes??[])],
+      sourceReady:Boolean(this.source),localEnabled:this.enabled,receiverEnabled:null,nativeInputTypes:[...(this.lastProbe?.nativeTypes??this.lastProbe?.inputTypes??[])],
       disabledReason:this.source?null:this.reason,detail:this.detail,...state,cleanupPending:Boolean(state.cleanupPending||this.retiring.size),injectionCount:state.submittedRecords??0,nativeInput:this.provider.snapshot?.()??null};
   }
   controlDiagnostics(){return structuredClone({...this.stats,...this.diagnostics()});}

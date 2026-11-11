@@ -8,7 +8,7 @@ export const geometry={revision:'geometry-1',displays:[{nativeId:'primary',prima
 export const openRequest=sourceBindingId=>({controlVersion:1,runtimeInstanceId:product.targetMessage.data.runtimeInstanceId,target:product.targetMessage.data.target,sourceBindingId,streamKind:'touchback',format:'input-sample-v1',inputTypes:['touch'],maxDataBytes:4096,touch:{maxContacts:10},commandId:'open-1'});
 export async function peer(options={}){
   const actions=[],sent=[];
-  const provider={probe:async()=>({inputTypes:['touch'],maxDataBytes:4096,touch:{maxContacts:10},geometry,nativeReady:true}),prepare:async()=>({status:'ready'}),apply:async(action)=>{actions.push(action);return{status:'submitted'};},releaseOwned:async()=>({status:'released'}),...options.provider};
+  const provider=options.providerAdapter??{probe:async()=>({inputTypes:['touch'],maxDataBytes:4096,touch:{maxContacts:10},geometry,nativeReady:true}),prepare:async()=>({status:'ready'}),apply:async(action)=>{actions.push(action);return{status:'submitted'};},releaseOwned:async()=>({status:'released'}),...options.provider};
   const sender=new WebCastTouchbackSender({provider,engineOptions:options.engineOptions,onStatus:options.onStatus,onTouchFeedback:options.onTouchFeedback});
   const channel={readyState:'open',ordered:true,send:value=>sent.push(value),close(){this.readyState='closed';void sender.fence('channel closed');}};
   const mediaIdentity={roomId:'room-1',userId:'sender-1',hostUserId:'receiver-1'};

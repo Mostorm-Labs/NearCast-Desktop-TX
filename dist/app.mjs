@@ -60,6 +60,36 @@ const inputEnabled = document.querySelector('#input-enabled');
 const inputState = document.querySelector('#input-state');
 const inputReconnect = document.querySelector('#input-reconnect');
 const inputCleanup = document.querySelector('#input-cleanup');
+const inputTouchOutput=document.querySelector('#input-touch-output');
+const inputMouseOutput=document.querySelector('#input-mouse-output');
+const inputPolicyApply=document.querySelector('#input-policy-apply');
+const inputPolicyStatus=document.querySelector('#input-policy-status');
+const touchOutputHelp=document.querySelector('#input-touch-help');
+const mouseOutputHelp=document.querySelector('#input-mouse-help');
+const inputProvider=createPlatformInputAdapter({}, {invoke});
+let policyPending=false;
+const outputLabels={touch:'Touch',mouse:'Mouse'};
+const outputHelp={
+  touch:{native:'Touch 直接输出为原生触控；不支持时不会自动转换。','mouse-drag':'单指按下立即按住鼠标左键，移动拖拽，抬手释放；可选中文字和拖动物体。',
+    'mouse-scroll':'轻点松开时点击；移动超过 6 个本机坐标单位后开始滚动，不会按住鼠标；只支持单点。',disabled:'不协商和执行接收到的 Touch 输入。'},
+  mouse:{native:'保持 Mouse 语义，包括本机支持的按钮与滚轮。',touch:'只将左键按下、移动、释放转换成单点 Touch；不转换悬停、右键或滚轮。',disabled:'不协商和执行接收到的 Mouse 输入。'},
+};
+const updatePolicyHelp=()=>{touchOutputHelp.textContent=outputHelp.touch[inputTouchOutput.value]??'';mouseOutputHelp.textContent=outputHelp.mouse[inputMouseOutput.value]??'';};
+inputTouchOutput.addEventListener('change',updatePolicyHelp);
+inputMouseOutput.addEventListener('change',updatePolicyHelp);
+async function renderPolicyConfiguration(){
+  const config=await inputProvider.configuration();
+  for(const [type,select]of [['touch',inputTouchOutput],['mouse',inputMouseOutput]]){
+    select.replaceChildren(...config.options[type].map(item=>{
+      const option=document.createElement('option');option.value=item.value;option.disabled=!item.supported;
+      option.textContent=item.label+(item.supported?'':' · 本机不支持');return option;
+    }));
+    select.value=config.policy[type];select.disabled=policyPending;
+  }
+  inputPolicyApply.disabled=policyPending;
+  updatePolicyHelp();
+  inputPolicyStatus.textContent=`本机原生输出：${config.nativeInputTypes.map(type=>outputLabels[type]).join(' / ')||'暂无可用类型'}。转换仅在选择并应用后生效。`;
+}
 let permissionActionPending = false;
 let permissionSettingsOpened = null;
 
@@ -158,17 +188,32 @@ digits.forEach((input, index) => {
 });
 
 const buildTouchback = () => new WebCastTouchbackSender({
-  provider: createPlatformInputAdapter({}, {invoke}),
+  provider: inputProvider,
   onStatus: (_status, state) => {
     const reasons = {LOCAL_INPUT_DISABLED:'反控未启用', APP_NOT_READY:'等待接收端建立反控会话', TARGET_UNBOUND:'等待接收端绑定投屏来源', CAPTURE_UNAVAILABLE:'请先分享整个屏幕', CAPTURE_CHANGED:'分享已停止，重新分享后等待接收端恢复反控', CAPTURE_GEOMETRY_CHANGED:'正在更新分享范围，反控暂时暂停', CAPTURE_MUTED:'采集已暂停', NATIVE_CLEANUP_PENDING:'等待释放上一次输入', NATIVE_PERMISSION_UNAVAILABLE:'本机输入不可用，请检查系统权限', NATIVE_DOMAIN_BUSY:'本机输入正由其他会话使用', NATIVE_GEOMETRY_UNAVAILABLE:'无法确认当前分享范围的坐标映射，请查看反控诊断', TARGET_CONTRACT_MISMATCH:'接收端反控协议版本不匹配', INPUT_SESSION_FAULT:'反控连接异常，可重建连接'};
     inputState.textContent = !state.localEnabled ? '反控未启用' : state.state === 'active' && state.sourceReady ? `反控已开启 · ${state.acceptedInputTypes.join(' / ')} · stream ${state.streamId}` : state.sourceReady ? '本机已就绪，等待接收端开启反控' : state.detail?.includes('BROWSER_WINDOW_INPUT_UNSUPPORTED') ? '窗口投屏可用；反控请改为分享整个屏幕' : state.detail?.includes('BROWSER_MULTIPLE_DISPLAYS_UNPROVEN') ? '未完成屏幕识别，反控暂不可用；请停止后重新分享整个屏幕' : state.detail?.includes('BROWSER_DISPLAY_LAYOUT_CHANGED') ? '显示布局已变化，请停止后重新分享以校验屏幕' : state.detail?.includes('BROWSER_DISPLAY_BINDING_RETIRED') ? '屏幕绑定已失效，请停止后重新分享' : state.detail?.includes('BROWSER_SOURCE_SIZE_UNPROVEN') ? '无法确认原始屏幕尺寸，反控暂不可用' : state.detail?.includes('capture_window_not_foreground') ? '窗口反控已暂停，请切回正在分享的窗口' : state.detail?.includes('minimized') ? '窗口已最小化，反控已暂停' : state.disabledReason === 'NATIVE_PROBE_FAILED' ? '无法读取本机输入能力，请重试或检查系统权限' : captureProvider && state.disabledReason === 'NATIVE_GEOMETRY_UNAVAILABLE' ? '正在确认分享范围，反控暂不可用' : state.disabledReason === 'INPUT_SESSION_FAULT' && state.detail?.includes('Input queue age') ? '输入处理积压，已释放触点；可重建反控连接' : reasons[state.disabledReason] || '正在准备反控';
     inputCleanup.hidden = !state.cleanupPending;
     inputReconnect.disabled = state.cleanupPending || !['connected','sharing'].includes(currentStatus);
+    inputPolicyApply.disabled=policyPending||state.cleanupPending;
     touchbackStatus.textContent = touchbackSummary(platformInfo ?? {});
     renderControlDiagnostics();
   },
 });
 touchback = buildTouchback();
+inputPolicyApply.addEventListener('click',async()=>{
+  if(policyPending)return;
+  const requested={touch:inputTouchOutput.value,mouse:inputMouseOutput.value};
+  policyPending=true;inputPolicyApply.disabled=true;inputTouchOutput.disabled=true;inputMouseOutput.disabled=true;
+  inputPolicyStatus.textContent='正在释放当前输入并应用转换配置…';
+  try{
+    await touchback.setOutputPolicy(requested);
+    await renderPolicyConfiguration();
+    inputPolicyStatus.textContent='配置已应用。请在接收端重新开启反控；投屏保持连接。';
+  }catch(error){
+    await renderPolicyConfiguration().catch(()=>{});
+    inputPolicyStatus.textContent=`未应用配置：${error.message||error}`;
+  }finally{policyPending=false;inputTouchOutput.disabled=false;inputMouseOutput.disabled=false;inputPolicyApply.disabled=touchback.diagnostics().cleanupPending;}
+});
 inputEnabled.addEventListener('change', () => { void touchback.setEnabled(inputEnabled.checked); });
 inputCleanup.addEventListener('click', async () => {
   inputCleanup.disabled = true;
@@ -388,6 +433,7 @@ platformReady = loadPlatformInfo(invoke).then(info => {
   platformStatus.textContent = platformSummary(info);
   touchbackStatus.textContent = touchbackSummary(info);
   touchback.status();
+  void renderPolicyConfiguration().catch(error=>{inputPolicyStatus.textContent=`无法读取输入能力：${error.message||error}`;});
   return info;
 }).catch(() => ({os: 'unknown', touchback: false, inputControl: 'none'}));
 startDiscovery();

@@ -63,6 +63,18 @@
       <div id="preview-wrap" class="preview-wrap" hidden><video id="preview" autoplay muted playsinline></video><span class="preview-badge">LOCAL PREVIEW</span></div>
       <section class="macos-interaction" aria-label="反向控制">
         <label><input id="input-enabled" type="checkbox"> 允许接收端反控本机</label>
+        <details class="input-mapping" open>
+          <summary>输入转换配置</summary>
+          <div class="input-mapping-grid">
+            <label>收到 Touch 时，本机输出<select id="input-touch-output" aria-describedby="input-touch-help" disabled></select></label>
+            <label>收到 Mouse 时，本机输出<select id="input-mouse-output" aria-describedby="input-mouse-help" disabled></select></label>
+          </div>
+          <p id="input-touch-help" class="quality-help"></p>
+          <p id="input-mouse-help" class="quality-help"></p>
+          <button id="input-policy-apply" class="button secondary" type="button" disabled>应用转换配置</button>
+          <p id="input-policy-status" class="quality-help" role="status">正在读取本机输入能力…</p>
+          <p class="quality-help">应用时会释放当前输入并重新协商；接收端可能需要重新开启反控。设置在本次运行期间保留。</p>
+        </details>
         <p id="input-state" aria-live="polite">反控未启用</p>
         <p id="capture-help" class="quality-help">反控需要双方启用；整屏分享在屏幕识别成功后支持反控，窗口仅投屏。</p>
         <button id="input-reconnect" class="refresh" type="button" disabled>重建反控连接</button>
