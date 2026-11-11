@@ -14,7 +14,7 @@
 | `calibrateDisplayBinding` / Rust `display_binding` | 短暂显示四角随机标记，仅本地识别所选屏幕；Rust 持有布局与来源绑定及释放责任 |
 | `WebCastTouchbackSender` / InputEngine | AXTP 会话、输入流、坐标映射、按住状态和释放 |
 | Rust `native_audio` | 独立音频会话及有界 PCM 队列，全部 COM 音频接口由专属线程拥有 |
-| Rust `input_geometry/input_native` | 当前物理屏幕几何、原生 Touch 注入与租约校验 |
+| Rust `input_geometry/input_native` | 当前物理屏幕几何、Windows Touch/Mouse 与 macOS Mouse 注入、租约校验及状态释放 |
 
 默认媒体路径：
 

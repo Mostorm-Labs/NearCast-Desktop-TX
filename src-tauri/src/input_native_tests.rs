@@ -11,12 +11,28 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 static PREVIOUS: AtomicIsize = AtomicIsize::new(0);
 static DOWN: AtomicU32 = AtomicU32::new(0);
 static UP: AtomicU32 = AtomicU32::new(0);
+static MOUSE_DOWN: AtomicU32 = AtomicU32::new(0);
+static MOUSE_UP: AtomicU32 = AtomicU32::new(0);
+static RIGHT_DOWN: AtomicU32 = AtomicU32::new(0);
+static RIGHT_UP: AtomicU32 = AtomicU32::new(0);
+static CTRL_CLICK: AtomicU32 = AtomicU32::new(0);
+static WHEEL: AtomicU32 = AtomicU32::new(0);
+static HWHEEL: AtomicU32 = AtomicU32::new(0);
 unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if msg == WM_POINTERDOWN {
         DOWN.fetch_add(1, Ordering::SeqCst);
     }
     if msg == WM_POINTERUP {
         UP.fetch_add(1, Ordering::SeqCst);
+    }
+    match msg {
+        WM_LBUTTONDOWN=>{MOUSE_DOWN.fetch_add(1,Ordering::SeqCst);if wp.0&8!=0{CTRL_CLICK.fetch_add(1,Ordering::SeqCst);}},
+        WM_LBUTTONUP=>{MOUSE_UP.fetch_add(1,Ordering::SeqCst);},
+        WM_RBUTTONDOWN=>{RIGHT_DOWN.fetch_add(1,Ordering::SeqCst);},
+        WM_RBUTTONUP=>{RIGHT_UP.fetch_add(1,Ordering::SeqCst);},
+        WM_MOUSEWHEEL=>{WHEEL.fetch_add(1,Ordering::SeqCst);},
+        WM_MOUSEHWHEEL=>{HWHEEL.fetch_add(1,Ordering::SeqCst);},
+        _=>{},
     }
     CallWindowProcW(
         std::mem::transmute::<isize, WNDPROC>(PREVIOUS.load(Ordering::SeqCst)),
@@ -25,6 +41,62 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
         wp,
         lp,
     )
+}
+
+#[test]
+#[ignore = "creates an owned foreground window and tests typed Mouse plus owned cleanup"]
+fn typed_native_mouse_and_owned_cleanup_reach_our_window() {
+    let geometry=input_geometry::snapshot().unwrap();
+    let display=geometry.displays.iter().find(|display|!display.primary).unwrap_or(&geometry.displays[0]);
+    let source_id="1cc04c93-e9ce-4f91-a14c-c8d6421c4f58".to_string();
+    let challenge=crate::display_binding::begin(source_id.clone()).unwrap();
+    let marker=challenge["displays"].as_array().unwrap().iter().find(|marker|marker["nativeId"].as_str()==Some(display.native_id.as_str())).unwrap();
+    let binding=crate::display_binding::confirm(source_id.clone(),challenge["challengeId"].as_str().unwrap().into(),marker["token"].as_str().unwrap().into(),
+        vec![0,1,2,3],display.capture_width,display.capture_height).unwrap();
+    let previous=unsafe{GetForegroundWindow()};let mut cursor=POINT::default();unsafe{GetCursorPos(&mut cursor).unwrap();}
+    let hwnd=unsafe{CreateWindowExW(WS_EX_TOPMOST,w!("BUTTON"),w!("NearCast typed Mouse self-test"),WS_OVERLAPPEDWINDOW|WS_VISIBLE,
+        display.region.x as i32+80,display.region.y as i32+80,500,320,None,None,None,None).unwrap()};
+    struct Guard{hwnd:HWND,previous:HWND,cursor:POINT,source_id:String}
+    impl Drop for Guard{fn drop(&mut self){
+        let _=input_native::release("owned-mouse-test".into(),None);let _=crate::display_binding::release(self.source_id.clone());
+        unsafe{let _=DestroyWindow(self.hwnd);let _=SetCursorPos(self.cursor.x,self.cursor.y);if !self.previous.0.is_null(){let _=SetForegroundWindow(self.previous);}}
+    }}
+    let _guard=Guard{hwnd,previous,cursor,source_id};
+    PREVIOUS.store(unsafe{SetWindowLongPtrW(hwnd,GWLP_WNDPROC,procedure as *const () as isize)},Ordering::SeqCst);
+    unsafe{
+        use windows::Win32::System::Threading::{AttachThreadInput,GetCurrentThreadId};
+        let thread=GetCurrentThreadId();let foreground_thread=GetWindowThreadProcessId(GetForegroundWindow(),None);
+        let attached=foreground_thread!=thread&&AttachThreadInput(thread,foreground_thread,true).as_bool();
+        let _=SetForegroundWindow(hwnd);let _=SetFocus(Some(hwnd));
+        if attached{let _=AttachThreadInput(thread,foreground_thread,false);}
+    }pump(hwnd);
+    assert_eq!(unsafe{GetForegroundWindow()},hwnd);
+    let point=POINT{x:display.region.x as i32+300,y:display.region.y as i32+230};
+    assert_eq!(unsafe{WindowFromPoint(point)},hwnd);
+    let prepared=input_native::prepare("owned-mouse-test".into(),"capture-test".into(),binding["revision"].as_str().unwrap().into(),
+        binding["nativeId"].as_str().unwrap().into(),vec!["mouse".into()],0);
+    assert_eq!(prepared["status"],"ready","{prepared}");let lease=prepared["leaseId"].as_str().unwrap().to_string();
+    let apply=|mut action:serde_json::Value|{
+        assert_eq!(unsafe{GetForegroundWindow()},hwnd);assert_eq!(unsafe{WindowFromPoint(point)},hwnd);
+        action["inputType"]=json!("mouse");action["x"]=json!(point.x);action["y"]=json!(point.y);
+        let result=input_native::apply("owned-mouse-test".into(),lease.clone(),binding["revision"].as_str().unwrap().into(),serde_json::from_value(action).unwrap());
+        assert_eq!(result["status"],"submitted","{result}");assert_eq!(result["nativeApi"],"SendInput");pump(hwnd);
+    };
+    apply(json!({"eventKind":1,"buttons":1,"modifiers":2}));
+    apply(json!({"eventKind":0,"buttons":1,"modifiers":2}));
+    apply(json!({"eventKind":1,"buttons":0,"modifiers":0}));
+    apply(json!({"eventKind":1,"buttons":2}));apply(json!({"eventKind":1,"buttons":0}));
+    apply(json!({"eventKind":2,"wheelUnit":0,"wheelPhase":0,"wheelX":120,"wheelY":120}));
+    apply(json!({"eventKind":2,"wheelUnit":1,"wheelPhase":1,"wheelX":0,"wheelY":4096}));
+    apply(json!({"eventKind":2,"wheelUnit":1,"wheelPhase":3,"wheelX":0,"wheelY":0}));
+    apply(json!({"eventKind":1,"buttons":1,"modifiers":2}));
+    let released=input_native::release("owned-mouse-test".into(),Some(lease));assert_eq!(released["status"],"released","{released}");pump(hwnd);
+    assert_eq!(MOUSE_DOWN.load(Ordering::SeqCst),2);assert_eq!(MOUSE_UP.load(Ordering::SeqCst),2);
+    assert_eq!(RIGHT_DOWN.load(Ordering::SeqCst),1);assert_eq!(RIGHT_UP.load(Ordering::SeqCst),1);
+    assert_eq!(CTRL_CLICK.load(Ordering::SeqCst),2);assert!(WHEEL.load(Ordering::SeqCst)>=1);assert!(HWHEEL.load(Ordering::SeqCst)>=1);
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState,VK_LCONTROL};
+    assert!(unsafe{GetAsyncKeyState(VK_LCONTROL.0 as i32)}>=0,"owned Ctrl must be released");
+    eprintln!("typed native Mouse PASS: left/right click, drag, Ctrl-click, horizontal/continuous wheel and owned cleanup on {}",display.native_id);
 }
 fn pump(hwnd: HWND) {
     let until = Instant::now() + Duration::from_millis(100);

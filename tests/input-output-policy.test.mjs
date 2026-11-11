@@ -7,6 +7,7 @@ import {encodeInputFrame} from '../src/touchback/typed-codec.mjs';
 const mouseCaps={inputTypes:['mouse'],nativeTypes:['mouse'],nativeReady:true,maxDataBytes:4096,
   mouse:{buttonsMask:7,modifierMask:15,allowChords:false,wheelUnits:['detent120','regionQ16_16'],continuousScroll:true},zoom:{browser:true},geometry};
 const touchCaps={inputTypes:['touch'],nativeTypes:['touch'],nativeReady:true,maxDataBytes:4096,touch:{maxContacts:10},geometry};
+const windowsCaps={...touchCaps,inputTypes:['touch','mouse'],nativeTypes:['touch','mouse'],mouse:mouseCaps.mouse};
 function platform(caps=mouseCaps){
   const calls=[];let releaseResult={status:'released'};
   const provider=createPlatformInputAdapter({}, {invoke:async(name,args)=>{
@@ -184,4 +185,59 @@ test('policy reconfiguration includes gesture timing and discards an armed conta
   assert.equal(p.provider.snapshot().gestureFeedback,null);
   assert.equal(p.provider.snapshot().outputPolicy.gestures.holdMs,450);
   assert.equal(p.provider.snapshot().owners,0);
+});
+
+test('Windows dual native capabilities expose every supported Touch and Mouse route without automatic conversion',async()=>{
+  for(const directory of ['src','dist']){
+    const {createPlatformInputAdapter}=await import(`../${directory}/touchback/platform-input.mjs`);
+    const provider=createPlatformInputAdapter({os:'windows'},{invoke:async()=>structuredClone(windowsCaps)});
+    const configuration=await provider.configuration();
+    assert.deepEqual(configuration.options.touch.filter(o=>o.supported).map(o=>o.value),['native','mouse-drag','mouse-scroll','mouse-gestures','disabled']);
+    assert.deepEqual(configuration.options.mouse.filter(o=>o.supported).map(o=>o.value),['native','touch','disabled']);
+    assert.deepEqual(configuration.pinchActions,['disabled','ctrl-wheel']);
+    assert.deepEqual((await provider.probe()).inputTypes,['touch','mouse']);
+  }
+});
+
+test('Windows dual typed stream routes native Touch then native Mouse and rejects overlapping gestures',async t=>{
+  const p=await session(t,{touch:'native',mouse:'native'},windowsCaps);
+  const request={...openRequest(p.source().data.sourceBindingId),inputTypes:['touch','mouse'],mouse:mouseCaps.mouse};
+  const opened=await p.sender.engine.open(request,{sessionId:p.sender.server.sessionId});
+  assert.deepEqual(opened.acceptedInputTypes,['touch','mouse']);
+  const prepared=p.calls.find(([name])=>name==='nearcast_input_prepare')[1];
+  assert.deepEqual(prepared.inputTypes,['touch','mouse']);assert.equal(prepared.maxContacts,10);
+  await send(p,opened.streamId,1,{inputType:'touch',records:[contact(0)]});
+  await send(p,opened.streamId,2,{inputType:'touch',records:[contact(2)]});
+  await send(p,opened.streamId,3,{inputType:'mouse',eventKind:1,buttons:2,modifiers:2,x:10000,y:20000});
+  assert.deepEqual(p.actions().map(a=>a.inputType),['touch','touch','mouse']);
+  assert.equal(p.actions().at(-1).buttons,2);assert.equal(p.actions().at(-1).modifiers,2);
+  await send(p,opened.streamId,4,{inputType:'touch',records:[contact(0)]});
+  assert.equal(p.actions().length,3,'overlapping Touch must not reach the native boundary');
+  assert.equal(p.provider.snapshot().owners,0,'fault must release the same native owner');
+});
+
+test('Windows native modifier-only input cannot overlap Touch until its modifiers are released',async t=>{
+  const p=await session(t,{touch:'native',mouse:'native'},windowsCaps);
+  const opened=await p.sender.engine.open({...openRequest(p.source().data.sourceBindingId),inputTypes:['touch','mouse'],mouse:mouseCaps.mouse},
+    {sessionId:p.sender.server.sessionId});
+  await send(p,opened.streamId,1,{inputType:'mouse',eventKind:4,modifiers:2});
+  await assert.rejects(p.sender.engine.accept({streamId:opened.streamId,seqId:2,cursor:2,inputType:'touch',dataBytes:8,records:[contact(0)]}),/Overlapping/);
+  assert.equal(p.actions().length,1);
+  assert.equal(p.provider.snapshot().owners,0);
+});
+
+test('Windows Touch gesture conversion and Ctrl-wheel pinch keep the wire Touch type and native Mouse output',async t=>{
+  const p=await session(t,{touch:'mouse-gestures',mouse:'native',gestures:{pinchAction:'ctrl-wheel'}},windowsCaps);
+  const opened=await p.sender.engine.open(openRequest(p.source().data.sourceBindingId),{sessionId:p.sender.server.sessionId});
+  const r=(contactId,phase,x)=>({contactId,phase,x,y:20000});
+  await send(p,opened.streamId,1,{inputType:'touch',records:[r(1,0,10000),r(2,0,20000)]});
+  await send(p,opened.streamId,2,{inputType:'touch',records:[r(1,1,5000),r(2,1,25000)]});
+  assert.equal(p.actions().at(-1).eventKind,4,'converted pinch must release its local Ctrl immediately');
+  assert.equal(p.actions().at(-1).modifiers,0);
+  await send(p,opened.streamId,3,{inputType:'touch',records:[r(1,2,5000),r(2,2,25000)]});
+  const wheel=p.actions().find(action=>action.eventKind===2);
+  assert.equal(wheel.inputType,'mouse');assert.equal(wheel.modifiers,2);
+  assert.equal(wheel.wheelUnit,0);assert.ok(wheel.wheelY>0);
+  assert.equal(p.provider.snapshot().lastConversion.receivedType,'touch');
+  assert.equal(p.provider.snapshot().lastConversion.outputType,'mouse');
 });

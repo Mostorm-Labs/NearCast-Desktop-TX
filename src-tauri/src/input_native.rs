@@ -13,6 +13,8 @@ struct Owner {
     max_contacts: u32,
     blocked: bool,
     mouse_buttons: u32,
+    #[cfg(windows)]
+    windows_mouse: crate::windows_mouse_model::State,
     possible_touch: Vec<TouchRecord>,
 }
 static OWNER: Mutex<Option<Owner>> = Mutex::new(None);
@@ -124,7 +126,12 @@ pub fn probe() -> Value {
                 ready.unwrap_or(false)
             })
             .unwrap_or(false);
-        return json!({"inputTypes":["touch"],"nativeTypes":["touch"],"maxDataBytes":4096,"touch":{"maxContacts":10},"nativeReady":ready&&!blocked,"cleanupBlocked":blocked,"ownerBusy":busy,"geometry":geometry});
+        let types=if ready{vec!["touch","mouse"]}else{vec!["mouse"]};
+        let mut caps=json!({"inputTypes":types,"nativeTypes":types,"maxDataBytes":4096,
+            "mouse":{"buttonsMask":7,"modifierMask":15,"allowChords":false,"wheelUnits":["detent120","regionQ16_16"],"continuousScroll":true},
+            "nativeReady":!blocked,"cleanupBlocked":blocked,"ownerBusy":busy,"geometry":geometry});
+        if ready{caps["touch"]=json!({"maxContacts":10});}
+        return caps;
     }
     #[cfg(target_os = "macos")]
     {
@@ -140,6 +147,7 @@ fn cleanup(owner: &mut Owner) -> Result<(), String> {
     crate::gesture_halo::clear();
     #[cfg(windows)]
     {
+        crate::windows_mouse::reset(&mut owner.windows_mouse)?;
         if owner.possible_touch.is_empty() {
             if !crate::pointer::reset_all() {
                 return Err("native_touch_cleanup_unconfirmed".into());
@@ -173,7 +181,10 @@ pub fn prepare(
         return failure("rejected", "INVALID_ARGUMENT native owner/binding");
     }
     #[cfg(windows)]
-    let supported = input_types == ["touch"] && max_contacts >= 1 && max_contacts <= 10;
+    let supported = !input_types.is_empty() && input_types.len()<=2
+        && input_types.iter().all(|kind|kind=="touch"||kind=="mouse")
+        && (input_types.len()!=2||input_types[0]!=input_types[1])
+        && if input_types.iter().any(|kind|kind=="touch"){(1..=10).contains(&max_contacts)}else{max_contacts==0};
     #[cfg(target_os = "macos")]
     let supported = input_types == ["mouse"] && max_contacts == 0;
     #[cfg(not(any(windows, target_os = "macos")))]
@@ -218,6 +229,8 @@ pub fn prepare(
         max_contacts,
         blocked: false,
         mouse_buttons: 0,
+        #[cfg(windows)]
+        windows_mouse: crate::windows_mouse_model::State::default(),
         possible_touch: Vec::new(),
     };
     if let Err(error) = cleanup(&mut owner) {
@@ -226,7 +239,7 @@ pub fn prepare(
         return json!({"status":"blocked","leaseId":lease,"error":error});
     }
     #[cfg(windows)]
-    if !crate::pointer::initialize(max_contacts) {
+    if owner.input_types.iter().any(|kind|kind=="touch") && !crate::pointer::initialize(max_contacts) {
         return failure("rejected", "native_touch_initialization_failed");
     }
     #[cfg(target_os = "macos")]
@@ -299,11 +312,14 @@ pub fn apply(
 #[cfg(windows)]
 fn apply_touch(owner: &mut Owner, display: &Display, records: Vec<TouchRecord>) -> Value {
     use std::collections::BTreeSet;
-    if owner.input_types != ["touch"]
+    if !owner.input_types.iter().any(|kind|kind=="touch")
         || records.is_empty()
         || records.len() > owner.max_contacts as usize
     {
         return failure("rejected", "native_touch_count/type");
+    }
+    if owner.windows_mouse.buttons!=0||owner.windows_mouse.owned_modifiers!=0||owner.windows_mouse.scroll.is_some(){
+        return failure("rejected","overlapping_touch_mouse_output");
     }
     let ids = records
         .iter()
@@ -477,7 +493,21 @@ fn apply_mouse(
         }
     }
 }
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+fn apply_mouse(owner:&mut Owner,display:&Display,kind:u8,buttons:u32,modifiers:u16,x:f64,y:f64,wheel:Option<MouseWheel>)->Value {
+    if !owner.input_types.iter().any(|kind|kind=="mouse"){return failure("rejected","NOT_SUPPORTED native Mouse");}
+    if kind!=3&&kind!=4&&!display.contains(x,y){return failure("rejected","native_mouse_action_invalid");}
+    if !crate::pointer::active_points().is_empty()||!owner.possible_touch.is_empty(){return failure("rejected","overlapping_touch_mouse_output");}
+    let action=crate::windows_mouse_model::Action{kind,buttons,modifiers,x,y,
+        wheel:wheel.map(|w|crate::windows_mouse_model::Wheel{unit:w.unit,phase:w.phase,x:w.x,y:w.y})};
+    match crate::windows_mouse::apply(&mut owner.windows_mouse,action,display){
+        Ok(submitted)=>{owner.mouse_buttons=owner.windows_mouse.buttons;
+            json!({"status":"submitted","submittedActions":submitted,"inputType":"mouse","nativeApi":"SendInput","eventKind":kind})},
+        Err(error)=>{owner.blocked=true;
+            json!({"status":if error.submitted>0{"partial"}else{"unknown"},"submittedActions":error.submitted,"error":error.error})},
+    }
+}
+#[cfg(not(any(windows,target_os = "macos")))]
 fn apply_mouse(
     _owner: &mut Owner,
     _display: &Display,
@@ -555,6 +585,16 @@ pub fn ensure_released_for_update() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn windows_advertises_native_mouse_wheel_and_modifiers_alongside_touch() {
+        let caps=probe();
+        assert!(caps["inputTypes"].as_array().unwrap().iter().any(|value| value=="mouse"),"{caps}");
+        assert_eq!(caps["mouse"]["buttonsMask"],7);
+        assert_eq!(caps["mouse"]["modifierMask"],15);
+        assert_eq!(caps["mouse"]["continuousScroll"],true);
+        assert_eq!(caps["mouse"]["wheelUnits"],json!(["detent120","regionQ16_16"]));
+    }
     #[test]
     fn halo_feedback_is_bounded_to_display_and_known_phases() {
         let display=Display{native_id:"one".into(),primary:true,units:"points".into(),rotation:0,
@@ -597,6 +637,8 @@ mod tests {
             max_contacts: 10,
             blocked: false,
             mouse_buttons: 0,
+            #[cfg(windows)]
+            windows_mouse: crate::windows_mouse_model::State::default(),
             possible_touch: vec![],
         });
         assert!(authorized(&mut owner, "two", "secret").is_err());

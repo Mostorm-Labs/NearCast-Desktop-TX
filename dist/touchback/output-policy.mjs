@@ -70,7 +70,7 @@ export class OutputPolicyAdapter {
     if(nativeTypes.includes('mouse'))nativeContract.mouse=structuredClone(this.nativeCaps.mouse);
     // Retain context even if IPC loses the prepare response: release must still
     // reach the guarded native owner before another policy can be selected.
-    this.owners.set(context.ownerId,{policy,gesture:null,activeType:null,buttons:0,scrolling:false,
+    this.owners.set(context.ownerId,{policy,gesture:null,activeType:null,buttons:0,modifiers:0,scrolling:false,
       recognizer:policy.touch==='mouse-gestures'?new TouchMouseGestures({region:context.geometry.region,settings:policy.gestures}):null});
     return this.native.prepare(context,nativeContract);
   }
@@ -80,7 +80,9 @@ export class OutputPolicyAdapter {
     if(mode==='native')return [action];
     const mouse=(eventKind,buttons,x,y,extra={})=>({inputType:'mouse',eventKind,buttons,modifiers:0,x,y,...extra});
     if(type==='touch'){
-      if(mode==='mouse-gestures')return owner.recognizer.accept(action.records,this.now());
+      if(mode==='mouse-gestures')return owner.recognizer.accept(action.records,this.now()).flatMap(converted=>
+        converted.inputType==='mouse'&&converted.eventKind===2&&converted.modifiers?
+          [converted,{inputType:'mouse',eventKind:4,modifiers:0}]:[converted]);
       check(action.records.length===1,'Touch conversion supports one contact');
       const r=action.records[0],g=owner.gesture;
       if(r.phase===0){
@@ -131,13 +133,14 @@ export class OutputPolicyAdapter {
         submitted+=result.submittedActions??1;this.lastConversion.emittedActions++;
       }
       if(action.inputType==='mouse'&&owner.policy.mouse==='native'){
-        if(action.eventKind===3){owner.buttons=0;owner.scrolling=false;}
+        if(action.eventKind===3){owner.buttons=0;owner.modifiers=0;owner.scrolling=false;}
         else{
           if(action.buttons!==undefined)owner.buttons=action.buttons;
+          if(action.modifiers!==undefined)owner.modifiers=action.modifiers;
           if(action.eventKind===2&&action.wheelUnit===1)owner.scrolling=action.wheelPhase<3;
         }
       }
-      const active=owner.recognizer?.group||owner.gesture||action.inputType==='touch'&&owner.policy.touch==='native'&&action.records.some(r=>r.phase<2)||owner.buttons||owner.scrolling;
+      const active=owner.recognizer?.group||owner.gesture||action.inputType==='touch'&&owner.policy.touch==='native'&&action.records.some(r=>r.phase<2)||owner.buttons||owner.modifiers||owner.scrolling;
       owner.activeType=active?action.inputType:null;
       this.lastConversion.status='submitted';return{status:'submitted',submittedActions:submitted};
     }catch(error){this.lastConversion.status='rejected';return{status:submitted?'partial':'rejected',submittedActions:submitted,error:String(error.message??error)};}

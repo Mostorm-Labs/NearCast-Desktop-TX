@@ -27,7 +27,7 @@ export function platformSummary(info) {
 export function touchbackSummary(info) {
   const value = normalizePlatformInfo(info);
   if (value.inputControl === 'macos-mouse') return '反控：macOS 原生 Mouse；可配置 Touch 转鼠标或滚动；请分享单一主屏幕并允许“辅助功能”';
-  if (value.inputControl === 'windows-pointer') return '反控：Windows 原生 Touch；可配置 Mouse 转单点 Touch；窗口仅支持投屏';
+  if (value.inputControl === 'windows-pointer') return '反控：Windows 原生 Touch 和 Mouse；可配置触控手势转鼠标或 Mouse 转单点 Touch；窗口仅支持投屏';
   return 'Touchback：当前平台不支持反向控制';
 }
 
