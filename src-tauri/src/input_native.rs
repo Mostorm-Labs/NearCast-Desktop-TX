@@ -18,6 +18,10 @@ struct Owner {
     possible_touch: Vec<TouchRecord>,
 }
 static OWNER: Mutex<Option<Owner>> = Mutex::new(None);
+#[cfg(all(test,windows,feature="webview-input-test"))]
+pub fn hold_fixture_owner(ready:std::sync::mpsc::Sender<()>,release:std::sync::mpsc::Receiver<()>){
+    let _guard=OWNER.lock().unwrap();ready.send(()).unwrap();release.recv_timeout(std::time::Duration::from_secs(3)).unwrap();
+}
 #[cfg(windows)]
 static TOUCH_READY: Mutex<Option<bool>> = Mutex::new(None);
 
@@ -230,11 +234,7 @@ fn cleanup(owner: &mut Owner) -> Result<(), String> {
     {
         let mouse_cleanup = crate::windows_mouse::reset(&mut owner.windows_mouse);
         let touch_cleanup = if owner.possible_touch.is_empty() {
-            if !crate::pointer::reset_all() {
-                Err("native_touch_cleanup_unconfirmed".to_string())
-            } else {
-                Ok(())
-            }
+            crate::pointer::reset_all()
         } else {
             crate::pointer::cancel_possible(&owner.possible_touch)
                 .map(|()| owner.possible_touch.clear())
@@ -363,6 +363,10 @@ pub fn apply(
     geometry_revision: String,
     action: Action,
 ) -> Value {
+    #[cfg(windows)]
+    let _execution = crate::input_execution::start("apply");
+    #[cfg(windows)]
+    crate::input_execution::phase("owner_lock");
     let mut guard = match OWNER.lock() {
         Ok(owner) => owner,
         Err(_) => return failure("blocked", "native_owner_lock_poisoned"),
@@ -374,6 +378,8 @@ pub fn apply(
     if owner.revision != geometry_revision {
         return failure("rejected", "native_geometry_revision_mismatch");
     }
+    #[cfg(windows)]
+    crate::input_execution::phase("capture_geometry");
     let display = match input_geometry::current(&owner.revision, &owner.native_id) {
         Ok(display) => display,
         Err(error) => return failure("rejected", error),
@@ -510,8 +516,10 @@ fn apply_touch(owner: &mut Owner, display: &Display, records: Vec<TouchRecord>) 
             .collect::<Vec<_>>();
         if let Err(error) = crate::pointer::inject_batch(&convert(&preparation)) {
             owner.blocked = true;
-            owner.possible_touch = preparation;
-            return json!({"status":"unknown","submittedActions":0,"error":error});
+            if !error.unchanged {
+                owner.possible_touch = preparation;
+            }
+            return json!({"status":"unknown","submittedActions":0,"inputType":"touch","nativeApi":"InjectTouchInput","lastWin32Error":error.code,"error":error.to_string()});
         }
         submitted = 1;
     }
@@ -527,8 +535,10 @@ fn apply_touch(owner: &mut Owner, display: &Display, records: Vec<TouchRecord>) 
         .collect::<Vec<_>>();
     if let Err(error) = crate::pointer::inject_batch(&convert(&final_records)) {
         owner.blocked = true;
-        owner.possible_touch = records;
-        return json!({"status":if submitted>0{"partial"}else{"unknown"},"submittedActions":submitted,"error":error});
+        if !error.unchanged {
+            owner.possible_touch = records;
+        }
+        return json!({"status":if submitted>0{"partial"}else{"unknown"},"submittedActions":submitted,"inputType":"touch","nativeApi":"InjectTouchInput","lastWin32Error":error.code,"error":error.to_string()});
     }
     json!({"status":"submitted","submittedActions":submitted+1,"submittedRecords":records.len(),"inputType":"touch","nativeApi":"InjectTouchInput","pointerType":"PT_TOUCH"})
 }
@@ -692,6 +702,10 @@ fn apply_mouse(
 }
 
 pub fn release(owner_id: String, lease_id: Option<String>) -> Value {
+    #[cfg(windows)]
+    let _execution = crate::input_execution::start("release");
+    #[cfg(windows)]
+    crate::input_execution::phase("owner_lock");
     let mut guard = match OWNER.lock() {
         Ok(owner) => owner,
         Err(_) => return failure("blocked", "native_owner_lock_poisoned"),

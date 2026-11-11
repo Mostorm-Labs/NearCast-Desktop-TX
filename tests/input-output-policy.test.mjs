@@ -241,3 +241,14 @@ test('Windows Touch gesture conversion and Ctrl-wheel pinch keep the wire Touch 
   assert.equal(p.provider.snapshot().lastConversion.receivedType,'touch');
   assert.equal(p.provider.snapshot().lastConversion.outputType,'mouse');
 });
+
+test('native execution duration survives shared routing so queue waits are distinguishable from Win32 cost',async()=>{
+  const caps=structuredClone(windowsCaps);
+  const provider=createPlatformInputAdapter({os:'windows'},{invoke:async(name)=>name==='nearcast_input_probe'?caps:
+    name==='nearcast_input_prepare'?{status:'ready',leaseId:'lease'}:{status:'submitted',nativeDurationMs:7.5}});
+  await provider.probe();
+  const context={ownerId:'timing-owner',geometry:{...geometry.displays[0],revision:geometry.revision},binding:{sourceBindingId:'test-binding'}};
+  await provider.prepare(context,{acceptedInputTypes:['mouse'],mouse:caps.mouse});
+  const result=await provider.apply({inputType:'mouse',eventKind:0,buttons:0,modifiers:0,x:10,y:20},context);
+  assert.equal(result.nativeDurationMs,7.5);await provider.releaseOwned(context,'test');
+});

@@ -124,12 +124,13 @@ export class OutputPolicyAdapter {
     const owner=this.owners.get(context.ownerId);
     if(!owner)return{status:'rejected',error:'Output policy owner missing'};
     this.lastConversion={receivedType:action.inputType,outputType:outputType(owner.policy,action.inputType),mode:owner.policy[action.inputType],emittedActions:0,status:'pending'};
-    let submitted=0;
+    let submitted=0,nativeDurationMs=0;
     try{
       const actions=this.convert(action,owner,context);
       for(const converted of actions){
         const result=await this.native.apply(converted,context);
-        if(result.status!=='submitted'){this.lastConversion.status=result.status;return{...result,status:submitted?'partial':result.status,submittedActions:submitted+(result.submittedActions??0)};}
+        nativeDurationMs+=result.nativeDurationMs??0;
+        if(result.status!=='submitted'){this.lastConversion.status=result.status;return{...result,nativeDurationMs,status:submitted?'partial':result.status,submittedActions:submitted+(result.submittedActions??0)};}
         submitted+=result.submittedActions??1;this.lastConversion.emittedActions++;
       }
       if(action.inputType==='mouse'&&owner.policy.mouse==='native'){
@@ -142,7 +143,7 @@ export class OutputPolicyAdapter {
       }
       const active=owner.recognizer?.group||owner.gesture||action.inputType==='touch'&&owner.policy.touch==='native'&&action.records.some(r=>r.phase<2)||owner.buttons||owner.modifiers||owner.scrolling;
       owner.activeType=active?action.inputType:null;
-      this.lastConversion.status='submitted';return{status:'submitted',submittedActions:submitted};
+      this.lastConversion.status='submitted';return{status:'submitted',submittedActions:submitted,nativeDurationMs};
     }catch(error){this.lastConversion.status='rejected';return{status:submitted?'partial':'rejected',submittedActions:submitted,error:String(error.message??error)};}
   }
   async releaseOwned(context,reason){
@@ -151,6 +152,7 @@ export class OutputPolicyAdapter {
     return result;
   }
   owns(ownerId){return this.native.owns(ownerId);}
+  refreshExecution(){return this.native.refreshExecution?.();}
   gestureFeedback(){for(const owner of this.owners.values())if(owner.recognizer)return owner.recognizer.tick(this.now());return null;}
   async refreshGestureFeedback(){
     for(const [ownerId,owner]of this.owners)if(owner.recognizer)return this.native.showGestureFeedback?.(ownerId,owner.recognizer.tick(this.now()));

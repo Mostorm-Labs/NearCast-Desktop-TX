@@ -20,6 +20,12 @@ Mouse 能力：buttonsMask=31、modifierMask=15、allowChords=true、wheelUnits=
 - 清理失败保留状态并阻止下一 owner；Touch 清理失败仍尝试 Mouse 清理，反之亦然。
 - Touch/Mouse 活动手势不交叠；Mouse 仅持有修饰键或连续滚动时同样禁止 Touch 穿入。转换设置应用前撤销来源并释放旧 owner，成功后重新发布绑定。
 
+## 高频滚动与队列
+
+RX 手势控制直接产生 typed Mouse wheel 时，TX 保持原生输出。每包先校验完整合同、序列和滚动生命周期；在未提交队列中，仅把同 stream、单位、阶段、锚点、按钮和修饰键的连续增量相加。detent120 的 None 和连续滚动 Changed 可合并，Began/Ended/Cancelled、方向反转、按键或锚点变化均为边界。合并保留双轴总量，不丢弃滚动位移，检查 i32 及平台转换范围；零轴可累积，正负轴不相互抵消。
+
+250ms 队列期限及总容量保持。滚轮合并保留最早一包的入队时间，不能用持续新消息延长旧增量的寿命。普通帧无 ACK，stream 状态使用最后实际提交的 seqId。诊断 coalescedSamples 反映减少的本机调用，lastNativeExecutionMs 保留共享路由下全部原生执行耗时；控制诊断 DOM 最多约每 150ms 更新一次。
+
 ## 验证
 
 Rust 规划测试覆盖五键、组合、拖拽、滚轮方向、无坐标 cancel/modifiers、越界/非法形状拒绝、部分提交和失败 reset。JS 原生适配测试覆盖全部 Mouse 字段无损传递；Edge 集成覆盖真实 DataChannel 上 Touch→Mouse→Touch、帧序列、独立视频连续和诊断。测试使用 fixture 的原生桥接，不替代真实 RX 验收。

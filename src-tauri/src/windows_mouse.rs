@@ -152,6 +152,7 @@ fn execute_with(
     Ok(sent)
 }
 fn desktop() -> [f64; 4] {
+    crate::input_execution::phase("virtual_desktop");
     unsafe {
         [
             GetSystemMetrics(SM_XVIRTUALSCREEN) as f64,
@@ -162,6 +163,7 @@ fn desktop() -> [f64; 4] {
     }
 }
 fn send(inputs: &[INPUT]) -> (usize, u32) {
+    crate::input_execution::phase("send_input");
     unsafe {
         SetLastError(WIN32_ERROR(0));
         let sent = SendInput(inputs, std::mem::size_of::<INPUT>() as i32);
@@ -173,11 +175,13 @@ pub fn apply(
     action: Action,
     display: &Display,
 ) -> Result<usize, SubmissionError> {
+    crate::input_execution::phase("mouse_dpi");
     let _dpi = physical_coordinates().map_err(|error| SubmissionError {
         error,
         submitted: 0,
     })?;
     if action.kind == 1 {
+        crate::input_execution::phase("physical_buttons");
         let pressed = [
             (1, VK_LBUTTON),
             (2, VK_RBUTTON),
@@ -195,6 +199,7 @@ pub fn apply(
             });
         }
     }
+    crate::input_execution::phase("physical_modifiers");
     let plan = model::plan(
         *state,
         action,
@@ -209,6 +214,7 @@ pub fn apply(
     execute_with(state, &plan, desktop(), send)
 }
 pub fn reset(state: &mut State) -> Result<(), String> {
+    crate::input_execution::phase("mouse_reset");
     let _dpi = physical_coordinates()?;
     let plan = model::reset_plan(*state);
     execute_with(state, &plan, desktop(), send)

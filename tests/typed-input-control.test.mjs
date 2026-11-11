@@ -159,6 +159,21 @@ test('replacement control session cannot bypass a retired native owner awaiting 
   assert.equal(p.source().data.available,true);assert.equal(p.sender.diagnostics().cleanupPending,false);
 });
 
+test('retired input cleanup exposes its failure instead of the new closed engine empty state',async t=>{
+  let canRelease=false;
+  const p=await peer({provider:{releaseOwned:async()=>canRelease?{status:'released'}:{status:'blocked',error:'native_touch_uncertain_cleanup_failed:win32=87'}}});
+  t.after(()=>{canRelease=true;return p.sender.retryCleanup();});
+  await p.handshake();await p.bind();await p.sender.setCaptureTrack(p.track);await p.sender.setEnabled(true);
+  await p.sender.engine.open(openRequest(p.source().data.sourceBindingId),{sessionId:p.sender.server.sessionId});
+  const channel={...p.channel,send:value=>p.sent.push(value)};
+  await p.sender.attachControlChannel(channel,{authorized:true,mediaIdentity:{roomId:'room-1',userId:'sender-1',hostUserId:'receiver-1'}});
+  await turn();await turn();
+  const d=p.sender.diagnostics();assert.equal(d.cleanupPending,true);
+  assert.match(d.lastError.message,/win32=87/);assert.equal(d.retiredInputs[0].state,'cleanup_blocked');
+  assert.equal(d.retiredInputs[0].streamId,1);assert.equal(d.disabledReason,'NATIVE_CLEANUP_PENDING');
+  canRelease=true;await p.sender.retryCleanup();assert.deepEqual(p.sender.diagnostics().retiredInputs,[]);
+});
+
 test('capture mute releases held ownership without waiting for another network sample',async t=>{
   let releases=0;const p=await peer({provider:{releaseOwned:async()=>{releases++;return{status:'released'};}}});t.after(()=>p.sender.fence());
   const track=Object.assign(new EventTarget(),p.track,{muted:false});

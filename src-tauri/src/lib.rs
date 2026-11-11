@@ -12,6 +12,8 @@ mod display_binding;
 #[cfg(any(windows,test))]
 mod native_audio;
 mod input_native;
+#[cfg(windows)]
+mod input_execution;
 #[cfg(any(windows, test))]
 mod windows_mouse_model;
 #[cfg(windows)]
@@ -21,6 +23,8 @@ mod gesture_halo;
 mod input_native_tests;
 #[cfg(all(test,windows))]
 mod input_dispatch_tests;
+#[cfg(all(test,windows,feature="webview-input-test"))]
+mod input_webview_tests;
 mod macos_permissions;
 #[cfg(target_os = "macos")]
 mod macos_input;
@@ -163,73 +167,7 @@ async fn nearcast_code_display(app: AppHandle, instance: String, request: serde_
 }
 
 #[cfg(windows)]
-mod pointer {
-    use windows::Win32::UI::Input::Pointer::{InitializeTouchInjection, InjectTouchInput, POINTER_TOUCH_INFO, TOUCH_FEEDBACK_NONE, POINTER_FLAG_INCONTACT, POINTER_FLAG_INRANGE, POINTER_FLAG_DOWN, POINTER_FLAG_UPDATE, POINTER_FLAG_UP, POINTER_FLAG_CANCELED};
-    use windows::Win32::UI::WindowsAndMessaging::PT_TOUCH;
-    use windows::Win32::Foundation::POINT;
-    use std::sync::Mutex;
-    static ACTIVE: Mutex<Vec<(u32, POINT)>> = Mutex::new(Vec::new());
-
-    #[derive(Clone, Copy)]
-    pub struct Record { pub contact_id: u32, pub phase: u8, pub x: i32, pub y: i32 }
-
-    fn flags(phase: u8) -> Result<windows::Win32::UI::Input::Pointer::POINTER_FLAGS, String> {
-        Ok(match phase { 0 => POINTER_FLAG_DOWN | POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT, 1 => POINTER_FLAG_UPDATE | POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT, 2 => POINTER_FLAG_UP, 3 => POINTER_FLAG_CANCELED | POINTER_FLAG_UP, _ => return Err("invalid_pointer_phase".into()) })
-    }
-
-    pub fn initialize(max: u32) -> bool {
-        let okay = unsafe { InitializeTouchInjection(max, TOUCH_FEEDBACK_NONE).is_ok() };
-        if okay { if let Ok(mut active) = ACTIVE.lock() { active.clear(); } }
-        okay
-    }
-
-    pub fn active_points() -> Vec<(u32,POINT)> { ACTIVE.lock().map(|active|active.clone()).unwrap_or_default() }
-    pub fn reset_all() -> bool { reset(&active_points().iter().map(|(id,_)|*id).collect::<Vec<_>>()) }
-    pub fn cancel_possible(records: &[crate::input_native::TouchRecord]) -> Result<(),String> {
-        let infos=records.iter().map(|record|{let mut info=POINTER_TOUCH_INFO::default();info.pointerInfo.pointerType=PT_TOUCH;info.pointerInfo.pointerId=record.contact_id;info.pointerInfo.ptPixelLocation=POINT{x:record.x,y:record.y};info.pointerInfo.pointerFlags=POINTER_FLAG_CANCELED|POINTER_FLAG_UP;info}).collect::<Vec<_>>();
-        unsafe{InjectTouchInput(&infos)}.map_err(|error|format!("native_touch_uncertain_cleanup_failed:0x{:08X}",error.code().0 as u32))?;
-        ACTIVE.lock().map_err(|_|"windows_pointer_state_poisoned".to_string())?.clear();Ok(())
-    }
-
-    pub fn reset(ids: &[u32]) -> bool {
-        let contacts = match ACTIVE.lock() { Ok(active) => active.iter().filter(|item| ids.contains(&item.0)).copied().collect::<Vec<_>>(), Err(_) => return false };
-        if contacts.is_empty() { return true; }
-        let records = contacts.into_iter().map(|(contact_id, point)| Record {contact_id, phase: 3, x: point.x, y: point.y}).collect::<Vec<_>>();
-        inject_batch(&records).is_ok()
-    }
-
-    pub fn inject_batch(records: &[Record]) -> Result<(), String> {
-        if records.is_empty() { return Ok(()); }
-        let current = ACTIVE.lock().map_err(|_| "windows_pointer_state_poisoned".to_string())?.clone();
-        let mut points = current.iter().copied().collect::<std::collections::BTreeMap<_, _>>();
-        let mut phases = std::collections::BTreeMap::new();
-        for record in records {
-            let flag = flags(record.phase)?;
-            let previous = points.get(&record.contact_id).copied();
-            let point = match record.phase {
-                0 => { if previous.is_some() { return Err("pointer_contact_already_active".into()); } POINT {x: record.x, y: record.y} },
-                1 => { if previous.is_none() { return Err("pointer_contact_not_active".into()); } POINT {x: record.x, y: record.y} },
-                2 | 3 => previous.ok_or("pointer_contact_not_active")?,
-                _ => unreachable!(),
-            };
-            phases.insert(record.contact_id, (flag, point.x, point.y));
-            // Keep terminal contacts in the frame so InjectTouchInput receives
-            // their final coordinates together with every other active contact.
-            // They are removed from ACTIVE only after the native call succeeds.
-            points.insert(record.contact_id, point);
-        }
-        let mut infos = Vec::with_capacity(points.len());
-        for (id, point) in points.iter() {
-            let (pointer_flags, x, y) = phases.get(id).copied().unwrap_or((POINTER_FLAG_UPDATE | POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT, point.x, point.y));
-            let mut info = POINTER_TOUCH_INFO::default(); info.pointerInfo.pointerType = PT_TOUCH; info.pointerInfo.pointerId = *id; info.pointerInfo.ptPixelLocation = POINT {x, y}; info.touchMask = 0; info.pointerInfo.pointerFlags = pointer_flags; infos.push(info);
-        }
-        if let Err(error) = unsafe { InjectTouchInput(&infos) } { return Err(format!("windows_inject_touch_input_failed:0x{:08X}", error.code().0 as u32)); }
-        let mut active = ACTIVE.lock().map_err(|_| "windows_pointer_state_poisoned".to_string())?;
-        for record in records { if record.phase >= 2 { points.remove(&record.contact_id); } }
-        *active = points.into_iter().collect();
-        Ok(())
-    }
-}
+mod pointer;
 
 #[tauri::command]
 fn nearcast_macos_permissions() -> Result<serde_json::Value, String> {
@@ -311,9 +249,26 @@ fn nearcast_input_apply(owner_id:String,lease_id:String,geometry_revision:String
 #[tauri::command]
 fn nearcast_input_release(owner_id:String,lease_id:Option<String>)->serde_json::Value{input_native::release(owner_id,lease_id)}
 
+#[cfg(windows)]
+#[tauri::command]
+async fn nearcast_input_feedback(owner_id:String,lease_id:String,feedback:Option<input_native::GestureFeedback>)->Result<serde_json::Value,String>{
+    native_input_task(move||input_native::feedback(owner_id,lease_id,feedback)).await
+}
+#[cfg(not(windows))]
 #[tauri::command]
 fn nearcast_input_feedback(owner_id:String,lease_id:String,feedback:Option<input_native::GestureFeedback>)->serde_json::Value{
     input_native::feedback(owner_id,lease_id,feedback)
+}
+#[tauri::command]
+fn nearcast_input_execution_status()->serde_json::Value{
+    #[cfg(windows)]{return input_execution::snapshot();}
+    #[cfg(not(windows))]{serde_json::Value::Null}
+}
+#[cfg(windows)]
+fn close_after_input_cleanup(window:tauri::Window){
+    tauri::async_runtime::spawn_blocking(move||{
+        input_native::shutdown();display_binding::shutdown();native_audio::shutdown();let _=window.destroy();
+    });
 }
 
 #[tauri::command]
@@ -366,14 +321,22 @@ pub fn run() {
         .manage(MdnsState(Mutex::new(None)))
         .manage(TrustState::default())
         .setup(|app| { let _=diagnostics::initialize(app.handle());Ok(()) })
-        .on_window_event(|_, event| {
-            if matches!(event,tauri::WindowEvent::CloseRequested{..}|tauri::WindowEvent::Destroyed){input_native::shutdown();display_binding::shutdown();#[cfg(windows)] native_audio::shutdown();}
+        .on_window_event(|window, event| {
+            #[cfg(windows)]
+            if let tauri::WindowEvent::CloseRequested{api,..}=event{
+                // Keep the window message loop alive while a worker releases
+                // injected input. SendInput may be targeting this very window.
+                api.prevent_close();
+                static CLOSING:AtomicBool=AtomicBool::new(false);
+                if !CLOSING.swap(true,Ordering::AcqRel){close_after_input_cleanup(window.clone());}
+            }
+            #[cfg(not(windows))]
+            if matches!(event,tauri::WindowEvent::CloseRequested{..}|tauri::WindowEvent::Destroyed){input_native::shutdown();display_binding::shutdown();}
             #[cfg(target_os = "macos")]
             if matches!(event, tauri::WindowEvent::Destroyed) { let _ = macos_input::reset(); }
-            #[cfg(not(target_os = "macos"))]
-            let _ = event;
+            let _=(window,event);
         })
-        .invoke_handler(tauri::generate_handler![nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_input_feedback, nearcast_system_audio_start, nearcast_audio_read, nearcast_audio_stop, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info, nearcast_display_binding_begin, nearcast_display_binding_confirm, nearcast_display_binding_cancel, nearcast_display_binding_release, nearcast_diagnostics_record, nearcast_diagnostics_export, nearcast_update_initialize, nearcast_update_check, nearcast_update_download, nearcast_update_install])
+        .invoke_handler(tauri::generate_handler![nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_input_feedback, nearcast_input_execution_status, nearcast_system_audio_start, nearcast_audio_read, nearcast_audio_stop, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info, nearcast_display_binding_begin, nearcast_display_binding_confirm, nearcast_display_binding_cancel, nearcast_display_binding_release, nearcast_diagnostics_record, nearcast_diagnostics_export, nearcast_update_initialize, nearcast_update_check, nearcast_update_download, nearcast_update_install])
         .build(tauri::generate_context!())
         .expect("error while building NearCast Desktop TX")
         .run(|_, event| {

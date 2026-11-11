@@ -220,6 +220,63 @@ test('Mouse modifier changes and button transitions remain ordered barriers betw
   assert.equal(engine.snapshot().mouseButtons,0);
 });
 
+test('continuous Mouse wheel backlog accumulates every delta without crossing Began, Ended, modifier or direction barriers',async t=>{
+  let now=0,finish,hold=true;
+  const {engine,calls,provider}=await fixture({apply:()=>hold?new Promise(resolve=>{finish=resolve;}):Promise.resolve({status:'submitted'})},{now:()=>now,maxQueuedSamples:8});
+  t.after(async()=>{provider.apply=async()=>({status:'submitted'});finish?.({status:'submitted'});await engine.close();});
+  await engine.open(request('wheel-burst'),{sessionId:'AUTH-SID'});
+  const wheel=(seqId,phase,x=64,y=-128,modifiers=0)=>({streamId:7,seqId,cursor:seqId,inputType:'mouse',dataBytes:22,eventKind:2,buttons:0,modifiers,x:10000,y:20000,wheelUnit:1,wheelPhase:phase,wheelX:x,wheelY:y});
+  const pending=[engine.accept(wheel(1,1))];while(!finish)await delay(0);
+  for(let seq=2;seq<=81;seq++){now=seq;pending.push(engine.accept(wheel(seq,2,seq%2?0:64)).catch(error=>({error})));}
+  pending.push(engine.accept(wheel(82,2,-64,128)).catch(error=>({error})));
+  pending.push(engine.accept(wheel(83,2,-64,128,2)).catch(error=>({error})));
+  pending.push(engine.accept(wheel(84,3,0,0,2)).catch(error=>({error})));
+  assert.equal(engine.snapshot().queueLength,4,'80 queued Changed frames should become one additive action');
+  hold=false;now=120;finish({status:'submitted'});
+  assert.ok((await Promise.all(pending)).every(result=>!result.error));
+  const actions=calls.filter(([name])=>name==='apply').map(([,a])=>a);
+  assert.deepEqual(actions.map(a=>[a.wheelPhase,a.wheelX,a.wheelY,a.modifiers]),[[1,64,-128,0],[2,2560,-10240,0],[2,-64,128,0],[2,-64,128,2],[3,0,0,2]]);
+  assert.equal(engine.streamState(7,'AUTH-SID').lastSeqId,84);assert.equal(engine.snapshot().scrollActive,false);
+  assert.equal(engine.snapshot().coalescedSamples,79);assert.equal(engine.state,'active');
+});
+
+test('wheel coalescing preserves the oldest delta age and cannot extend the stale-input budget',async t=>{
+  let now=0,finish;
+  const {engine,provider}=await fixture({apply:()=>new Promise(resolve=>{finish=resolve;})},{now:()=>now,maxQueueAgeMs:50});
+  t.after(async()=>{provider.apply=async()=>({status:'submitted'});finish?.({status:'submitted'});await engine.close();});
+  await engine.open(request('wheel-age'),{sessionId:'AUTH-SID'});
+  const wheel=seqId=>({streamId:7,seqId,cursor:seqId,inputType:'mouse',dataBytes:22,eventKind:2,buttons:0,modifiers:0,x:100,y:200,wheelUnit:0,wheelPhase:0,wheelX:0,wheelY:120});
+  const first=engine.accept(wheel(1));while(!finish)await delay(0);
+  const queued=engine.accept(wheel(2)).catch(error=>error);now=40;const next=engine.accept(wheel(3)).catch(error=>error);
+  now=60;provider.apply=async()=>({status:'submitted'});finish({status:'submitted'});
+  await first;await queued;assert.match((await next).message,/Input queue age/);assert.equal(engine.state,'closed');
+});
+
+test('a sequence gap is rejected before wheel aggregation and releases the in-flight owner',async t=>{
+  let finish;const {engine,provider}=await fixture({apply:()=>new Promise(resolve=>{finish=resolve;})});
+  t.after(async()=>{provider.apply=async()=>({status:'submitted'});finish?.({status:'submitted'});await engine.close();});
+  await engine.open(request('wheel-gap'),{sessionId:'AUTH-SID'});
+  const wheel=seqId=>({streamId:7,seqId,cursor:seqId,inputType:'mouse',dataBytes:22,eventKind:2,buttons:0,modifiers:0,x:100,y:200,wheelUnit:0,wheelPhase:0,wheelX:0,wheelY:120});
+  const first=engine.accept(wheel(1));while(!finish)await delay(0);
+  const queued=engine.accept(wheel(2));const gap=engine.accept(wheel(4)).catch(error=>error);
+  assert.equal(engine.state,'closing');finish({status:'submitted'});await first;await queued;
+  assert.match((await gap).message,/sequence/);assert.equal(engine.state,'closed');
+});
+
+test('detent wheel aggregation keeps totals, anchors, cancel and overflow boundaries',async t=>{
+  let finish,hold=true;const {engine,calls,provider}=await fixture({apply:()=>hold?new Promise(resolve=>{finish=resolve;}):Promise.resolve({status:'submitted'})});
+  t.after(async()=>{provider.apply=async()=>({status:'submitted'});finish?.({status:'submitted'});await engine.close();});
+  await engine.open(request('detents'),{sessionId:'AUTH-SID'});
+  const wheel=(seqId,delta,x=100)=>({streamId:7,seqId,cursor:seqId,inputType:'mouse',dataBytes:22,eventKind:2,buttons:0,modifiers:0,x,y:200,wheelUnit:0,wheelPhase:0,wheelX:0,wheelY:delta});
+  const pending=[engine.accept(wheel(1,120))];while(!finish)await delay(0);
+  for(const [index,delta]of [120,240,-120,2147483640,120].entries())pending.push(engine.accept(wheel(index+2,delta)));
+  pending.push(engine.accept(wheel(7,120,101)));
+  pending.push(engine.accept({streamId:7,seqId:8,cursor:8,inputType:'mouse',dataBytes:2,eventKind:3}));
+  hold=false;finish({status:'submitted'});await Promise.all(pending);
+  assert.deepEqual(calls.filter(([name])=>name==='apply').map(([,a])=>a.eventKind===2?[a.wheelY,a.x]:['cancel']),[[120,3],[360,3],[-120,3],[2147483640,3],[120,3],[120,3],['cancel']]);
+  assert.equal(engine.snapshot().mouseButtons,0);
+});
+
 
 test('Touch feedback reports received physical points before native completion and clears on close',async t=>{
   const events=[];let finish;

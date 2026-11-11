@@ -3,7 +3,13 @@ import {check,integer} from './frame-codec.mjs';
 // This adapter receives validated native actions, never network bytes. Native
 // leases and ID pools stay local and are never included in product descriptors.
 export class NativeInputAdapter{
-  constructor({invoke}={}){if(typeof invoke!=='function')throw new TypeError('Tauri invoke required');this.invoke=invoke;this.owners=new Map();this.lastSubmission=null;}
+  constructor({invoke}={}){if(typeof invoke!=='function')throw new TypeError('Tauri invoke required');this.invoke=invoke;this.owners=new Map();this.lastSubmission=null;this.lastCleanup=null;this.nativeExecution=null;this.executionPending=false;}
+  async refreshExecution(){
+    if(this.executionPending)return;
+    this.executionPending=true;
+    try{this.nativeExecution=await this.invoke('nearcast_input_execution_status');}catch{/* Diagnostics cannot own the input chain. */}
+    finally{this.executionPending=false;}
+  }
   async probe(){
     const result=await this.invoke('nearcast_input_probe');
     check(result&&Array.isArray(result.inputTypes)&&result.inputTypes.every(type=>['touch','mouse'].includes(type)),'Invalid native capability result');
@@ -42,10 +48,12 @@ export class NativeInputAdapter{
       }
       const result=await this.invoke('nearcast_input_apply',{ownerId:context.ownerId,leaseId:owner.leaseId,geometryRevision:context.geometry.revision,action:nativeAction});
       this.lastSubmission={inputType:action.inputType,nativeInputType:result?.inputType??null,nativeApi:result?.nativeApi??null,pointerType:result?.pointerType??null,status:result?.status??'unknown',
+        ...(result?.error?{error:String(result.error)}:{}),...(Number.isInteger(result?.lastWin32Error)?{lastWin32Error:result.lastWin32Error}:{}),
+        ...(Number.isFinite(result?.nativeDurationMs)?{nativeDurationMs:result.nativeDurationMs}:{}),
         ...(action.inputType==='touch'?{records:nativeAction.records.slice(0,10).map(record=>({...record}))}:{eventKind:action.eventKind})};
       if(result?.status==='submitted'){if(next)owner.slots=next;return result;}
       return{status:['partial','unknown','rejected'].includes(result?.status)?result.status:'unknown',submittedActions:result?.submittedActions??0,error:result?.error??'Native submission unconfirmed'};
-    }catch(error){this.lastSubmission.status='unknown';return{status:'unknown',error:String(error?.message??error)};}
+    }catch(error){this.lastSubmission.status='unknown';this.lastSubmission.error=String(error?.message??error);return{status:'unknown',error:this.lastSubmission.error};}
   }
   async releaseOwned(context,reason){
     const owner=this.owners.get(context.ownerId);
@@ -53,14 +61,15 @@ export class NativeInputAdapter{
       // A prepare response can be lost after acquiring a native owner. Always
       // ask native to release this exact random owner, even without a lease copy.
       const result=await this.invoke('nearcast_input_release',{ownerId:context.ownerId,leaseId:owner?.leaseId??null,reason});
+      this.lastCleanup={status:result?.status??'unknown',...(result?.error?{error:String(result.error)}:{})};
       if(result?.status==='released'){this.owners.delete(context.ownerId);return result;}
       return{status:'blocked',error:result?.error??'Native cleanup unconfirmed'};
-    }catch(error){return{status:'blocked',error:String(error?.message??error)};}
+    }catch(error){this.lastCleanup={status:'blocked',error:String(error?.message??error)};return this.lastCleanup;}
   }
   async showGestureFeedback(ownerId,feedback){
     const owner=this.owners.get(ownerId);if(!owner)return;
     return this.invoke('nearcast_input_feedback',{ownerId,leaseId:owner.leaseId,feedback});
   }
-  snapshot(){return{owners:this.owners.size,activeContacts:[...this.owners.values()].reduce((sum,owner)=>sum+owner.slots.size,0),lastSubmission:structuredClone(this.lastSubmission)};}
+  snapshot(){return{owners:this.owners.size,activeContacts:[...this.owners.values()].reduce((sum,owner)=>sum+owner.slots.size,0),lastSubmission:structuredClone(this.lastSubmission),lastCleanup:structuredClone(this.lastCleanup),nativeExecution:structuredClone(this.nativeExecution)};}
   owns(ownerId){return this.owners.has(ownerId);}
 }

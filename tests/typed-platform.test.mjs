@@ -7,6 +7,6 @@ test('all platforms obtain actual typed capabilities from the guarded native pro
       ...(os==='windows'?{touch:{maxContacts:10}}:os==='macos'?{mouse:{buttonsMask:7,modifierMask:15,allowChords:false,wheelUnits:['regionQ16_16'],continuousScroll:true}}:{})};
     const provider=createPlatformInputAdapter({os},{invoke:async command=>{calls.push(command);return capabilities;}});
     assert.deepEqual(await provider.probe(),{...capabilities,nativeTypes:capabilities.inputTypes});assert.deepEqual(calls,['nearcast_input_probe']);
-    assert.deepEqual(provider.snapshot(),{owners:0,activeContacts:0,lastSubmission:null,outputPolicy:{touch:'native',mouse:'native'},nativeInputTypes:capabilities.inputTypes,lastConversion:null});
+    assert.deepEqual(provider.snapshot(),{owners:0,activeContacts:0,lastSubmission:null,lastCleanup:null,nativeExecution:null,outputPolicy:{touch:'native',mouse:'native'},nativeInputTypes:capabilities.inputTypes,lastConversion:null});
   }
 });

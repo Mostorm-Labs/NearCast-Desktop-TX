@@ -71,7 +71,8 @@ export class WebCastTouchbackSender{
         const sample=decodeInputPayload(frame.payload,{frameBytes:frame.frameBytes,maxDataBytes:this.engine.stream?.maxDataBytes??4096});
         this.stats[sample.inputType==='touch'?'receivedTouchSamples':'receivedMouseSamples']++;
         this.stats.lastReceivedInput={streamId:sample.streamId,seqId:sample.seqId,cursor:sample.cursor,inputType:sample.inputType,typeByte:INPUT_WIRE.inputTypes[sample.inputType],
-          ...(sample.inputType==='touch'?{recordCount:sample.records.length,records:sample.records.slice(0,10).map(record=>({...record}))}:{eventKind:sample.eventKind})};
+          ...(sample.inputType==='touch'?{recordCount:sample.records.length,records:sample.records.slice(0,10).map(record=>({...record}))}:
+            {eventKind:sample.eventKind,...Object.fromEntries(['buttons','modifiers','wheelUnit','wheelPhase','wheelX','wheelY'].filter(key=>sample[key]!==undefined).map(key=>[key,sample[key]]))})};
         return this.engine.accept(sample);
       },
     });
@@ -183,9 +184,13 @@ export class WebCastTouchbackSender{
   }
   diagnostics(){
     const state=this.engine?.snapshot()??{};
+    const retiredInputs=[...this.retiring].map(engine=>engine.snapshot());
+    const cleanupPending=Boolean(state.cleanupPending||retiredInputs.length);
+    const cleanupError=retiredInputs.map(input=>input.lastError).find(Boolean);
     return{controlChannelReady:this.channel?.readyState==='open',appReady:this.server?.ready===true,nativeReady:this.lastProbe?.nativeReady===true,
       sourceReady:Boolean(this.source),localEnabled:this.enabled,receiverEnabled:null,nativeInputTypes:[...(this.lastProbe?.nativeTypes??this.lastProbe?.inputTypes??[])],
-      disabledReason:this.source?null:this.reason,detail:this.detail,...state,cleanupPending:Boolean(state.cleanupPending||this.retiring.size),injectionCount:state.submittedRecords??0,nativeInput:this.provider.snapshot?.()??null};
+      disabledReason:cleanupPending?'NATIVE_CLEANUP_PENDING':this.source?null:this.reason,detail:this.detail,...state,lastError:state.lastError??cleanupError??null,
+      retiredInputs,cleanupPending,injectionCount:state.submittedRecords??0,nativeInput:this.provider.snapshot?.()??null};
   }
   controlDiagnostics(){return structuredClone({...this.stats,...this.diagnostics()});}
   snapshot(){return this.diagnostics();}

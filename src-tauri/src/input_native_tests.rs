@@ -170,8 +170,16 @@ fn typed_native_touch_mouse_and_owned_cleanup_reach_our_window() {
         Ordering::SeqCst,
     );
     unsafe {
+        use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+        let caller = GetCurrentThreadId();
+        let foreground = GetWindowThreadProcessId(GetForegroundWindow(), None);
+        let attached =
+            caller != foreground && AttachThreadInput(caller, foreground, true).as_bool();
         let _ = SetForegroundWindow(hwnd);
         let _ = SetFocus(Some(hwnd));
+        if attached {
+            let _ = AttachThreadInput(caller, foreground, false);
+        }
     }
     pump(hwnd);
     assert_eq!(unsafe { GetForegroundWindow() }, hwnd);
@@ -206,6 +214,74 @@ fn typed_native_touch_mouse_and_owned_cleanup_reach_our_window() {
     apply(0);
     apply(1);
     apply(2);
+    // Reproduce the reported complete sample: an active contact moves while a
+    // second contact first goes Down, then both move and leave together.
+    let touch_batch = |records: serde_json::Value| {
+        let result = input_native::apply(
+            "owned-touch-test".into(),
+            lease.clone(),
+            binding["revision"].as_str().unwrap().into(),
+            serde_json::from_value(json!({"inputType":"touch","records":records})).unwrap(),
+        );
+        assert_eq!(
+            result["status"], "submitted",
+            "two-contact sample: {result}"
+        );
+        pump(hwnd);
+    };
+    touch_batch(json!([{ "contactId":1,"phase":0,"x":point.x,"y":point.y }]));
+    touch_batch(
+        json!([{ "contactId":1,"phase":1,"x":point.x+4,"y":point.y+4 },{ "contactId":2,"phase":0,"x":point.x+30,"y":point.y+30 }]),
+    );
+    touch_batch(
+        json!([{ "contactId":1,"phase":1,"x":point.x+8,"y":point.y+8 },{ "contactId":2,"phase":1,"x":point.x+34,"y":point.y+34 }]),
+    );
+    touch_batch(
+        json!([{ "contactId":1,"phase":2,"x":point.x+12,"y":point.y+12 },{ "contactId":2,"phase":2,"x":point.x+38,"y":point.y+38 }]),
+    );
+    touch_batch(json!([{ "contactId":1,"phase":0,"x":point.x,"y":point.y }]));
+    let uncertain = vec![
+        input_native::TouchRecord {
+            contact_id: 1,
+            phase: 1,
+            x: point.x + 4,
+            y: point.y + 4,
+        },
+        input_native::TouchRecord {
+            contact_id: 2,
+            phase: 0,
+            x: point.x + 30,
+            y: point.y + 30,
+        },
+    ];
+    // Force the exact exhausted ERROR_NOT_READY path without sending this new
+    // Down to Windows. Production release must not Up the unsubmitted second ID.
+    crate::pointer::fail_next_frame_not_ready();
+    let failed = input_native::apply(
+        "owned-touch-test".into(),
+        lease.clone(),
+        binding["revision"].as_str().unwrap().into(),
+        input_native::Action::Touch { records: uncertain },
+    );
+    assert_eq!(failed["status"], "unknown");
+    assert_eq!(failed["lastWin32Error"], 21);
+    let cleanup = input_native::release("owned-touch-test".into(), Some(lease.clone()));
+    pump(hwnd);
+    assert!(
+        cleanup["status"] == "released",
+        "cancel must release confirmed point after a definitely unsubmitted second Down"
+    );
+    assert!(crate::pointer::active_points().is_empty());
+    let next = input_native::prepare(
+        "owned-touch-test".into(),
+        "capture-test".into(),
+        binding["revision"].as_str().unwrap().into(),
+        binding["nativeId"].as_str().unwrap().into(),
+        vec!["touch".into(), "mouse".into()],
+        10,
+    );
+    assert_eq!(next["status"], "ready");
+    let lease = next["leaseId"].as_str().unwrap().to_owned();
     // Ensure all Mouse fields enter through the production IPC deserializer,
     // lease checks and calibrated secondary-monitor binding.
     let mouse = |action: serde_json::Value| {
@@ -321,8 +397,8 @@ fn typed_native_touch_mouse_and_owned_cleanup_reach_our_window() {
             0
         );
     }
-    assert_eq!(DOWN.load(Ordering::SeqCst), 2);
-    assert_eq!(UP.load(Ordering::SeqCst), 2);
+    assert_eq!(DOWN.load(Ordering::SeqCst), 5);
+    assert_eq!(UP.load(Ordering::SeqCst), 5);
     eprintln!(
         "typed native Touch + Mouse PASS: calibrated secondary pixel, five buttons, Ctrl drag, detent/continuous wheel, overlap rejection, cancel and source-revocation cleanup"
     );

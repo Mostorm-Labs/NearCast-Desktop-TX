@@ -94,3 +94,18 @@ test('native adapter preserves every explicit Mouse action including wheel field
   assert.equal(adapter.snapshot().activeContacts,0);
   await adapter.releaseOwned(owner,'source changed');assert.equal(calls.at(-1)[1].ownerId,owner.ownerId);
 });
+
+test('native failure and failed cleanup retain the exact error until the same owner is released',async()=>{
+  let released=false;
+  const adapter=new NativeInputAdapter({invoke:async(name)=>name==='nearcast_input_prepare'?{status:'ready',leaseId:'secret'}:
+    name==='nearcast_input_apply'?{status:'unknown',inputType:'touch',nativeApi:'InjectTouchInput',lastWin32Error:21,error:'windows_inject_touch_input_failed:win32=21'}:
+    released?{status:'released'}:{status:'blocked',error:'native_touch_uncertain_cleanup_failed:win32=87'}});
+  await adapter.prepare(owner,{acceptedInputTypes:['touch'],touch:{maxContacts:10}});
+  await adapter.apply({inputType:'touch',records:[{contactId:1,phase:0,x:10,y:20}]},owner);
+  assert.match(adapter.snapshot().lastSubmission.error,/win32=21/);
+  assert.equal(adapter.snapshot().lastSubmission.lastWin32Error,21);
+  await adapter.releaseOwned(owner,'close');
+  assert.match(adapter.snapshot().lastCleanup.error,/win32=87/);assert.equal(adapter.snapshot().owners,1);
+  released=true;await adapter.releaseOwned(owner,'retry');assert.equal(adapter.snapshot().lastCleanup.status,'released');
+  assert.equal(JSON.stringify(adapter.snapshot()).includes('secret'),false);
+});

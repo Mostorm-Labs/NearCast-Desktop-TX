@@ -150,11 +150,18 @@ const renderControlDiagnostics = () => {
   const audio=captureProvider?.diagnostics()?.audio;
   if(systemAudioStatus)systemAudioStatus.textContent=audio?.error?`系统声音不可用，视频继续：${audio.error}`:audio?.state==='capturing'?'正在分享默认播放设备的系统声音':captureProvider?.current?'本次分享没有音频轨道':'开始分享后采集系统声音';
 };
+// Full JSON diagnostics are observability, not a per-input rendering task.
+// Limit DOM/stringification work while the high-rate input queue drains.
+let controlDiagnosticsTimer=null;
+const scheduleControlDiagnostics=()=>{
+  if(controlDiagnosticsTimer!==null)return;
+  controlDiagnosticsTimer=setTimeout(()=>{controlDiagnosticsTimer=null;renderControlDiagnostics();},150);
+};
 let mediaStatsPending=false;
 setInterval(async()=>{
   if(mediaStatsPending)return;
   mediaStatsPending=true;
-  try{await client?.refreshMediaDiagnostics?.();}catch{/* Statistics cannot stop media. */}
+  try{await Promise.all([client?.refreshMediaDiagnostics?.(),inputProvider.refreshExecution?.()]);}catch{/* Statistics cannot stop media. */}
   finally{mediaStatsPending=false;renderControlDiagnostics();}
 },1000);
 
@@ -230,7 +237,7 @@ const buildTouchback = () => new WebCastTouchbackSender({
     inputReconnect.disabled = state.cleanupPending || !['connected','sharing'].includes(currentStatus);
     inputPolicyApply.disabled=policyPending||state.cleanupPending;
     touchbackStatus.textContent = touchbackSummary(platformInfo ?? {});
-    renderControlDiagnostics();
+    scheduleControlDiagnostics();
   },
 });
 touchback = buildTouchback();

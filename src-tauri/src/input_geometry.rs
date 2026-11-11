@@ -44,7 +44,9 @@ pub fn snapshot() -> Result<Geometry, String> {
 pub fn current(revision: &str, native_id: &str) -> Result<Display, String> {
     let geometry = snapshot()?;
     if native_id.starts_with("screen-binding:") {
-        return crate::display_binding::current(native_id,revision,&geometry);
+        #[cfg(windows)]
+        crate::input_execution::phase("display_binding");
+        return crate::display_binding::current(native_id, revision, &geometry);
     }
     if geometry.revision != revision || geometry.displays.len() != 1 {
         return Err("input_geometry_changed_or_unproven".into());
@@ -97,6 +99,7 @@ fn enumerate() -> Result<Vec<Display>, String> {
         let displays = &mut *(data.0 as *mut Vec<Display>);
         let mut info = MONITORINFOEXW::default();
         info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+        crate::input_execution::phase("get_monitor_info");
         if !GetMonitorInfoW(monitor, &mut info.monitorInfo).as_bool() {
             return BOOL(0);
         }
@@ -108,6 +111,7 @@ fn enumerate() -> Result<Vec<Display>, String> {
         let name = String::from_utf16_lossy(&info.szDevice[..end]);
         let mut mode = DEVMODEW::default();
         mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+        crate::input_execution::phase("enum_display_settings");
         if !EnumDisplaySettingsW(
             PCWSTR(info.szDevice.as_ptr()),
             ENUM_CURRENT_SETTINGS,
@@ -142,6 +146,7 @@ fn enumerate() -> Result<Vec<Display>, String> {
         BOOL(1)
     }
     let mut displays = Vec::new();
+    crate::input_execution::phase("enum_display_monitors");
     if !unsafe {
         EnumDisplayMonitors(
             None,

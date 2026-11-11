@@ -115,7 +115,7 @@ try {
           if(message.data.available&&state.armInput&&state.lastInputBinding!==message.data.sourceBindingId){
             state.lastInputBinding=message.data.sourceBindingId;const id=++state.inputRpcId;
             const inputTypes=state.requestedInputTypes??['touch'];
-            inputChannel.send(frameCodec.encodeStandardFrame(sessionCodec.rpcPayload({sid:state.inputSid,op:7,d:{id,method:'input.openStream',params:{controlVersion:1,runtimeInstanceId:'rx-runtime-1',target:{sessionId:'share-1',sessionGeneration:'1',slotId:'0',bindingGeneration:'1',lifecycleGeneration:'1'},sourceBindingId:message.data.sourceBindingId,streamKind:'touchback',format:'input-sample-v1',inputTypes,maxDataBytes:4096,...(inputTypes.includes('touch')?{touch:{maxContacts:10}}:{}),...(inputTypes.includes('mouse')?{mouse:{buttonsMask:31,modifierMask:15,allowChords:true,wheelUnits:['detent120'],continuousScroll:false}}:{}),commandId:`open-${id}`}}}),{payloadType:2}));
+            inputChannel.send(frameCodec.encodeStandardFrame(sessionCodec.rpcPayload({sid:state.inputSid,op:7,d:{id,method:'input.openStream',params:{controlVersion:1,runtimeInstanceId:'rx-runtime-1',target:{sessionId:'share-1',sessionGeneration:'1',slotId:'0',bindingGeneration:'1',lifecycleGeneration:'1'},sourceBindingId:message.data.sourceBindingId,streamKind:'touchback',format:'input-sample-v1',inputTypes,maxDataBytes:4096,...(inputTypes.includes('touch')?{touch:{maxContacts:10}}:{}),...(inputTypes.includes('mouse')?{mouse:{buttonsMask:31,modifierMask:15,allowChords:true,wheelUnits:['detent120','regionQ16_16'],continuousScroll:true}}:{}),commandId:`open-${id}`}}}),{payloadType:2}));
           }
         }
       };
@@ -209,10 +209,15 @@ try {
       }
       if(command==='nearcast_input_probe'){
         const width=state.testCalibration?1920:320,height=state.testCalibration?1080:180;
-        return{nativeReady:true,inputTypes:['touch','mouse'],maxDataBytes:4096,touch:{maxContacts:10},mouse:{buttonsMask:31,modifierMask:15,allowChords:true,wheelUnits:['detent120'],continuousScroll:false},geometry:{browserBinding:state.browserBinding,revision:state.displayRevision??'single-display',displays:Array.from({length:state.displayCount??1},(_,i)=>({nativeId:'DISPLAY'+i,primary:i===0,units:'physical-pixels',rotation:0,region:{x:i===0?0:-width,y:0,width,height},captureWidth:width,captureHeight:height}))}};
+        return{nativeReady:true,inputTypes:['touch','mouse'],maxDataBytes:4096,touch:{maxContacts:10},mouse:{buttonsMask:31,modifierMask:15,allowChords:true,wheelUnits:['detent120','regionQ16_16'],continuousScroll:true},geometry:{browserBinding:state.browserBinding,revision:state.displayRevision??'single-display',displays:Array.from({length:state.displayCount??1},(_,i)=>({nativeId:'DISPLAY'+i,primary:i===0,units:'physical-pixels',rotation:0,region:{x:i===0?0:-width,y:0,width,height},captureWidth:width,captureHeight:height}))}};
       }
       if(command==='nearcast_input_prepare'){state.nativeOwner=args;return{status:'ready',leaseId:'local-test-lease'};}
-      if(command==='nearcast_input_apply'){if(state.nativeApplyDelayMs)await new Promise(resolve=>setTimeout(resolve,state.nativeApplyDelayMs));state.lastNativeAction=args.action;state.nativeApplyCalls=(state.nativeApplyCalls??0)+1;return{status:'submitted',nativeDurationMs:1,inputType:args.action.inputType,nativeApi:args.action.inputType==='mouse'?'SendInput':'InjectTouchInput'};}
+      if(command==='nearcast_input_apply'){
+        if(state.nativeApplyDelayMs)await new Promise(resolve=>setTimeout(resolve,state.nativeApplyDelayMs));
+        state.lastNativeAction=args.action;state.nativeApplyCalls=(state.nativeApplyCalls??0)+1;
+        if(args.action.inputType==='mouse'&&args.action.eventKind===2){state.wheelTotalX=(state.wheelTotalX??0)+args.action.wheelX;state.wheelTotalY=(state.wheelTotalY??0)+args.action.wheelY;}
+        return{status:'submitted',nativeDurationMs:1,inputType:args.action.inputType,nativeApi:args.action.inputType==='mouse'?'SendInput':'InjectTouchInput'};
+      }
       if(command==='nearcast_input_release'){state.nativeOwner=null;state.borderActive=false;return{status:'released'};}
       return false;
     }}, event: {listen: async (name,callback) => {state.discoveryListeners[name]=callback;return()=>delete state.discoveryListeners[name];}}};
@@ -350,6 +355,29 @@ try {
   assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().control.receivedMouseSamples),7);
   assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().nativeInput.lastSubmission.nativeApi),'SendInput');
   await page.waitForFunction(n=>testReceiver.frames>n+2,beforeMouse.frames);
+  // Reproduce real RX gesture scrolling faster than a ~20ms native bridge.
+  // Deltas must all reach the native fixture while video and control stay live.
+  const beforeWheel=await page.evaluate(()=>({frames:testReceiver.frames,calls:testReceiver.nativeApplyCalls,coalesced:__nearcastTouchbackDiagnostics().coalescedSamples}));
+  await page.evaluate(async()=>{
+    const {encodeInputFrame}=await import('/touchback/typed-codec.mjs');
+    testReceiver.nativeApplyDelayMs=20;testReceiver.wheelTotalX=0;testReceiver.wheelTotalY=0;
+    for(let i=0;i<122;i++){
+      const phase=i===0?1:i===121?3:2,terminal=phase===3;
+      testReceiver.sendInputBytes(encodeInputFrame({streamId:testReceiver.inputStreamId,seqId:i+8,cursor:i+8,inputType:'mouse',eventKind:2,buttons:0,modifiers:0,
+        x:32768,y:32768,wheelUnit:1,wheelPhase:phase,wheelX:terminal?0:64,wheelY:terminal?0:-128}));
+      await new Promise(resolve=>setTimeout(resolve,4));
+    }
+  });
+  await page.waitForFunction(()=>__nearcastTouchbackDiagnostics().submittedSeqId===129||!__nearcastTouchbackDiagnostics().controlChannelReady);
+  assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().controlChannelReady),true);
+  assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().state),'active');
+  assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().scrollActive),false);
+  assert.deepEqual(await page.evaluate(()=>[testReceiver.wheelTotalX,testReceiver.wheelTotalY]),[121*64,-121*128]);
+  assert.ok(await page.evaluate(n=>__nearcastTouchbackDiagnostics().coalescedSamples>n,beforeWheel.coalesced));
+  assert.ok(await page.evaluate(n=>testReceiver.nativeApplyCalls-n<100,beforeWheel.calls));
+  assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().lastNativeExecutionMs),1);
+  await page.waitForFunction(n=>testReceiver.frames>n+2,beforeWheel.frames);
+  await page.evaluate(()=>{testReceiver.nativeApplyDelayMs=0;});
   const mouseStream=await page.evaluate(()=>testReceiver.inputStreamId);
   await page.evaluate(()=>{testReceiver.requestedInputTypes=['touch'];});
   await page.locator('#input-enabled').uncheck();await page.locator('#input-enabled').check();
@@ -371,7 +399,7 @@ try {
   await page.waitForFunction(()=>document.querySelector('#diagnostics-export-status').textContent.includes('nearcast-diagnostics-test.json'));
   assert.ok((await page.evaluate(()=>testReceiver.logSamples)).every(row=>Object.keys(row).every(key=>['event','status','metrics'].includes(key))));
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({result:'PASS',videoBackend:'browser',originalTrack:true,independentPcmOpus:true,screenOnlyInput:true,multiDisplayCalibration:true,negativeCoordinates:true,layoutInvalidation:true,screenReselection:true,touchMouseTouch:true,windowAndMultiDisplayVideo:true,senderReuse:true,frames:await page.evaluate(()=>testReceiver.frames)},null,2));
+  console.log(JSON.stringify({result:'PASS',videoBackend:'browser',originalTrack:true,independentPcmOpus:true,screenOnlyInput:true,multiDisplayCalibration:true,negativeCoordinates:true,layoutInvalidation:true,screenReselection:true,touchMouseTouch:true,wheelBackpressure:true,windowAndMultiDisplayVideo:true,senderReuse:true,frames:await page.evaluate(()=>testReceiver.frames)},null,2));
 } finally {
   await browser?.close();
   await new Promise(resolve => server.close(resolve));

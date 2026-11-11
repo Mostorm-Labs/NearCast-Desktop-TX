@@ -22,6 +22,22 @@ function supersedesMotion(previous,next){
   if(previous.inputType==='touch')return previous.records.every(record=>record.phase===1)&&previous.records.every(record=>next.records.some(value=>value.contactId===record.contactId));
   return previous.eventKind===0&&next.eventKind===0&&previous.buttons===next.buttons&&previous.modifiers===next.modifiers;
 }
+function accumulateWheel(previous,next,region){
+  if(previous?.streamId!==next.streamId||previous.inputType!=='mouse'||next.inputType!=='mouse'||
+    previous.eventKind!==2||next.eventKind!==2||previous.wheelUnit!==next.wheelUnit||
+    previous.wheelPhase!==next.wheelPhase||!([0,2].includes(next.wheelPhase))||
+    previous.buttons!==next.buttons||previous.modifiers!==next.modifiers||previous.x!==next.x||previous.y!==next.y)return null;
+  const result={...next};
+  for(const [axis,extent]of [['wheelX',region.width],['wheelY',region.height]]){
+    // A direction change is a user-visible barrier, never cancel it out by
+    // summing opposite deltas. Keep i32 wire/native budgets after accumulation.
+    if(previous[axis]!==0&&next[axis]!==0&&Math.sign(previous[axis])!==Math.sign(next[axis]))return null;
+    const sum=previous[axis]+next[axis];
+    if(!integer(sum,-2147483648,2147483647)||next.wheelUnit===1&&Math.abs(sum)/65536*Math.max(1,extent-1)*3>2999999)return null;
+    result[axis]=sum;
+  }
+  return result;
+}
 export class InputError extends Error{constructor(code,message=code,details){super(`${code}: ${message}`);this.code=code;this.details=details;}}
 const requireInput=(condition,code,message)=>{if(!condition)throw new InputError(code,message);};
 const timeout=(promise,ms,code='TIMEOUT')=>new Promise((resolve,reject)=>{
@@ -145,7 +161,9 @@ export class InputEngine{
     try{candidate=this.ingress.candidate(sample,this.stream);this.stats.validatedSamples++;}
     catch(error){this.stats.failedSamples++;return this.fault(error).catch(()=>{}).then(()=>{throw error;});}
     const records=sample.inputType==='touch'?sample.records.length:1;
-    const tail=this.queue.at(-1),replace=tail?.generation===this.generation&&supersedesMotion(tail.sample,sample);
+    const tail=this.queue.at(-1),sameGeneration=tail?.generation===this.generation;
+    const wheel=sameGeneration?accumulateWheel(tail.sample,sample,this.mapper.descriptor.region):null;
+    const replace=sameGeneration&&(Boolean(wheel)||supersedesMotion(tail.sample,sample));
     const queuedRecords=this.queue.reduce((sum,item)=>sum+item.records,0)-(replace?tail.records:0),queuedBytes=this.queue.reduce((sum,item)=>sum+item.sample.dataBytes,0)-(replace?tail.sample.dataBytes:0);
     if(this.queue.length-(replace?1:0)>=this.maxQueuedSamples||queuedRecords+records>this.maxQueuedRecords||queuedBytes+sample.dataBytes>this.maxQueuedBytes){
       const error=new InputError('RESOURCE_EXHAUSTED','Input queue budget');return this.fault(error).catch(()=>{}).then(()=>{throw error;});
@@ -153,7 +171,9 @@ export class InputEngine{
     this.ingress=candidate;this.touchFeedback('received',sample);
     return new Promise((resolve,reject)=>{
       if(replace){this.queue.pop();tail.resolve({status:'coalesced'});this.stats.coalescedSamples++;}
-      this.queue.push({sample:structuredClone(sample),candidate,records,generation:this.generation,queuedAt:this.now(),resolve,reject});
+      // Wheel deltas are additive: retain their first arrival time so merging
+      // cannot hide stale input. Position snapshots only retain the latest time.
+      this.queue.push({sample:structuredClone(wheel??sample),candidate,records,generation:this.generation,queuedAt:wheel?tail.queuedAt:this.now(),resolve,reject});
       this.stats.queuePeak=Math.max(this.stats.queuePeak,this.queue.length);this.pump();
     });
   }
