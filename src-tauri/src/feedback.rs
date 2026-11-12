@@ -7,10 +7,10 @@ use std::{
 const BASE: &str = "https://mosapi.auditoryworks.co/v1";
 const MAX_ARCHIVE: usize = 4 * 1024 * 1024;
 static SENDING: AtomicBool = AtomicBool::new(false);
-fn product(os: &str) -> Result<u32, String> {
+fn application(os: &str) -> Result<u32, String> {
     match os {
-        "windows" => Ok(646),
-        "macos" => Ok(647),
+        "windows" => Ok(39),
+        "macos" => Ok(40),
         _ => Err("Feedback only supports Windows and macOS".into()),
     }
 }
@@ -56,14 +56,14 @@ fn response_id(v: &Value) -> Option<u64> {
         })
 }
 fn payload(os: &str, email: &str, message: &str, file: u64) -> Result<Value, String> {
-    let product = product(os)?;
+    let application = application(os)?;
     Ok(
         json!({"data":{"appVersion":format!("NearHub Cast {}.{}",env!("NEARCAST_LOGICAL_VERSION"),env!("NEARCAST_BUILD_NUMBER")),
         "client":{"name":"Unknown","email":email,"phone":"Unknown","location":"Unknown"},
         "equipment":{"category":"PC","manufacture":"Unknown","model":{"name":"Unknown"},"hardware":{"processor":std::env::consts::ARCH,"memory":"Unknown","storage":"Unknown"},
             "software":{"systemVersion":os,"systemType":os,"language":"Unknown","region":"Unknown"},"graphics":[],"displays":[]},
         "content":{"title":format!("NearHub Cast: {}",message.chars().take(50).collect::<String>()),"message":message,"attachments":[{"id":file}]},
-        "application":{"connect":[{"id":2}]},"product":{"connect":[{"id":product}]},
+        "application":{"connect":[{"id":application}]},
         "timestamp":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis().to_string()}}),
     )
 }
@@ -141,7 +141,7 @@ pub async fn submit(email: String, message: String, consent: bool) -> Result<Val
     let email = email.trim();
     let message = message.trim();
     validate(email, message, consent)?;
-    product(std::env::consts::OS)?;
+    application(std::env::consts::OS)?;
     if SENDING.swap(true, Ordering::AcqRel) {
         return Err("反馈正在发送，请稍候。".into());
     }
@@ -256,7 +256,8 @@ mod tests {
         let second = String::from_utf8_lossy(&requests[1]);
         assert!(second.starts_with("POST /feedbacks "));
         let body: Value = serde_json::from_str(second.split_once("\r\n\r\n").unwrap().1).unwrap();
-        assert_eq!(body["data"]["product"]["connect"][0]["id"], 646);
+        assert_eq!(body["data"]["application"]["connect"][0]["id"], 39);
+        assert!(body["data"].get("product").is_none());
         assert_eq!(body["data"]["content"]["attachments"][0]["id"], 42);
         let (base, worker) = mock(401, 1);
         let error = tauri::async_runtime::block_on(upload_to(
@@ -272,13 +273,14 @@ mod tests {
         assert_eq!(worker.join().unwrap().len(), 1);
     }
     #[test]
-    fn consent_bounded_fields_product_and_archive_are_native_owned() {
+    fn consent_bounded_fields_application_and_archive_are_native_owned() {
         assert!(validate("a@b.co", "problem", true).is_ok());
         assert!(validate("a@b.co", "problem", false).is_err());
         assert!(validate("invalid", "problem", true).is_err());
-        for (os, id) in [("windows", 646), ("macos", 647)] {
+        for (os, id) in [("windows", 39), ("macos", 40)] {
             let p = payload(os, "a@b.co", "problem", 42).unwrap();
-            assert_eq!(p["data"]["product"]["connect"][0]["id"], id);
+            assert_eq!(p["data"]["application"]["connect"][0]["id"], id);
+            assert!(p["data"].get("product").is_none());
             assert_eq!(p["data"]["content"]["attachments"][0]["id"], 42);
         }
         let zip = archive(br#"{"events":[]}"#).unwrap();

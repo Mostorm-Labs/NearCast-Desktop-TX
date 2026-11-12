@@ -93,7 +93,7 @@ TXT HTTPS endpoint 只用于显示码，选择设备不会覆盖 Launcher 配对
 
 ## 打包与跨平台验证
 
-左上角“设置”打开独立设置页，包含画质、码率、系统声音、反控与输入转换、检查更新及 Feedback。设置保存在本机；打开设置不会中断投屏。Feedback 在用户同意后打包诊断并向 Mosapi 提交，平台关联为 Windows 646 / macOS 647；线上产品关联字段仍待后台确认。实现与验证边界见 [设置与反馈](docs/architecture/settings-and-feedback.md)，Windows CI 与在线更新验收见 [发布约定](docs/release/version-and-mosapi.md)。
+左上角“设置”打开独立设置页，包含画质、码率、系统声音、反控与输入转换、检查更新及 Feedback。设置保存在本机；打开设置不会中断投屏。Feedback 在用户同意后打包诊断并向 Mosapi 提交，应用关联为 Windows `application.connect.id=39` / macOS `=40`，与更新的 product-id 区分。实现与验证边界见 [设置与反馈](docs/architecture/settings-and-feedback.md)，Windows CI 与在线更新验收见 [发布约定](docs/release/version-and-mosapi.md)。
 
 Windows 仅构建 x64。日志写入 Tauri 应用日志目录，最多三个 1 MiB JSONL 文件轮转；每 30 秒采集一次数值性能指标及会话状态，不记录配对码、SDP/ICE 或音视频内容。底部“导出诊断”生成本机 JSON 报告，最多保留五份。系统声音仍为独立 WASAPI 采集，不采集麦克风；更新签名验证与 mDNS 发现保持。
 

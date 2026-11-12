@@ -30,6 +30,8 @@ NearHub Cast 的更新查询按平台使用以下 product slug：
 
 TX 的构建、发布和更新范围仅限 Windows 和 macOS。客户端不得用一个平台的 slug 查询另一个平台的包；同一平台内按架构筛选资产。
 
+Feedback 使用独立的 application 关系：Windows `application.connect.id=39`，macOS `=40`；不得使用上述更新 product-id，也不发送 `product` 字段。诊断提交走公共 Mosapi，客户端不得内置 CI 管理 token。
+
 ## Mosapi 地址和凭据边界
 
 - CI 上传端点：`https://mosapi-admin.auditoryworks.co/v1/upload`，使用 `Mostorm-Labs/mosapi-action`，凭据放在 GitHub Actions Secret `MOSAPI_TOKEN`。

@@ -17,7 +17,7 @@
 
 诊断包含版本、平台、架构及最多三个 1 MiB 轮转日志中的白名单数值指标和状态；不包含音视频、配对码、SDP/ICE、设备密钥、窗口标题或任意文件。上传失败保留表单；单次超时 90 秒，同时只允许一次提交。附件成功但反馈记录失败时，不显示成功，重试会重新上传附件。
 
-Windows 使用 product `646`，macOS 使用 `647`，由 Rust 固定选择。现有 RX 示例使用 `application.connect.id=2`；TX 同时提交 `product.connect.id` 作为平台归属。**这个产品关系字段尚需 Mosapi 后台 schema 和真实服务验证，不能把本地 mock 通过视为线上可用。** 客户端不携带 CI 的 `MOSAPI_TOKEN`；若公共服务不允许匿名 Feedback，需要后台提供面向客户端的受限提交机制，不把管理 token 放入安装包。
+Feedback 的应用关系由 Rust 固定选择：Windows `application.connect.id=39`、macOS `=40`。不发送 `product` 字段；更新服务的 product-id `646/647` 与 Feedback application-id 不同。客户端不携带 CI 的 `MOSAPI_TOKEN`；若公共服务不允许匿名 Feedback，需要后台提供面向客户端的受限提交机制，不把管理 token 放入安装包。
 
 ## 验证
 
@@ -25,6 +25,6 @@ Windows 使用 product `646`，macOS 使用 `647`，由 Rust 固定选择。现�
 - `node tests/settings-browser.integration.mjs`：设置导航、页面返回、保存、Feedback 同意、确认编号及失败重试。
 - `node tests/webcast-browser.integration.mjs`：设置页面打开时实际 RTP 视频仍持续解码，浏览器原轨道保持 live；保留音频、反控和切屏覆盖。
 - `node tests/update-browser.integration.mjs`：启动提示、后台下载、暂不更新、再次打开、安装前清理与失败提示。
-- `cargo test --locked --manifest-path src-tauri/Cargo.toml`：真实本地 HTTP mock 检查 multipart ZIP、附件 ID、平台 product 和 HTTP 401 中止，以及原有清单/包签名和缓存篡改拒绝。
+- `cargo test --locked --manifest-path src-tauri/Cargo.toml`：真实本地 HTTP mock 检查 multipart ZIP、附件 ID、平台 application 和 HTTP 401 中止，以及原有清单/包签名和缓存篡改拒绝。
 
 Windows CI/Mosapi/安装重启的最终验收步骤见 [发布约定](../release/version-and-mosapi.md)。macOS 本机安装与更新仍需 macOS 主机验证。
