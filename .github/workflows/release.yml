@@ -125,7 +125,7 @@ jobs:
     permissions:
       contents: write
     env:
-      GH_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN || github.token }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
@@ -163,7 +163,11 @@ jobs:
         env:
           DISPLAY_VERSION: ${{ needs.version.outputs.display }}
         run: |
-          gh release create "v$DISPLAY_VERSION" --target "$GITHUB_SHA" --title "NearHub Cast $DISPLAY_VERSION" --draft --generate-notes
+          if gh release view "v$DISPLAY_VERSION" --json isDraft,assets > release-state.json 2>/dev/null; then
+            node --input-type=module -e 'import fs from "node:fs"; const r=JSON.parse(fs.readFileSync("release-state.json")); if(!r.isDraft || r.assets.length) throw Error("Release already contains published assets; allocate a new Build");'
+          else
+            gh release create "v$DISPLAY_VERSION" --target "$GITHUB_SHA" --title "NearHub Cast $DISPLAY_VERSION" --draft --generate-notes
+          fi
           find release -type f ! -name changelog.md -print0 | xargs -0 gh release upload "v$DISPLAY_VERSION"
           gh release upload "v$DISPLAY_VERSION" "NearHub-Cast-$DISPLAY_VERSION-release-assets.zip" "NearHub-Cast-$DISPLAY_VERSION-release-assets.zip.sha256"
       - name: Upload Windows update to Mosapi

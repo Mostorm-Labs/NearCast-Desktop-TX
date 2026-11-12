@@ -221,6 +221,7 @@ GitHub Secrets：
 | 名称 | 用途 |
 | --- | --- |
 | `MOSAPI_TOKEN` | Mosapi 上传授权 |
+| `GH_RELEASE_TOKEN` | 可选专用 GitHub 发布凭据；默认 `github.token`。若组织返回 403，需要可访问本仓库的 Contents 读写权限；发布含 workflow 变更的提交可能还需 Workflows 写权限及组织批准 |
 | `TAURI_SIGNING_PRIVATE_KEY` | 与仓库 `src-tauri/update.pub` 对应的更新签名私钥文件内容 |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 私钥密码（未设置密码时为空） |
 | `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD` | Developer ID 的 base64 P12 及密码 |
@@ -241,7 +242,7 @@ GitHub Secrets：
 6. 点击安装，确认投屏/声音停止、输入释放，安装并重启后版本升至新 Build，设置仍保留。
 7. 在干净 Windows 测试机上重复 MSI→MSI；分别验证取消 UAC、离线、下载中断可重试。自动化本地测试覆盖清单/安装包签名不符和缓存篡改拒绝；不得以关闭验证的方式完成安装测试。
 
-当前实现已通过本地浏览器与 Rust 校验、签名及安装包生成；公共 Windows 更新查询返回 HTTP 200 空列表。**GitHub 发布 run、Mosapi 上传、跨 Build 安装和自动重启仍未验收，需上传 token 配置后执行。** 不将这些本地结果视为在线发布成功。
+当前实现已通过本地浏览器与 Rust 校验、签名及安装包生成。两次 Windows alpha CI 的构建与签名成功，但 GitHub 创建 Release 返回 HTTP 403（日志已确认 `Contents: write`），尚未进入 Mosapi 上传；需要专用发布凭据或管理员解除组织限制。**Mosapi 上传、跨 Build 安装和自动重启仍未验收。** 不将本地结果或 CI 构建成功视为在线发布成功。仅发布阶段失败且尚未创建 Mosapi 记录时可重试失败 job，沿用原有已签名产物；若任何资产已公开或 Mosapi 记录已创建，需检查状态并分配新的 Build，不覆盖已发布版本。
 
 macOS 正式分发仍需稳定 Apple Developer ID 签名与 notarization。当前基础配置为 ad-hoc，不能据本机 Windows 验证宣称已完成 macOS 正式签名和权限保留验收。
 
