@@ -19,9 +19,21 @@
 
     <section id="code-view" class="sender-panel">
       <div class="panel-eyebrow">WEBCAST SENDER</div>
-      <h1>Welcome to cast screen</h1>
-      <p class="panel-desc">Enter the 4-digit code shown on your NearCast receiver.</p>
+      <h1>选择接收端</h1>
+      <p class="panel-desc">选择局域网中的设备，输入接收端显示的配对码。</p>
       <p id="platform-status" class="platform-status" aria-live="polite">正在读取平台能力…</p>
+
+      <section class="devices" aria-labelledby="devices-title">
+        <div class="devices-heading"><div><span class="section-kicker">LOCAL NETWORK</span><h2 id="devices-title">Available receivers</h2></div><button id="refresh-devices" class="refresh" type="button">↻ Scan</button></div>
+        <div id="device-status" class="device-status">Scanning for NearCast receivers…</div>
+        <div id="device-groups"></div>
+      </section>
+    </section>
+
+    <dialog id="pair-dialog" class="pair-dialog" aria-labelledby="pair-title">
+      <div class="pair-dialog-header"><span class="section-kicker">连接接收端</span><button id="pair-close" class="refresh" type="button" aria-label="关闭配对">取消</button></div>
+      <h2 id="pair-title">输入配对码</h2>
+      <p id="pair-device-name" class="panel-desc"></p>
       <form id="pair-form">
         <div class="code-input" aria-label="Pairing code">
           <input class="code-digit" maxlength="1" inputmode="text" autocomplete="one-time-code" aria-label="Pairing code digit 1" />
@@ -29,7 +41,7 @@
           <input class="code-digit" maxlength="1" inputmode="text" aria-label="Pairing code digit 3" />
           <input class="code-digit" maxlength="1" inputmode="text" aria-label="Pairing code digit 4" />
         </div>
-        <p class="pair-help">Pairing code</p>
+        <p id="pair-input-help" class="pair-help" role="status">请输入 4 位英文字母或数字，请使用英文输入法。</p>
         <p id="code-display-status" class="code-display-status" aria-live="polite"></p>
         <details id="trust-card" class="trust-card" hidden aria-live="polite">
           <summary id="trust-title" class="trust-title">现场核对接收端指纹</summary>
@@ -39,16 +51,11 @@
           <div class="trust-actions"><button id="trust-confirm" class="button primary" type="button" hidden disabled>确认并信任设备</button><button id="trust-retry" class="button primary" type="button" hidden>重新显示指纹</button><button id="trust-cancel" class="button secondary" type="button">取消</button><button id="trust-revoke" class="button secondary" type="button" hidden>撤销此设备信任</button></div>
           <p id="trust-error" class="error" hidden></p>
         </details>
-        <button id="connect-button" class="button primary" type="submit">Join receiver</button>
+        <button id="connect-button" class="button primary" type="submit">连接接收端</button>
       </form>
       <p id="code-error" class="error" hidden></p>
 
-      <section class="devices" aria-labelledby="devices-title">
-        <div class="devices-heading"><div><span class="section-kicker">LOCAL NETWORK</span><h2 id="devices-title">Available receivers</h2></div><button id="refresh-devices" class="refresh" type="button">↻ Scan</button></div>
-        <div id="device-status" class="device-status">Scanning for NearCast receivers…</div>
-        <div id="device-groups"></div>
-      </section>
-    </section>
+    </dialog>
 
     <section id="casting-view" class="sender-panel casting-panel" hidden>
       <div class="cast-icon">⌁</div>

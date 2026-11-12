@@ -11,6 +11,7 @@ import {BrowserCaptureMediaDevices} from './capture/browser-capture.mjs';
 import {mountUpdates} from './update/update-ui.mjs';
 import {createDiagnostics} from './diagnostics.mjs';
 import {loadPreferences,savePreferences,mountSettings,mountFeedback} from './settings.mjs';
+import {mountPairingInput} from './pairing-input.mjs';
 
 const tauri = globalThis.__TAURI__ ?? {};
 const invoke = tauri.core?.invoke ?? (async () => false);
@@ -18,6 +19,7 @@ const listen = tauri.event?.listen ?? (async () => () => {});
 const codeView = document.querySelector('#code-view');
 const castingView = document.querySelector('#casting-view');
 const pairForm = document.querySelector('#pair-form');
+const pairDialog=document.querySelector('#pair-dialog');
 const digits = [...document.querySelectorAll('.code-digit')];
 const connectButton = document.querySelector('#connect-button');
 const codeError = document.querySelector('#code-error');
@@ -219,27 +221,15 @@ const setView = status => {
   codeView.hidden = connected;
   castingView.hidden = !connected;
   settingsPage.render();
+  if(connected&&pairDialog.open)pairDialog.close();
+  document.querySelector('#pair-close').disabled=status!=='idle';
   connectButton.disabled = status !== 'idle';
   digits.forEach(input => { input.disabled = status !== 'idle'; });
   shareButton.disabled = capturePending || !['connected', 'sharing'].includes(status);
   deviceGroups.querySelectorAll('.device-row.selectable').forEach(row => { row.disabled = status !== 'idle'; });
   castStatus.textContent = status === 'sharing' ? 'Your screen is being shared to the receiver.' : status === 'connected' ? 'Receiver is ready for casting.' : 'Connecting to receiver…';
 };
-const focusNext = index => { if (index < digits.length - 1) digits[index + 1].focus(); };
-digits.forEach((input, index) => {
-  input.addEventListener('input', () => {
-    input.value = input.value.replace(/[^a-z0-9]/gi, '').slice(-1).toUpperCase();
-    setError(codeError, null);
-    if (input.value) focusNext(index);
-  });
-  input.addEventListener('keydown', event => { if (event.key === 'Backspace' && !input.value && index > 0) digits[index - 1].focus(); });
-  input.addEventListener('paste', event => {
-    event.preventDefault();
-    const pasted = (event.clipboardData?.getData('text') || '').replace(/[^a-z0-9]/gi, '').slice(0, 4).toUpperCase();
-    pasted.split('').forEach((value, offset) => { if (digits[index + offset]) digits[index + offset].value = value; });
-    focusNext(Math.min(index + pasted.length - 1, digits.length - 1));
-  });
-});
+mountPairingInput({inputs:digits,help:document.querySelector('#pair-input-help'),onChange:()=>setError(codeError,null)});
 
 const buildTouchback = () => new WebCastTouchbackSender({
   provider: inputProvider,
@@ -350,9 +340,17 @@ trustConfirm.addEventListener('click', async () => { try { await trustManager.co
 trustRetry.addEventListener('click', () => trustManager.prepare());
 trustCancel.addEventListener('click', () => { trustManager.cancel(); trustDevice = null; client.cancelCodeDisplay(); codeDisplayRequestId = null; setCodeDisplayStatus('已取消指纹核对，可现场输入配对码。'); });
 trustRevoke.addEventListener('click', async () => { try { client.cancelCodeDisplay(); codeDisplayRequestId = null; await trustManager.revoke(); setCodeDisplayStatus('已撤销信任。'); } catch (error) { setError(trustError, error); } });
+const closePairing=()=>{
+  if(currentStatus!=='idle')return;
+  trustManager.cancel();trustDevice=null;client.cancelCodeDisplay();codeDisplayRequestId=null;
+  digits.forEach(input=>{input.value='';});setError(codeError,null);pairDialog.close();
+};
+document.querySelector('#pair-close').addEventListener('click',closePairing);
+pairDialog.addEventListener('cancel',event=>{event.preventDefault();closePairing();});
 
 pairForm.addEventListener('submit', async event => {
   event.preventDefault();
+  if(!selectedDevice){setError(codeError,new Error('请先重新选择接收端。'));return;}
   const pairCode = codeValue();
   if (!/^[A-Z0-9]{4}$/.test(pairCode)) { setError(codeError, new Error('请输入 4 位字母或数字配对码')); return; }
   setError(codeError, null);
@@ -370,6 +368,7 @@ pairForm.addEventListener('submit', async event => {
     setError(codeError, error);
     await client.stop({notify: false});
     setView('idle');
+    if(!pairDialog.open)pairDialog.showModal();
   }
 });
 shareButton.addEventListener('click', async () => {
@@ -409,14 +408,16 @@ const renderDevices = devices => {
       const row = document.createElement('button'); row.type = 'button'; row.className = `device-row ${device.selectable ? 'selectable' : 'disabled'}`;
       row.disabled = !device.selectable || currentStatus !== 'idle';
       row.setAttribute('aria-pressed', String(device.selectable && device.discoveryId === selectedDevice?.discoveryId));
-      row.innerHTML = `<span class="device-icon">${group.icon}</span><span class="device-copy"><span class="device-name"></span><span class="device-meta"></span></span><span class="device-action">${device.selectable ? 'Use' : 'Display only'}</span>`;
+      row.innerHTML = `<span class="device-icon">${group.icon}</span><span class="device-copy"><span class="device-name"></span><span class="device-meta"></span></span><span class="device-action">${device.selectable ? '使用设备' : 'Display only'}</span>`;
       row.querySelector('.device-name').textContent = device.displayName;
       row.querySelector('.device-meta').textContent = device.addresses?.[0] ? `${device.addresses[0]}${device.port ? `:${device.port}` : ''}` : device.hostname || device.model || device.protocol;
       if (device.selectable) row.addEventListener('click', () => {
         if (currentStatus !== 'idle') return;
         client.cancelCodeDisplay(); codeDisplayRequestId = null;
         if (selectedDevice?.discoveryId !== device.discoveryId) digits.forEach(input => { input.value = ''; });
-        selectedDevice = device; trustDevice = device; selectedEndpoint = defaultEndpoint; client.endpoint = selectedEndpoint; digits[0].focus(); setError(codeError, null);
+        selectedDevice = device; trustDevice = device; selectedEndpoint = defaultEndpoint; client.endpoint = selectedEndpoint;
+        document.querySelector('#pair-device-name').textContent=device.displayName;
+        if(!pairDialog.open)pairDialog.showModal();digits[0].focus();setError(codeError, null);
         setCodeDisplayStatus(device.supportsTrustDisplay ? '正在请求现场核对指纹…' : '该接收端不支持指纹显示，请现场输入配对码。');
         trustManager.select(device);
       });

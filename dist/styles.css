@@ -63,6 +63,7 @@ h1 { margin: 10px 0 0; color: #fff; font-size: clamp(28px, 4vw, 38px); line-heig
 #update-button[data-available="true"] {padding:7px 10px;border-radius:8px;background:#438fff33;color:#a8efff}
 .update-dialog {width:min(560px,92vw);max-height:85vh;overflow:auto;padding:24px;border:1px solid #71829e;border-radius:16px;background:#161c2b;color:#e9effa;box-shadow:0 25px 80px #0009}
 .update-dialog::backdrop {background:#0009}
+.pair-dialog{width:min(530px,92vw);max-height:85vh;overflow:auto;padding:28px;border:1px solid #71829e;border-radius:18px;background:#161c2b;color:#e9effa;text-align:center;box-shadow:0 25px 80px #0009}.pair-dialog::backdrop{background:#000a}.pair-dialog-header{display:flex;align-items:center;justify-content:space-between}.pair-dialog h2{font-size:26px;margin:22px 0 10px}.pair-dialog .panel-desc{margin-bottom:24px}.pair-dialog .code-input{justify-content:center}.pair-dialog .button{margin-top:22px}.pair-dialog .pair-help{line-height:1.6}.pair-dialog .code-digit{text-transform:uppercase}
 .update-dialog h2 {margin:0 0 14px;font-size:20px}
 .update-dialog p {font-size:13px;line-height:1.6;color:#b7c4d9}
 .update-dialog pre {max-height:250px;overflow:auto;white-space:pre-wrap;font:inherit;font-size:13px;line-height:1.6;user-select:text}
