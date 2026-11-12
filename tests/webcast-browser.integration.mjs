@@ -97,6 +97,10 @@ try {
             const message=JSON.parse(new TextDecoder().decode(frame.payload.subarray(1)));
             if(message.op===0)inputChannel.send(frameCodec.encodeStandardFrame(sessionCodec.rpcPayload({sid:'',op:2,d:{randomSeed:123,eventMasks:'050101'}}),{payloadType:2}));
             if(message.op===3){state.inputReady=true;state.inputSid=message.sid;inputChannel.send(JSON.stringify({action:'nearcast-input-target',data:{version:1,contractFingerprint:'feac6fa2a4b9c927708c077746166259ffeb7d5f06dc6972b29f1fc30954c2d0',runtimeInstanceId:'rx-runtime-1',target:{sessionId:'share-1',sessionGeneration:'1',slotId:'0',bindingGeneration:'1',lifecycleGeneration:'1'}}}));}
+            if(message.op===7&&message.d.method==='cast.setTouchbackEnabled'){
+              (state.senderControlRequests??=[]).push(message.d.params);
+              inputChannel.send(frameCodec.encodeStandardFrame(sessionCodec.rpcPayload({sid:state.inputSid,op:8,d:{id:message.d.id,status:{ok:true,code:0},result:{controllerRequested:message.d.params.enabled}}}),{payloadType:2}));
+            }
             if(message.op===8&&message.d.id>=100){if(message.d.status.code!==0){state.error=JSON.stringify(message);return;}state.inputActive=true;state.inputStreamId=message.d.result.streamId;}
           }
           return;

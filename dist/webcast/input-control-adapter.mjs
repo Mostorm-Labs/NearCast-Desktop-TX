@@ -4,6 +4,7 @@ import {decodeInputPayload} from '../touchback/typed-codec.mjs';
 import {INPUT_CONTRACT,INPUT_WIRE} from '../touchback/axtp-input-contract.mjs';
 import {SESSION_CONTRACT} from '../touchback/axtp-session-contract.mjs';
 import {proveCaptureGeometry} from '../touchback/capture-geometry.mjs';
+import {requestInputConsent} from '../touchback/consent-request.mjs';
 const text=value=>typeof value==='string'&&value.length>0&&value.length<=128;
 const targetFields=['sessionId','sessionGeneration','slotId','bindingGeneration','lifecycleGeneration'];
 const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))):item);
@@ -11,12 +12,13 @@ const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='ob
 // Product/media association belongs here. Standard framing/session and native
 // execution remain separate owners; no transport callback injects OS input.
 export class WebCastTouchbackSender{
-  constructor({provider,nativeBridge,onStatus=()=>{},onTouchFeedback=()=>{},engineOptions={}}={}){
+  constructor({provider,nativeBridge,onStatus=()=>{},onTouchFeedback=()=>{},onConsentRequest=async()=>false,onEnabledChanged=()=>{},engineOptions={}}={}){
     this.provider=provider??nativeBridge;this.onStatus=onStatus;this.onTouchFeedback=onTouchFeedback;this.engineOptions=engineOptions;
     this.engine=null;this.server=null;this.channel=null;this.generation=0;this.refreshVersion=0;
     this.enabled=false;this.track=null;this.captureSeen=false;this.target=null;this.identity=null;this.source=null;this.sourceKey=null;
     this.retiring=new Set();this.lastProbe=null;this.reason='LOCAL_INPUT_DISABLED';this.detail=null;this.wireStateKey=null;
     this.stats={textReceived:0,binaryReceived:0,recentControl:[],lastOpenRequest:null,receivedTouchSamples:0,receivedMouseSamples:0,lastReceivedInput:null};
+    this.onConsentRequest=onConsentRequest;this.onEnabledChanged=onEnabledChanged;this.consent=null;this.consentController=null;this.consentIds=new Set();
   }
   feedback(event){try{this.onTouchFeedback(event);}catch{/* Feedback cannot own a session. */}}
   status(){const snapshot=this.diagnostics();this.onStatus(this.engine?.state==='active'?'accepted':this.server?.ready?'session_ready':'waiting',{...snapshot,nativeOwnerId:this.engine?.owner?.ownerId??null});}
@@ -32,7 +34,8 @@ export class WebCastTouchbackSender{
     const source=this.source;
     this.channel.send(JSON.stringify({action:'nearcast-input-source',data:{version:1,contractFingerprint:INPUT_CONTRACT.fingerprint,
       sourceBindingId:source?.sourceBindingId??null,roomId:this.identity.roomId,senderUserId:this.identity.userId,receiverUserId:this.identity.hostUserId,
-      geometryRevision:source?.geometry.revision??null,available:Boolean(source),disabledReason:source?null:this.reason,inputCapability:this.capability()}}));
+      geometryRevision:source?.geometry.revision??null,available:Boolean(source),disabledReason:source?null:this.reason,inputCapability:this.capability(),
+      displaySurface:this.track?.getSettings?.().displaySurface??null,controlConsent:this.consent??{}}}));
   }
   makeEngine(generation){
     const engine=new InputEngine({...this.engineOptions,provider:this.provider,onTouchFeedback:event=>{if(this.engine===engine&&generation===this.generation)this.feedback(event);},onState:snapshot=>{
@@ -101,10 +104,37 @@ export class WebCastTouchbackSender{
     const valid=data?.version===1&&data.contractFingerprint===INPUT_CONTRACT.fingerprint&&text(data.runtimeInstanceId)&&target&&
       targetFields.every(field=>text(target[field]))&&Object.keys(target).every(field=>targetFields.includes(field))&&
       ['sessionGeneration','bindingGeneration','lifecycleGeneration'].every(field=>/^[1-9]\d*$/.test(target[field])&&BigInt(target[field])<=0xffffffffffffffffn);
-    if(!valid){this.target=null;this.invalidateSource('TARGET_CONTRACT_MISMATCH');return{status:'invalid_target'};}
+    if(!valid){this.cancelConsent();this.target=null;this.invalidateSource('TARGET_CONTRACT_MISMATCH');return{status:'invalid_target'};}
     const value={runtimeInstanceId:data.runtimeInstanceId,target:structuredClone(target)};
-    if(canonical(this.target)!==canonical(value)){this.target=value;this.invalidateSource('TARGET_CHANGED');}
+    if(canonical(this.target)!==canonical(value)){this.cancelConsent();this.consentIds.clear();this.target=value;this.invalidateSource('TARGET_CHANGED');}
+    const request=data.controlRequest;
+    if(request&&text(request.requestId)&&request.timeoutMs===8000){
+      if(request.cancel===true){if(this.consent?.requestId===request.requestId){this.cancelConsent();this.sendSource();}}
+      else void this.receiveConsentRequest(request.requestId);
+    }
     return this.refreshSource().then(()=>({status:'target_bound'}));
+  }
+  cancelConsent(){this.consentController?.abort();this.consentController=null;this.consent=null;}
+  async receiveConsentRequest(requestId){
+    if(!this.server?.ready||!this.target||!this.identity||!this.track||this.track.readyState!=='live'||this.track.getSettings?.().displaySurface!=='monitor')return;
+    if(this.consentIds.has(requestId)){this.sendSource();return;}
+    if(this.consentController||this.consentIds.size>=64)return;
+    this.consentIds.add(requestId);
+    const generation=this.generation,target=canonical(this.target),controller=new AbortController();
+    this.consentController=controller;this.consent={requestId,status:'pending'};this.sendSource();
+    const status=this.enabled?'accepted':await requestInputConsent(this.onConsentRequest,{signal:controller.signal});
+    if(generation!==this.generation||target!==canonical(this.target)||this.consentController!==controller)return;
+    this.consentController=null;controller.abort();this.consent={requestId,status};
+    if(status==='accepted'){await this.setEnabled(true);if(this.enabled&&generation===this.generation&&target===canonical(this.target))this.onEnabledChanged(true);}
+    else {this.sendSource();this.status();}
+  }
+  async requestReceiverControl(enabled=true){
+    if(!this.server?.ready||!this.target)throw new InputError('INVALID_STATE','接收端反控通道尚未就绪');
+    if(enabled&&(!this.enabled||!this.source))throw new InputError('INVALID_STATE','请先允许反控并分享整个屏幕');
+    const server=this.server,generation=this.generation;
+    const result=await server.request('cast.setTouchbackEnabled',{target:this.target.target,enabled:enabled===true,commandId:crypto.randomUUID()});
+    if(server!==this.server||generation!==this.generation)throw new InputError('CANCELED','反控会话已更换');
+    return result;
   }
   invalidateSource(reason){
     this.feedback({stage:'clear'});this.refreshVersion++;this.source=null;this.sourceKey=null;this.reason=reason;this.sendSource();
@@ -153,9 +183,10 @@ export class WebCastTouchbackSender{
       this.source={sourceBindingId,geometry};this.sourceKey=key;this.reason=null;this.detail=null;this.sendSource();this.status();
     }catch(failure){if(generation===this.generation&&version===this.refreshVersion){this.detail=String(failure.message??failure);this.invalidateSource('NATIVE_PROBE_FAILED');}}
   }
-  async setEnabled(value){this.enabled=value===true;this.invalidateSource(this.enabled?'SOURCE_PREPARING':'LOCAL_INPUT_DISABLED');await this.refreshSource();}
+  async setEnabled(value){if(value!==true)this.cancelConsent();this.enabled=value===true;this.invalidateSource(this.enabled?'SOURCE_PREPARING':'LOCAL_INPUT_DISABLED');await this.refreshSource();}
   async setCaptureTrack(track){
     if(this.track===track)return;
+    this.cancelConsent();
     if(this.track){
       this.track.removeEventListener?.('ended',this.trackChanged);
       this.track.removeEventListener?.('mute',this.trackAvailability);
@@ -178,6 +209,7 @@ export class WebCastTouchbackSender{
     await this.refreshSource();return results.every(Boolean);
   }
   fence(reason='session ended'){
+    this.cancelConsent();this.consentIds.clear();
     this.feedback({stage:'clear'});this.generation++;this.refreshVersion++;clearInterval(this.tickTimer);clearInterval(this.probeTimer);
     this.server?.dispose();this.server=null;this.channel=null;this.identity=null;this.target=null;this.source=null;this.sourceKey=null;this.wireStateKey=null;this.captureSeen=false;
     const closing=this.retire(this.engine,reason);this.status();return closing.finally(()=>this.status());

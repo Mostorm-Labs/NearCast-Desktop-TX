@@ -79,7 +79,9 @@ test('source association requires local authorization, APP_READY, authenticated 
   assert.equal(p.source().data.disabledReason,'LOCAL_INPUT_DISABLED');
   await p.sender.setEnabled(true);
   const source=p.source();assert.equal(source.data.available,true);assert.ok(source.data.sourceBindingId);
-  assert.deepEqual({...source,data:{...source.data,sourceBindingId:'share-binding-1'}},product.sourceMessage);
+  const {displaySurface,controlConsent,...sourceData}=source.data;
+  assert.equal(displaySurface,'monitor');assert.deepEqual(controlConsent,{});
+  assert.deepEqual({...source,data:{...sourceData,sourceBindingId:'share-binding-1'}},product.sourceMessage);
   await p.sender.setCaptureTrack({...p.track,getSettings:()=>({displaySurface:'window',width:1920,height:1080})});
   assert.equal(p.source().data.available,false);assert.equal(p.source().data.geometryRevision,null);
   assert.deepEqual(p.source().data.inputCapability,product.sourceMessage.data.inputCapability);

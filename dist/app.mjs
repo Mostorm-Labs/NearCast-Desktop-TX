@@ -1,6 +1,7 @@
 import {LauncherWebCastClient, DEFAULT_ENDPOINT} from './webcast/launcher-webcast-client.mjs';
 import {ReceiverTrust, formatFingerprint} from './webcast/receiver-trust.mjs';
 import {WebCastTouchbackSender} from './webcast/touchback-sender.mjs';
+import {showInputConsent} from './touchback/consent-ui.mjs';
 import {createPlatformInputAdapter} from './touchback/platform-input.mjs';
 import {TauriDeviceDiscovery} from './tauri-device-discovery.mjs';
 import {loadPlatformInfo, platformSummary, screenCaptureError, touchbackSummary} from './platform-capabilities.mjs';
@@ -237,6 +238,8 @@ const pairingInput=mountPairingInput({inputs:digits,help:document.querySelector(
 
 const buildTouchback = () => new WebCastTouchbackSender({
   provider: inputProvider,
+  onConsentRequest:options=>showInputConsent(options,{showWindow:()=>invoke('nearcast_window_action',{action:{kind:'show'}})}),
+  onEnabledChanged:enabled=>{inputEnabled.checked=enabled;persistPreferences();},
   onStatus: (_status, state) => {
     const reasons = {LOCAL_INPUT_DISABLED:'反控未启用', APP_NOT_READY:'等待接收端建立反控会话', TARGET_UNBOUND:'等待接收端绑定投屏来源', CAPTURE_UNAVAILABLE:'请先分享整个屏幕', CAPTURE_CHANGED:'分享已停止，重新分享后等待接收端恢复反控', CAPTURE_GEOMETRY_CHANGED:'正在更新分享范围，反控暂时暂停', CAPTURE_MUTED:'采集已暂停', NATIVE_CLEANUP_PENDING:'等待释放上一次输入', NATIVE_PERMISSION_UNAVAILABLE:'本机输入不可用，请检查系统权限', NATIVE_DOMAIN_BUSY:'本机输入正由其他会话使用', NATIVE_GEOMETRY_UNAVAILABLE:'无法确认当前分享范围的坐标映射，请查看反控诊断', TARGET_CONTRACT_MISMATCH:'接收端反控协议版本不匹配', INPUT_SESSION_FAULT:'反控连接异常，可重建连接'};
     inputState.textContent = !state.localEnabled ? '反控未启用' : state.state === 'active' && state.sourceReady ? `反控已开启 · ${state.acceptedInputTypes.join(' / ')} · stream ${state.streamId}` : state.sourceReady ? '本机已就绪，等待接收端开启反控' : state.detail?.includes('BROWSER_WINDOW_INPUT_UNSUPPORTED') ? '窗口投屏可用；反控请改为分享整个屏幕' : state.detail?.includes('BROWSER_MULTIPLE_DISPLAYS_UNPROVEN') ? '未完成屏幕识别，反控暂不可用；请停止后重新分享整个屏幕' : state.detail?.includes('BROWSER_DISPLAY_LAYOUT_CHANGED') ? '显示布局已变化，请停止后重新分享以校验屏幕' : state.detail?.includes('BROWSER_DISPLAY_BINDING_RETIRED') ? '屏幕绑定已失效，请停止后重新分享' : state.detail?.includes('BROWSER_SOURCE_SIZE_UNPROVEN') ? '无法确认原始屏幕尺寸，反控暂不可用' : state.detail?.includes('capture_window_not_foreground') ? '窗口反控已暂停，请切回正在分享的窗口' : state.detail?.includes('minimized') ? '窗口已最小化，反控已暂停' : state.disabledReason === 'NATIVE_PROBE_FAILED' ? '无法读取本机输入能力，请重试或检查系统权限' : captureProvider && state.disabledReason === 'NATIVE_GEOMETRY_UNAVAILABLE' ? '正在确认分享范围，反控暂不可用' : state.disabledReason === 'INPUT_SESSION_FAULT' && state.detail?.includes('Input queue age') ? '输入处理积压，已释放触点；可重建反控连接' : reasons[state.disabledReason] || '正在准备反控';
@@ -266,7 +269,19 @@ inputPolicyApply.addEventListener('click',async()=>{
   }finally{policyPending=false;inputTouchOutput.disabled=false;inputMouseOutput.disabled=false;inputPolicyApply.disabled=touchback.diagnostics().cleanupPending;
     for(const control of [gestureHold,gestureRightClick,gestureRightHold,gesturePinch,gestureFeedback])control.disabled=false;}
 });
-inputEnabled.addEventListener('change', () => { persistPreferences();void touchback.setEnabled(inputEnabled.checked); });
+inputEnabled.addEventListener('change', async () => {
+  persistPreferences();await touchback.setEnabled(inputEnabled.checked);
+  if(inputEnabled.checked&&touchback.diagnostics().sourceReady){
+    try{await touchback.requestReceiverControl(true);}catch(error){inputState.textContent=`反控未开启：${error.message||error}`;}
+  }
+});
+const requestControl=document.createElement('button');requestControl.id='input-request-control';requestControl.type='button';requestControl.className='button secondary';requestControl.textContent='在接收端开启反控';
+inputState.after(requestControl);requestControl.addEventListener('click',async()=>{
+  requestControl.disabled=true;
+  try{if(!inputEnabled.checked){inputEnabled.checked=true;persistPreferences();await touchback.setEnabled(true);}await touchback.requestReceiverControl(true);}
+  catch(error){inputState.textContent=`反控未开启：${error.message||error}`;}
+  finally{requestControl.disabled=false;}
+});
 let haloPending=false;
 const haloTimer=setInterval(async()=>{
   if(haloPending||inputProvider.policy.touch!=='mouse-gestures')return;
