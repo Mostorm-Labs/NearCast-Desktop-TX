@@ -351,9 +351,7 @@ pub async fn initialize(app: AppHandle, state: &State) -> Result<Value, String> 
     }
     Ok(view(&runtime))
 }
-pub async fn check(app: AppHandle, state: &State) -> Result<Value, String> {
-    let mut runtime = state.inner.lock().await;
-    let os = platform();
+async fn find_candidate(client: &reqwest::Client, os: &str, cpu: &str, installer: &str, after: Version) -> Result<Option<Candidate>, String> {
     let slug = slug(os)?;
     let mut url = tauri::Url::parse(&format!("{BASE}{slug}")).unwrap();
     url.query_pairs_mut().extend_pairs([
@@ -365,7 +363,6 @@ pub async fn check(app: AppHandle, state: &State) -> Result<Value, String> {
         ("limit", "1000"),
         ("filters[state][$eq]", CHANNEL),
     ]);
-    let client = client()?;
     let payload: Value =
         serde_json::from_slice(&metadata(&client, url.as_str(), META_LIMIT).await?)
             .map_err(|e| e.to_string())?;
@@ -374,7 +371,7 @@ pub async fn check(app: AppHandle, state: &State) -> Result<Value, String> {
         .filter_map(|row| {
             let row = attrs(row);
             let v = Version::parse(&string(row, "version")).ok()?;
-            if string(row, "state") != CHANNEL || v <= current() {
+            if string(row, "state") != CHANNEL || v <= after {
                 return None;
             }
             let files = list(row.get("otaFiles")?)
@@ -402,7 +399,7 @@ pub async fn check(app: AppHandle, state: &State) -> Result<Value, String> {
             let signature = String::from_utf8(metadata(&client, &sig.url, 16384).await?)
                 .map_err(|e| e.to_string())?;
             let (manifest, mut asset) =
-                validate_manifest(&text, &signature, v, os, arch(), format())?;
+                validate_manifest(&text, &signature, v, os, cpu, installer)?;
             // Mosapi rewrites storage URLs. Hash, size, filename and signature
             // stay bound by the signed manifest; only resolve the transport URL.
             asset.url = files
@@ -420,23 +417,20 @@ pub async fn check(app: AppHandle, state: &State) -> Result<Value, String> {
         }
         .await;
         match result {
-            Ok(candidate) => {
-                let root = cache(&app)?;
-                let ready = read_package(&root, &candidate).is_ok();
-                atomic_write(
-                    &root,
-                    "candidate.json",
-                    &serde_json::to_vec(&candidate).map_err(|e| e.to_string())?,
-                )?;
-                runtime.candidate = Some(candidate);
-                runtime.ready = ready;
-                return Ok(view(&runtime));
-            }
+            Ok(candidate) => return Ok(Some(candidate)),
             Err(e) => last_error = Some(e),
         }
     }
-    if let Some(e) = last_error {
-        return Err(e);
+    if let Some(e) = last_error { return Err(e); }
+    Ok(None)
+}
+pub async fn check(app: AppHandle, state: &State) -> Result<Value, String> {
+    let mut runtime = state.inner.lock().await;
+    if let Some(candidate) = find_candidate(&client()?, platform(), arch(), format(), current()).await? {
+        let root = cache(&app)?;
+        runtime.ready = read_package(&root, &candidate).is_ok();
+        atomic_write(&root, "candidate.json", &serde_json::to_vec(&candidate).map_err(|e| e.to_string())?)?;
+        runtime.candidate = Some(candidate);
     }
     // Keep a verified cached update usable while the network/feed has no entry.
     Ok(view(&runtime))
@@ -549,6 +543,24 @@ pub async fn install(app: AppHandle, state: &State) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "downloads signed Windows assets from public Mosapi without installing"]
+    fn live_mosapi_signed_windows_update() {
+        assert_eq!(std::env::var("NEARCAST_LIVE_UPDATE_TEST").as_deref(), Ok("1"));
+        assert_eq!(CHANNEL, "alpha");
+        tauri::async_runtime::block_on(async {
+            let client = client().unwrap();
+            for installer in ["nsis", "msi"] {
+                let candidate = find_candidate(&client, "windows", "x86_64", installer, Version([0,0,0,0])).await.unwrap().expect("published Windows alpha update");
+                let package = metadata(&client, &candidate.asset.url, PACKAGE_LIMIT as usize).await.unwrap();
+                verify_package(&candidate, &package).unwrap();
+                let root = tempfile::tempdir().unwrap();
+                atomic_write(root.path(), "package.bin", &package).unwrap();
+                read_package(root.path(), &candidate).unwrap();
+                println!("Verified online {} {}: {} bytes", installer, candidate.manifest.version, package.len());
+            }
+        });
+    }
     #[test]
     fn versions_compare_all_four_components() {
         assert!(Version::parse("0.1.0.12").unwrap() > Version::parse("0.1.0.9").unwrap());

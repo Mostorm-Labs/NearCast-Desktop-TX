@@ -28,3 +28,5 @@ Feedback 的应用关系由 Rust 固定选择：Windows `application.connect.id=
 - `cargo test --locked --manifest-path src-tauri/Cargo.toml`：真实本地 HTTP mock 检查 multipart ZIP、附件 ID、平台 application 和 HTTP 401 中止，以及原有清单/包签名和缓存篡改拒绝。
 
 Windows CI/Mosapi/安装重启的最终验收步骤见 [发布约定](../release/version-and-mosapi.md)。macOS 本机安装与更新仍需 macOS 主机验证。
+
+真实 Mosapi 合成报告测试已经成功，Windows Feedback 返回编号 `2729`，请求关联 `application.connect.id=39`。该测试只上传显式构造的空事件报告，不读取本机日志。可显式设置 `NEARCAST_LIVE_FEEDBACK_TEST=1` 并单独执行 ignored 的 `live_mosapi_confirms_synthetic_windows_feedback` 重现；普通 CI 不创建反馈记录。

@@ -168,6 +168,24 @@ pub async fn submit(email: String, message: String, consent: bool) -> Result<Val
 mod tests {
     use super::*;
     use std::{io::Read, net::TcpListener};
+    #[test]
+    #[ignore = "uploads only a synthetic diagnostics fixture and creates a test Feedback on public Mosapi"]
+    fn live_mosapi_confirms_synthetic_windows_feedback() {
+        assert_eq!(
+            std::env::var("NEARCAST_LIVE_FEEDBACK_TEST").as_deref(),
+            Ok("1")
+        );
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(90))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let result = tauri::async_runtime::block_on(upload_to(&client, BASE,
+            br#"{"schemaVersion":1,"synthetic":true,"product":"NearHub Cast","events":[]}"#.to_vec(),
+            "nearhub-ci-test@example.invalid", "[AUTOMATED TEST] NearHub Cast Windows Feedback API contract validation; synthetic report only; no reply needed.", "windows")).unwrap();
+        println!("Mosapi synthetic Feedback confirmed: {}", result["id"]);
+    }
     fn mock(status: u16, count: usize) -> (String, std::thread::JoinHandle<Vec<Vec<u8>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = format!("http://{}", listener.local_addr().unwrap());
@@ -286,7 +304,10 @@ mod tests {
         let zip = archive(br#"{"events":[]}"#).unwrap();
         let mut reader = zip::ZipArchive::new(Cursor::new(zip)).unwrap();
         assert_eq!(reader.len(), 1);
-        assert_eq!(reader.by_index(0).unwrap().name().unwrap(), "diagnostics.json");
+        assert_eq!(
+            reader.by_index(0).unwrap().name().unwrap(),
+            "diagnostics.json"
+        );
         assert_eq!(response_id(&json!({"data":{"id":23}})), Some(23));
         assert!(response_id(&json!({"unknown":{"id":1}})).is_none());
         assert!(archive(&vec![0; MAX_ARCHIVE]).is_err());
