@@ -40,11 +40,16 @@ try{
   assert.match(await page.locator('#update-detail').textContent(),/结束当前投屏/);
   await page.locator('#update-later').click();
   assert.equal(await page.locator('#update-dialog').evaluate(x=>x.open),false);
-  await page.locator('#update-button').click();
+  await page.evaluate(()=>{document.querySelector('#code-view').hidden=true;document.querySelector('#settings-view').hidden=false;document.querySelector('#settings-general').hidden=true;document.querySelector('#settings-updates').hidden=false;});
+  assert.equal(await page.locator('#settings-version').textContent(),'0.1.0.0');
+  assert.match(await page.locator('#settings-update-status').textContent(),/0.2.0.37.*已下载/);
+  await page.locator('#settings-update-check').click();
   assert.equal(await page.locator('#update-dialog').evaluate(x=>x.open),true);
   await page.locator('#update-install').click();
   await page.waitForFunction(()=>document.querySelector('#update-error').textContent==='测试安装错误');
   assert.equal(await page.locator('#code-view').evaluate(x=>x.inert),false);
+  assert.equal(await page.locator('#settings-view').evaluate(x=>x.inert),false);
+  assert.equal(await page.locator('#settings-update-error').textContent(),'测试安装错误');
   const calls=await page.evaluate(()=>window.updateCalls);
   assert.ok(calls.indexOf('cleanup')<calls.indexOf('nearcast_update_install'));
   assert.deepEqual(errors,[]);
