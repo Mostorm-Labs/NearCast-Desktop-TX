@@ -10,6 +10,7 @@ import {MacOsPermissions} from './macos-permissions.mjs';
 import {BrowserCaptureMediaDevices} from './capture/browser-capture.mjs';
 import {mountUpdates} from './update/update-ui.mjs';
 import {createDiagnostics} from './diagnostics.mjs';
+import {loadPreferences,savePreferences,mountSettings,mountFeedback} from './settings.mjs';
 
 const tauri = globalThis.__TAURI__ ?? {};
 const invoke = tauri.core?.invoke ?? (async () => false);
@@ -78,6 +79,15 @@ const gesturePinch=document.querySelector('#gesture-pinch-action');
 const gesturePinchHelp=document.querySelector('#gesture-pinch-help');
 const gestureFeedback=document.querySelector('#gesture-feedback');
 const inputProvider=createPlatformInputAdapter({}, {invoke});
+const preferences=loadPreferences();
+videoResolution.value=preferences.video.resolution;videoBitrateMode.value=preferences.video.bitrateMode;videoBitrate.value=String(preferences.video.bitrateKbps);
+systemAudioEnabled.checked=preferences.systemAudio;inputEnabled.checked=preferences.inputEnabled;
+const persistPreferences=()=>{
+  try{savePreferences({video:videoQuality,systemAudio:systemAudioEnabled.checked,inputEnabled:inputEnabled.checked,policy:inputProvider.policy});
+    document.querySelector('#settings-save-status').textContent='设置已保存在本机。画质和声音在下次分享时生效。';}
+  catch{document.querySelector('#settings-save-status').textContent='无法保存设置，本次运行仍可使用。';}
+};
+for(const input of [videoResolution,videoBitrateMode,videoBitrate,systemAudioEnabled])input.addEventListener('change',()=>{videoQuality=normalizeVideoQuality({resolution:videoResolution.value,bitrateMode:videoBitrateMode.value,bitrateKbps:videoBitrate.value});persistPreferences();});
 let policyPending=false;
 const outputLabels={touch:'Touch',mouse:'Mouse'};
 const outputHelp={
@@ -132,6 +142,8 @@ let selectedEndpoint = defaultEndpoint;
 let selectedDevice = null;
 let activeDevice = null;
 let currentStatus = 'idle';
+const settingsPage=mountSettings({document,isConnected:()=>['joined','connected','sharing'].includes(currentStatus)});
+mountFeedback({document,invoke});
 let codeDisplayRequestId = null;
 let trustDevice = null;
 let platformInfo = null;
@@ -206,6 +218,7 @@ const setView = status => {
   const connected = ['joined', 'connected', 'sharing'].includes(status);
   codeView.hidden = connected;
   castingView.hidden = !connected;
+  settingsPage.render();
   connectButton.disabled = status !== 'idle';
   digits.forEach(input => { input.disabled = status !== 'idle'; });
   shareButton.disabled = capturePending || !['connected', 'sharing'].includes(status);
@@ -251,6 +264,7 @@ inputPolicyApply.addEventListener('click',async()=>{
   try{
     await touchback.setOutputPolicy(requested);
     await renderPolicyConfiguration();
+    persistPreferences();
     inputPolicyStatus.textContent='配置已应用。请在接收端重新开启反控；投屏保持连接。';
   }catch(error){
     await renderPolicyConfiguration().catch(()=>{});
@@ -258,7 +272,7 @@ inputPolicyApply.addEventListener('click',async()=>{
   }finally{policyPending=false;inputTouchOutput.disabled=false;inputMouseOutput.disabled=false;inputPolicyApply.disabled=touchback.diagnostics().cleanupPending;
     for(const control of [gestureHold,gestureRightClick,gestureRightHold,gesturePinch,gestureFeedback])control.disabled=false;}
 });
-inputEnabled.addEventListener('change', () => { void touchback.setEnabled(inputEnabled.checked); });
+inputEnabled.addEventListener('change', () => { persistPreferences();void touchback.setEnabled(inputEnabled.checked); });
 let haloPending=false;
 const haloTimer=setInterval(async()=>{
   if(haloPending||inputProvider.policy.touch!=='mouse-gestures')return;
@@ -349,8 +363,7 @@ pairForm.addEventListener('submit', async event => {
   try {
     await platformReady;
     await touchback.fence('new pairing');
-    inputEnabled.checked = false;
-    await touchback.setEnabled(false);
+    await touchback.setEnabled(inputEnabled.checked);
     await client.connect(pairCode);
     targetName.textContent = selectedDevice?.displayName || 'NearCast';
   } catch (error) {
@@ -472,7 +485,7 @@ window.addEventListener('focus', async () => {
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshPermissions(); });
 setView('idle');
-platformReady = loadPlatformInfo(invoke).then(info => {
+platformReady = loadPlatformInfo(invoke).then(async info => {
   platformInfo = info;
   document.querySelector('#system-audio-settings').hidden=false;
   document.querySelector('#capture-help').textContent = '系统选屏后会短暂显示四角校验标记；识别成功的整屏支持多屏反控。窗口仅投屏。';
@@ -485,7 +498,10 @@ platformReady = loadPlatformInfo(invoke).then(info => {
   platformStatus.textContent = platformSummary(info);
   touchbackStatus.textContent = touchbackSummary(info);
   touchback.status();
-  void renderPolicyConfiguration().catch(error=>{inputPolicyStatus.textContent=`无法读取输入能力：${error.message||error}`;});
+  try{await inputProvider.setOutputPolicy(preferences.policy);}
+  catch{inputPolicyStatus.textContent='已保存的转换不适用于本机，当前使用原生输入。';}
+  await touchback.setEnabled(inputEnabled.checked);
+  await renderPolicyConfiguration().catch(error=>{inputPolicyStatus.textContent=`无法读取输入能力：${error.message||error}`;});
   return info;
 }).catch(() => ({os: 'unknown', touchback: false, inputControl: 'none'}));
 startDiscovery();

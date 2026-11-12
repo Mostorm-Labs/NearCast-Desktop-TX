@@ -1,6 +1,8 @@
-# NearCast Desktop TX 版本与 Mosapi 更新发布契约
+# NearHub Cast 版本与 Mosapi 更新发布契约
 
 本文档定义 TX 的版本格式、Mosapi 后台信息、应用内更新策略和 GitHub Actions 发布边界。实现位于 `src-tauri/src/update.rs`、`src/update/`、`scripts/release.mjs` 和 `.github/workflows/release.yml`；代码与本地验证完成不等于已经发布线上更新。
+
+产品显示名为 `NearHub Cast`，应用 identifier 为 `com.mostorm.nearhub.cast`。软件此前未安装，不迁移旧安装身份。安装包名称采用 `NearHub Cast Desktop Installer`，保留版本、平台和架构；NSIS 安装窗口标题与 MSI 包摘要使用该名称，安装后的应用、快捷方式和 macOS `.app` 使用较短的产品名。当前安装模板基于 Tauri CLI 2.12.4，升级 CLI 时需核对模板差异。Mosapi slug/product-id、updater 公钥及 `NearCast-Desktop-TX-<version>-<platform>-manifest.json` 清单名称保持后台契约值。
 
 ## 1. 版本格式
 
@@ -72,7 +74,7 @@ CI 使用 `Mostorm-Labs/mosapi-action@v1.0.0` 上传资产并创建 update recor
     version: ${{ needs.version.outputs.display_version }}
     state: release
     type: optional
-    project-name: NearCast Desktop TX
+    project-name: NearHub Cast
     artifacts: |
       release/windows/*
 ```
@@ -148,7 +150,7 @@ Mosapi 会重写存储 URL；客户端通过 `otaFiles` 同名资产解析实际
 每个 `X.Y.Z.Build` 只创建一个 GitHub Release，Windows 和 macOS 的所有独立文件放在这个 Release 的 assets 下。同时提供一个完整发布集合：
 
 ```text
-NearCast-Desktop-TX-X.Y.Z.Build-release-assets.zip
+NearHub-Cast-X.Y.Z.Build-release-assets.zip
   windows/
     NSIS 更新包 + MSI 更新包 + 对应签名/校验文件 + Windows 版本清单
   macos/
@@ -164,29 +166,29 @@ NearCast-Desktop-TX-X.Y.Z.Build-release-assets.zip
 完整版本写入每个资产名，推荐形式如下：
 
 ```text
-NearCast-Desktop-TX-0.2.0.37-windows-x64-setup.exe
-NearCast-Desktop-TX-0.2.0.37-windows-x64-setup.exe.sha256
-NearCast-Desktop-TX-0.2.0.37-windows-x64-setup.exe.sig
-NearCast-Desktop-TX-0.2.0.37-windows-x64.msi
-NearCast-Desktop-TX-0.2.0.37-windows-x64.msi.sha256
-NearCast-Desktop-TX-0.2.0.37-windows-x64.msi.sig
+NearHub Cast Desktop Installer-0.2.0.37-windows-x86_64-setup.exe
+NearHub Cast Desktop Installer-0.2.0.37-windows-x86_64-setup.exe.sha256
+NearHub Cast Desktop Installer-0.2.0.37-windows-x86_64-setup.exe.sig
+NearHub Cast Desktop Installer-0.2.0.37-windows-x86_64.msi
+NearHub Cast Desktop Installer-0.2.0.37-windows-x86_64.msi.sha256
+NearHub Cast Desktop Installer-0.2.0.37-windows-x86_64.msi.sig
 NearCast-Desktop-TX-0.2.0.37-windows-manifest.json
-NearCast-Desktop-TX-0.2.0.37-macos-x86_64.app.tar.gz
-NearCast-Desktop-TX-0.2.0.37-macos-x86_64.app.tar.gz.sig
-NearCast-Desktop-TX-0.2.0.37-macos-x86_64.app.tar.gz.sha256
-NearCast-Desktop-TX-0.2.0.37-macos-aarch64.app.tar.gz
-NearCast-Desktop-TX-0.2.0.37-macos-aarch64.app.tar.gz.sig
-NearCast-Desktop-TX-0.2.0.37-macos-aarch64.app.tar.gz.sha256
+NearHub Cast Desktop Installer-0.2.0.37-macos-x86_64.app.tar.gz
+NearHub Cast Desktop Installer-0.2.0.37-macos-x86_64.app.tar.gz.sig
+NearHub Cast Desktop Installer-0.2.0.37-macos-x86_64.app.tar.gz.sha256
+NearHub Cast Desktop Installer-0.2.0.37-macos-aarch64.app.tar.gz
+NearHub Cast Desktop Installer-0.2.0.37-macos-aarch64.app.tar.gz.sig
+NearHub Cast Desktop Installer-0.2.0.37-macos-aarch64.app.tar.gz.sha256
 NearCast-Desktop-TX-0.2.0.37-macos-manifest.json
-NearCast-Desktop-TX-0.2.0.37-macos-aarch64.dmg
-NearCast-Desktop-TX-0.2.0.37-macos-aarch64.dmg.sha256
-NearCast-Desktop-TX-0.2.0.37-release-assets.zip
-NearCast-Desktop-TX-0.2.0.37-release-assets.zip.sha256
+NearHub Cast Desktop Installer-0.2.0.37-macos-aarch64.dmg
+NearHub Cast Desktop Installer-0.2.0.37-macos-aarch64.dmg.sha256
+NearHub-Cast-0.2.0.37-release-assets.zip
+NearHub-Cast-0.2.0.37-release-assets.zip.sha256
 ```
 
 实际文件名可以按 Tauri bundle 约定调整，但必须保留完整版本、平台和架构字段，且一个 update record 内不得混入其它平台的安装包。
 
-`state` 取 `alpha`、`beta` 或 `release`；本次客户端只接受 `release`，发布 workflow 的手动测试默认 `alpha`。自动发布使用 `type=optional`；当前策略始终由用户确认安装，不实施强制升级。
+`state` 取 `alpha`、`beta` 或 `release`；普通本地构建默认只接受 `release`。CI 将所选渠道写入编译时 `NEARCAST_UPDATE_CHANNEL`，alpha/beta 包仅查询并接受同渠道的签名清单，设置页会标明测试渠道，正式包不能通过前端切到测试渠道。发布 workflow 的手动测试默认 `alpha`。自动发布使用 `type=optional`；当前策略始终由用户确认安装，不实施强制升级。
 
 ## 5. 发布工作流边界
 
@@ -225,9 +227,21 @@ GitHub Secrets：
 | `APPLE_SIGNING_IDENTITY` | 稳定 Developer ID Application 身份 |
 | `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` | Apple notarization 身份与应用专用密码 |
 
-本次已生成一对更新密钥，公钥已入仓库，私钥只保存在当前机器仓库外 `C:\Users\Chado\.codex\update-key-tx\tx.key`，未上传 GitHub。不要输出或提交私钥；先将它安全备份并配置为上述 Secret。更换密钥必须在首次发布前同步公钥；上线后轮换须保留旧版本升级通路。
+更新公钥已入仓库，私钥保存在当前机器仓库外 `C:\Users\Chado\.codex\update-key-tx\tx.key`，并已配置为 GitHub Actions Secret `TAURI_SIGNING_PRIVATE_KEY`，签名验证与内置公钥一致。不要输出或提交私钥，需额外安全备份。更换密钥必须在首次发布前同步公钥；上线后轮换须保留旧版本升级通路。
 
-打 `vX.Y.Z` tag 触发正式 release，或手动选择逻辑版本和渠道。发布逻辑先收集 Windows 和 macOS 两架构共三个任务的资产，再生成两个平台清单、清单签名和聚合 ZIP。创建同一个 GitHub draft Release，上传所有 assets，分别创建 Windows/macOS Mosapi 更新记录，成功后公开 GitHub Release。平台记录独立创建，Mosapi 没有跨产品原子事务；部分失败需检查已创建的 update-id 并以新 Build 重试。
+打 `vX.Y.Z` tag 触发全平台正式 release；手动可选择逻辑版本、渠道及 `platforms=windows|all`，默认 Windows/alpha，仍共享同一流水线全局递增 Build。Windows 单独发布无需 Apple 凭据，生成 NSIS、MSI、签名、清单，共 9 个 Mosapi 资产；全平台还包含 macOS 两架构及其 9 个资产。聚合 ZIP 仅包含本次选中的平台。创建同一个 GitHub draft Release，上传所有 assets，再创建所选产品的 Mosapi 更新记录，成功后公开 GitHub Release。平台记录独立创建，Mosapi 没有跨产品原子事务；部分失败需检查已创建的 update-id 并以新 Build 重试。
+
+### Windows 两个 Build 的在线验收
+
+1. 在仓库 Settings → Secrets and variables → Actions 配置 `MOSAPI_TOKEN`；签名 Secret 已配置。token 需要 folder `546` 上传及 product `646` 更新创建权限。
+2. 将工作流及实现推送后，在 Actions → Release TX 选择目标分支、逻辑版本、`channel=alpha`、`platforms=windows`，运行一次。检查三个阶段成功，Mosapi update-id 非空、uploaded-count=9，保存 GitHub Release 链接。
+3. 安装该 Build 的 NSIS 测试包作为基线；设置页应显示完整版本和 alpha 测试渠道，保存画质配置。
+4. 新建一次 workflow run 生成更高 Build，不要 rerun 同一次发布。公共 `/updates/product/nearcast-tx-windows` 应查询到 alpha 记录，并有对应版本的安装包、清单和签名。
+5. 启动基线包，确认自动提示、后台下载、暂不更新后可继续投屏，退出重启后仍提示已就绪。设置页与顶部更新入口显示一致。
+6. 点击安装，确认投屏/声音停止、输入释放，安装并重启后版本升至新 Build，设置仍保留。
+7. 在干净 Windows 测试机上重复 MSI→MSI；分别验证取消 UAC、离线、下载中断可重试。自动化本地测试覆盖清单/安装包签名不符和缓存篡改拒绝；不得以关闭验证的方式完成安装测试。
+
+当前实现已通过本地浏览器与 Rust 校验、签名及安装包生成；公共 Windows 更新查询返回 HTTP 200 空列表。**GitHub 发布 run、Mosapi 上传、跨 Build 安装和自动重启仍未验收，需上传 token 配置后执行。** 不将这些本地结果视为在线发布成功。
 
 macOS 正式分发仍需稳定 Apple Developer ID 签名与 notarization。当前基础配置为 ad-hoc，不能据本机 Windows 验证宣称已完成 macOS 正式签名和权限保留验收。
 

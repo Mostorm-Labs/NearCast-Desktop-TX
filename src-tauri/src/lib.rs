@@ -8,6 +8,7 @@ mod trust;
 mod input_geometry;
 mod update;
 mod diagnostics;
+mod feedback;
 mod display_binding;
 #[cfg(any(windows,test))]
 mod native_audio;
@@ -297,6 +298,8 @@ async fn nearcast_diagnostics_record(sample:diagnostics::Sample)->Result<(),Stri
 async fn nearcast_diagnostics_export(app:AppHandle)->Result<String,String>{
     tauri::async_runtime::spawn_blocking(move||diagnostics::export(&app)).await.map_err(|e|e.to_string())?
 }
+#[tauri::command]
+async fn nearcast_feedback_submit(email:String,message:String,consent:bool)->Result<serde_json::Value,String>{feedback::submit(email,message,consent).await}
 
 #[tauri::command]
 async fn nearcast_display_binding_begin(source_id:String)->Result<serde_json::Value,String>{
@@ -336,9 +339,9 @@ pub fn run() {
             if matches!(event, tauri::WindowEvent::Destroyed) { let _ = macos_input::reset(); }
             let _=(window,event);
         })
-        .invoke_handler(tauri::generate_handler![nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_input_feedback, nearcast_input_execution_status, nearcast_system_audio_start, nearcast_audio_read, nearcast_audio_stop, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info, nearcast_display_binding_begin, nearcast_display_binding_confirm, nearcast_display_binding_cancel, nearcast_display_binding_release, nearcast_diagnostics_record, nearcast_diagnostics_export, nearcast_update_initialize, nearcast_update_check, nearcast_update_download, nearcast_update_install])
+        .invoke_handler(tauri::generate_handler![nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_input_feedback, nearcast_input_execution_status, nearcast_system_audio_start, nearcast_audio_read, nearcast_audio_stop, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info, nearcast_display_binding_begin, nearcast_display_binding_confirm, nearcast_display_binding_cancel, nearcast_display_binding_release, nearcast_diagnostics_record, nearcast_diagnostics_export, nearcast_feedback_submit, nearcast_update_initialize, nearcast_update_check, nearcast_update_download, nearcast_update_install])
         .build(tauri::generate_context!())
-        .expect("error while building NearCast Desktop TX")
+        .expect("error while building NearHub Cast")
         .run(|_, event| {
             if matches!(event, tauri::RunEvent::Exit) {
                 diagnostics::shutdown();

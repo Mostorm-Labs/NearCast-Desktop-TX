@@ -1,19 +1,47 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {releaseVersion,buildManifest,selectPackage,validateAssets,verifySignedAsset} from '../scripts/release.mjs';
+import {releaseVersion,buildManifest,selectPackage,validateAssets,verifySignedAsset,releasePackageName,releasePlatforms,releaseMatrix} from '../scripts/release.mjs';
+import {installerFileName,nameInstallers} from '../scripts/name-installers.mjs';
 import {readFile} from 'node:fs/promises';
+
+test('Windows-only release keeps shared build allocation and a complete x64 installer pair',()=>{
+  assert.deepEqual(releasePlatforms('windows'),['windows']);
+  assert.deepEqual(releaseMatrix('windows').include,[{os:'windows-latest',target:'x86_64-pc-windows-msvc',platform:'windows',arch:'x86_64',bundles:'nsis,msi'}]);
+  assert.equal(releaseMatrix('all').include.length,3);
+  assert.throws(()=>releasePlatforms('linux'));
+  validateAssets([{arch:'x86_64',format:'nsis'},{arch:'x86_64',format:'msi'}],'windows');
+  assert.throws(()=>validateAssets([{arch:'x86_64',format:'nsis'}],'windows'));
+});
 test('release maps four-part display and numeric build metadata consistently',()=>{
   assert.deepEqual(releaseVersion('0.2.1','37'),{logical:'0.2.1',build:37,display:'0.2.1.37',semver:'0.2.1+37',msi:'1.0.37'});
   assert.ok(Number(releaseVersion('0.2.1','38').msi.split('.')[2])>Number(releaseVersion('0.2.1','37').msi.split('.')[2]));
   for(const args of [['1.2','1'],['1.2.3','0'],['1.2.3','65536'],['1.2.65536','1']])assert.throws(()=>releaseVersion(...args));
 });
+
+test('desktop installer naming preserves sidecar signatures and version/platform identity',async()=>{
+  const {mkdtemp,mkdir,writeFile,rm,readdir}=await import('node:fs/promises');
+  const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+  assert.equal(releasePackageName('0.2.0.37','windows','x86_64','nsis'),'NearHub Cast Desktop Installer-0.2.0.37-windows-x86_64-setup.exe');
+  assert.equal(releasePackageName('0.2.0.37','macos','aarch64','app'),'NearHub Cast Desktop Installer-0.2.0.37-macos-aarch64.app.tar.gz');
+  assert.equal(installerFileName('NearHub Cast.app.tar.gz'),'NearHub Cast.app.tar.gz');
+  const root=await mkdtemp(join(tmpdir(),'nearhub-installer-'));
+  try{
+    await mkdir(join(root,'nsis'));
+    const name='NearHub Cast_0.2.0+37_x64-setup.exe',next=installerFileName(name);
+    await writeFile(join(root,'nsis',name),'package');await writeFile(join(root,'nsis',name+'.sig'),'signed bytes');
+    await nameInstallers(root);await nameInstallers(root);
+    assert.deepEqual((await readdir(join(root,'nsis'))).sort(),[next,next+'.sig'].sort());
+    assert.equal(await readFile(join(root,'nsis',next+'.sig'),'utf8'),'signed bytes');
+    await writeFile(join(root,'nsis',name),'new package');await assert.rejects(nameInstallers(root),/already exists/);
+  }finally{await rm(root,{recursive:true,force:true});}
+});
 test('release refuses stale bundle output and incomplete or duplicate architecture sets',()=>{
-  const old='bundle/nsis/NearCast Desktop TX_0.1.0+1_x64-setup.exe';
-  const current='bundle/nsis/NearCast Desktop TX_0.1.0+2_x64-setup.exe';
+  const old='bundle/nsis/NearHub Cast_0.1.0+1_x64-setup.exe';
+  const current='bundle/nsis/NearHub Cast_0.1.0+2_x64-setup.exe';
   assert.equal(selectPackage([old,current],{semver:'0.1.0+2',format:'nsis'}),current);
   assert.throws(()=>selectPackage([old],{semver:'0.1.0+2',format:'nsis'}));
   assert.throws(()=>selectPackage([current,current],{semver:'0.1.0+2',format:'nsis'}));
-  assert.equal(selectPackage(['macos/NearCast Desktop TX.app.tar.gz'],{semver:'0.1.0+2',format:'app'}),'macos/NearCast Desktop TX.app.tar.gz');
+  assert.equal(selectPackage(['macos/NearHub Cast.app.tar.gz'],{semver:'0.1.0+2',format:'app'}),'macos/NearHub Cast.app.tar.gz');
   const assets=[{arch:'x86_64',format:'app'},{arch:'aarch64',format:'app'}];
   validateAssets(assets,'macos');
   assert.throws(()=>validateAssets(assets.slice(0,1),'macos'));

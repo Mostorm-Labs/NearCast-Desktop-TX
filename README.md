@@ -1,4 +1,4 @@
-# NearCast Desktop TX
+# NearHub Cast
 
 版本和 Mosapi 更新发布契约见 [`AGENTS.md`](AGENTS.md) 与 [`docs/release/version-and-mosapi.md`](docs/release/version-and-mosapi.md)。完整版本使用 `X.Y.Z.Build`，TX 仅发布 Windows 和 macOS：`nearcast-tx-windows`（product-id `646`）与 `nearcast-tx-macos`（product-id `647`）。同一 GitHub Release 提供两平台更新包、签名和版本清单，并提供聚合 ZIP 单链接下载。
 
@@ -6,9 +6,9 @@
 
 当前反控使用 AXTP typed-input R2 开发快照；实现、依赖指纹、恢复步骤和验证限制见 [TI-3 handoff](docs/superpowers/handoffs/2026-11-06-tx-typed-input-ti3.md)。早期 TouchBatch/BIND 联调记录仅供历史追溯。
 
-支持 Windows 10/11 和 macOS 13 及以上版本。Windows 使用 WebView2；Windows 安装包会在安装时下载并静默安装 WebView2 Bootstrapper。macOS 首次分享屏幕前，需要在“系统设置 → 隐私与安全性 → 屏幕录制”允许 NearCast Desktop TX。
+支持 Windows 10/11 和 macOS 13 及以上版本。Windows 使用 WebView2；Windows 安装包会在安装时下载并静默安装 WebView2 Bootstrapper。macOS 首次分享屏幕前，需要在“系统设置 → 隐私与安全性 → 屏幕录制”允许 NearHub Cast。
 
-NearCast Desktop TX 是基于 Tauri 的 WebCast 发送端，复用 Launcher 的发送流程：配对码加入房间、WebSocket 信令、WebRTC `RTCPeerConnection` 和 DataChannel 控制通道。
+NearHub Cast 是基于 Tauri 的 WebCast 发送端，复用 Launcher 的发送流程：配对码加入房间、WebSocket 信令、WebRTC `RTCPeerConnection` 和 DataChannel 控制通道。
 
 ## 本地运行
 
@@ -32,10 +32,10 @@ macOS 本地调试请构建并打开 `.app`：
 
 ```sh
 npm run build:macos
-open "src-tauri/target/debug/bundle/macos/NearCast Desktop TX.app"
+open "src-tauri/target/debug/bundle/macos/NearHub Cast.app"
 ```
 
-`build:macos` 优先选择钥匙串中唯一的 Apple Development 证书（没有开发证书时选择 Developer ID Application），也可通过 `APPLE_SIGNING_IDENTITY` 明确指定。脚本拒绝使用 ad-hoc 签名进行权限联调，并在应用仍运行时拒绝覆盖 `.app`。配置中的 `signingIdentity: "-"` 仅供无证书的 CI 生成构建产物；ad-hoc 代码身份随构建变化，不能保证保留旧版本的录屏与辅助功能授权。正式权限联调使用稳定的 Apple 签名身份。参见 [Apple 代码身份说明](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)。首次启动请允许本地网络访问；可在“系统设置 → 隐私与安全 → 本地网络”检查 NearCast Desktop TX。
+`build:macos` 优先选择钥匙串中唯一的 Apple Development 证书（没有开发证书时选择 Developer ID Application），也可通过 `APPLE_SIGNING_IDENTITY` 明确指定。脚本拒绝使用 ad-hoc 签名进行权限联调，并在应用仍运行时拒绝覆盖 `.app`。配置中的 `signingIdentity: "-"` 仅供无证书的 CI 生成构建产物；ad-hoc 代码身份随构建变化，不能保证保留旧版本的录屏与辅助功能授权。正式权限联调使用稳定的 Apple 签名身份。参见 [Apple 代码身份说明](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)。首次启动请允许本地网络访问；可在“系统设置 → 隐私与安全 → 本地网络”检查 NearHub Cast。
 
 从旧 ad-hoc 包切换到稳定签名后，旧授权可能仍绑定原来的代码哈希，单纯关闭再开启系统开关不会更新该身份。本机系统日志会报告 `Failed to match existing code requirement`。仅重置当前应用对应的 `Accessibility` / `ScreenCapture` 授权，再由用户重新确认；不要清空其他应用的授权或修改 TCC 数据库。
 
@@ -93,10 +93,12 @@ TXT HTTPS endpoint 只用于显示码，选择设备不会覆盖 Launcher 配对
 
 ## 打包与跨平台验证
 
+左上角“设置”打开独立设置页，包含画质、码率、系统声音、反控与输入转换、检查更新及 Feedback。设置保存在本机；打开设置不会中断投屏。Feedback 在用户同意后打包诊断并向 Mosapi 提交，平台关联为 Windows 646 / macOS 647；线上产品关联字段仍待后台确认。实现与验证边界见 [设置与反馈](docs/architecture/settings-and-feedback.md)，Windows CI 与在线更新验收见 [发布约定](docs/release/version-and-mosapi.md)。
+
 Windows 仅构建 x64。日志写入 Tauri 应用日志目录，最多三个 1 MiB JSONL 文件轮转；每 30 秒采集一次数值性能指标及会话状态，不记录配对码、SDP/ICE 或音视频内容。底部“导出诊断”生成本机 JSON 报告，最多保留五份。系统声音仍为独立 WASAPI 采集，不采集麦克风；更新签名验证与 mDNS 发现保持。
 
 Release 使用速度优化等级 3、ThinLTO、单编译单元及符号裁剪。Windows updater 仅处理当前 NSIS/MSI 原始包，移除旧 ZIP 更新包兼容；macOS updater 仍保留 `.app.tar.gz` 支持。WGC、窗口缩略图和原生边框源码已删除；Windows Mouse 通过受 owner/lease 保护的 typed 原生输入层执行，旧无 owner 注入命令保持移除。
 
 `src-tauri/tauri.conf.json` 已开启 `nsis`、`msi`、macOS `.app` 和 `.dmg` bundle；macOS 最低版本固定为 13.0。`.github/workflows/build.yml` 使用 Windows runner、macOS 15 Intel runner（部署目标 13.0）和 macOS 15 Apple Silicon runner 构建。当前开发机是 Windows，不能在本机编译或验收 macOS bundle，macOS 产物需要使用 GitHub Actions 或真实 macOS 主机。
 
-跨电脑测试优先使用 `src-tauri/target/release/bundle/nsis/NearCast Desktop TX_0.1.0_x64-setup.exe`，安装包按当前用户安装并检查 WebView2；下载运行时需要联网。裸 EXE 为 `src-tauri/target/release/nearcast_desktop_tx.exe`，目标电脑需要已有 WebView2 Runtime。应用的 WebView2 数据和设备信任保存在当前用户的应用数据目录。当前产物尚未代码签名。
+跨电脑测试优先使用 `src-tauri/target/release/bundle/nsis/NearHub Cast Desktop Installer_0.1.0_x64-setup.exe`，安装包按当前用户安装并检查 WebView2；下载运行时需要联网。裸 EXE 为 `src-tauri/target/release/nearcast_desktop_tx.exe`，目标电脑需要已有 WebView2 Runtime。应用的 WebView2 数据和设备信任保存在当前用户的应用数据目录。当前产物尚未代码签名。

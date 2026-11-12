@@ -3,6 +3,25 @@ import {readFile, writeFile, mkdir, readdir, copyFile} from 'node:fs/promises';
 import {resolve, basename, join} from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {INSTALLER_NAME} from './name-installers.mjs';
+
+export function releasePlatforms(selection='all') {
+  if(!['all','windows'].includes(selection))throw new Error('Expected all or windows release platforms');
+  return selection==='windows'?['windows']:['windows','macos'];
+}
+export function releaseMatrix(selection='all') {
+  const platforms=releasePlatforms(selection);
+  return {include:[
+    {os:'windows-latest',target:'x86_64-pc-windows-msvc',platform:'windows',arch:'x86_64',bundles:'nsis,msi'},
+    {os:'macos-15-intel',target:'x86_64-apple-darwin',platform:'macos',arch:'x86_64',bundles:'app,dmg'},
+    {os:'macos-15',target:'aarch64-apple-darwin',platform:'macos',arch:'aarch64',bundles:'app,dmg'},
+  ].filter(row=>platforms.includes(row.platform))};
+}
+
+export function releasePackageName(version,platform,cpu,format){
+  const ext=format==='nsis'?'-setup.exe':format==='msi'?'.msi':'.app.tar.gz';
+  return INSTALLER_NAME+'-'+version+'-'+platform+'-'+cpu+ext;
+}
 
 export function releaseVersion(logical, run) {
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(logical)) throw new Error('Expected X.Y.Z');
@@ -69,23 +88,22 @@ async function prepare(target,platform,cpu,display,inputRoot,outputRoot) {
       const bundleBuild=execFileSync('/usr/libexec/PlistBuddy',['-c','Print :CFBundleVersion',plist],{encoding:'utf8'}).trim();
       if(bundleBuild!==String(version.build))throw new Error('Stale macOS app bundle');
     }
-    const ext=format==='nsis'?'-setup.exe':format==='msi'?'.msi':'.app.tar.gz';
-    const name='NearCast-Desktop-TX-'+display+'-'+platform+'-'+cpu+ext;
+    const name=releasePackageName(display,platform,cpu,format);
     const destination=join(output,name);await copyFile(original,destination);sign(destination,version.semver);
     const bytes=await readFile(destination);const sha256=hash(bytes);
     await writeFile(destination+'.sha256',sha256+'  '+name+'\n');
     const signature=(await readFile(destination+'.sig','utf8')).trim();
     verifySignedAsset(bytes,signature,await readFile('src-tauri/update.pub','utf8'),version.semver);
-    const url='https://github.com/'+process.env.GITHUB_REPOSITORY+'/releases/download/v'+display+'/'+name;
+    const url='https://github.com/'+process.env.GITHUB_REPOSITORY+'/releases/download/v'+display+'/'+encodeURIComponent(name);
     assets.push({platform,arch:cpu,format,name,url,size:bytes.length,sha256,signature});
   }
   await writeFile(join(output,'assets.json'),JSON.stringify(assets,null,2)+'\n');
 }
-async function aggregate(display,inputRoot,outputRoot,channel) {
+async function aggregate(display,inputRoot,outputRoot,channel,selection='all') {
   const [x,y,z,b]=display.split('.');const version=releaseVersion(x+'.'+y+'.'+z,b);
-  const files=await walk(inputRoot);let notes='NearCast Desktop TX '+display;
+  const files=await walk(inputRoot);let notes='NearHub Cast '+display;
   try{notes=await readFile('docs/releases/v'+version.logical+'.md','utf8');}catch{}
-  for(const platform of ['windows','macos']) {
+  for(const platform of releasePlatforms(selection)) {
     const dest=resolve(outputRoot,platform);await mkdir(dest,{recursive:true});
     const assets=[];
     for(const path of files.filter(p=>basename(p)==='assets.json')){

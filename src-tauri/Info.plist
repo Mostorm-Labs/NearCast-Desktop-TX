@@ -3,19 +3,19 @@
 <plist version="1.0">
 <dict>
   <key>NSLocalNetworkUsageDescription</key>
-  <string>NearCast Desktop TX 需要访问局域网，以发现 NearCast 接收设备。</string>
+  <string>NearHub Cast 需要访问局域网，以发现 NearCast 接收设备。</string>
   <key>NSBonjourServices</key>
   <array>
     <string>_nearcast._tcp</string>
   </array>
   <key>NSScreenCaptureUsageDescription</key>
-  <string>NearCast Desktop TX 需要屏幕录制权限，才能把你选择的屏幕发送到接收端。</string>
+  <string>NearHub Cast 需要屏幕录制权限，才能把你选择的屏幕发送到接收端。</string>
   <!-- WebKit gates navigator.mediaDevices on an audio/video usage declaration,
        including getDisplayMedia. This does not request microphone capture;
        the sender only requests display/system audio. -->
   <key>NSMicrophoneUsageDescription</key>
-  <string>NearCast Desktop TX 需要媒体权限，以便发送你选择的显示/系统音频。</string>
+  <string>NearHub Cast 需要媒体权限，以便发送你选择的显示/系统音频。</string>
   <key>NSAccessibilityUsageDescription</key>
-  <string>NearCast Desktop TX 需要辅助功能权限，才能在 WebCast 反向控制中注入鼠标事件。</string>
+  <string>NearHub Cast 需要辅助功能权限，才能在 WebCast 反向控制中注入鼠标事件。</string>
 </dict>
 </plist>

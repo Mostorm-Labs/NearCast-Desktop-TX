@@ -2096,6 +2096,7 @@ dependencies = [
  "tokio",
  "windows 0.61.3",
  "x509-parser",
+ "zip",
 ]
 
 [[package]]

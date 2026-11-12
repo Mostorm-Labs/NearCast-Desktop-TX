@@ -7,6 +7,10 @@ fn main() {
     }
     println!("cargo:rerun-if-env-changed=NEARCAST_BUILD_NUMBER");
     println!("cargo:rerun-if-env-changed=NEARCAST_LOGICAL_VERSION");
+    println!("cargo:rerun-if-env-changed=NEARCAST_UPDATE_CHANNEL");
+    let channel=std::env::var("NEARCAST_UPDATE_CHANNEL").unwrap_or_else(|_|"release".into());
+    assert!(["release","beta","alpha"].contains(&channel.as_str()),"Invalid NEARCAST_UPDATE_CHANNEL");
+    println!("cargo:rustc-env=NEARCAST_UPDATE_CHANNEL={channel}");
     let build = std::env::var("NEARCAST_BUILD_NUMBER").unwrap_or_else(|_| "0".into());
     assert!(
         !build.is_empty() && build.bytes().all(|c| c.is_ascii_digit()),

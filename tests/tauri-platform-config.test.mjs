@@ -8,6 +8,10 @@ const root = process.cwd();
 test('Tauri bundle declares Windows installers and macOS 13 minimum', () => {
   const config = JSON.parse(fs.readFileSync(path.join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'));
   assert.equal(config.bundle.active, true);
+  assert.equal(config.productName,'NearHub Cast');
+  assert.equal(config.app.windows[0].title,'NearHub Cast');
+  assert.equal(config.identifier,'com.mostorm.nearhub.cast');
+  assert.equal(config.bundle.windows.wix.upgradeCode,undefined,'new product uses its own default installation identity');
   assert.deepEqual(config.bundle.targets, ['nsis', 'msi', 'app', 'dmg']);
   assert.equal(config.bundle.windows.webviewInstallMode.type, 'downloadBootstrapper');
   assert.equal(config.bundle.macOS.minimumSystemVersion, '13.0');

@@ -17,6 +17,8 @@ const KEY: &str = include_str!("../update.pub");
 const META_LIMIT: usize = 2 * 1024 * 1024;
 const PACKAGE_LIMIT: u64 = 512 * 1024 * 1024;
 const BASE: &str = "https://mosapi.auditoryworks.co/v1/updates/product/";
+// Fixed at build time: production clients cannot be switched by an IPC URL.
+const CHANNEL: &str = env!("NEARCAST_UPDATE_CHANNEL");
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Version(pub [u64; 4]);
@@ -243,7 +245,7 @@ fn validate_manifest(
         || manifest.logical_version != format!("{}.{}.{}", v.0[0], v.0[1], v.0[2])
         || manifest.platform != os
         || manifest.product_slug != slug(os)?
-        || manifest.channel != "release"
+        || manifest.channel != CHANNEL
     {
         return Err("Signed update manifest does not match product/version/channel".into());
     }
@@ -281,7 +283,7 @@ fn cache(app: &AppHandle) -> Result<PathBuf, String> {
 }
 fn view(runtime: &Runtime) -> Value {
     json!({"status":if runtime.ready{"ready"}else if runtime.candidate.is_some(){"available"}else{"current"},
-        "currentVersion":current().text(),"update":runtime.candidate.as_ref().map(|c|json!({"version":c.manifest.version,"notes":c.manifest.notes,"size":c.asset.size}))})
+        "currentVersion":current().text(),"channel":CHANNEL,"update":runtime.candidate.as_ref().map(|c|json!({"version":c.manifest.version,"notes":c.manifest.notes,"size":c.asset.size}))})
 }
 fn verify_package(candidate: &Candidate, bytes: &[u8]) -> Result<(), String> {
     if bytes.len() as u64 != candidate.asset.size
@@ -361,7 +363,7 @@ pub async fn check(app: AppHandle, state: &State) -> Result<Value, String> {
         ("populate[otaFiles][populate][0]", "file"),
         ("populate[descriptions][populate][0]", "*"),
         ("limit", "1000"),
-        ("filters[state][$eq]", "release"),
+        ("filters[state][$eq]", CHANNEL),
     ]);
     let client = client()?;
     let payload: Value =
@@ -372,7 +374,7 @@ pub async fn check(app: AppHandle, state: &State) -> Result<Value, String> {
         .filter_map(|row| {
             let row = attrs(row);
             let v = Version::parse(&string(row, "version")).ok()?;
-            if string(row, "state") != "release" || v <= current() {
+            if string(row, "state") != CHANNEL || v <= current() {
                 return None;
             }
             let files = list(row.get("otaFiles")?)

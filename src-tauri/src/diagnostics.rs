@@ -171,6 +171,15 @@ pub fn export(app: &AppHandle) -> Result<String, String> {
     fs::write(&path, bytes).map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().into_owned())
 }
+pub fn feedback_report() -> Result<Vec<u8>, String> {
+    let guard = STORE.lock().map_err(|_| "diagnostics lock poisoned")?;
+    let rows = guard
+        .as_ref()
+        .ok_or("Diagnostics not initialized")?
+        .collect()?;
+    serde_json::to_vec(&serde_json::json!({"schemaVersion":1,"product":"NearHub Cast","version":format!("{}.{}",env!("NEARCAST_LOGICAL_VERSION"),env!("NEARCAST_BUILD_NUMBER")),
+        "platform":std::env::consts::OS,"arch":std::env::consts::ARCH,"videoBackend":"browser","events":rows})).map_err(|e|e.to_string())
+}
 #[cfg(test)]
 mod tests {
     use super::*;

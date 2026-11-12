@@ -259,6 +259,24 @@ try {
   assert.equal(await page.evaluate(()=>document.querySelector('#preview').srcObject.getVideoTracks()[0]===testReceiver.browserVideoTrack),true,'the original browser track must reach preview/WebRTC');
   assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().capture.backend),'browser');
   assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().capture.audio.state),'capturing');
+  const settingsFrames=await page.evaluate(()=>testReceiver.frames);
+  await page.locator('#settings-open').click();
+  assert.equal(await page.locator('#settings-general').isVisible(),true);
+  if(process.env.SETTINGS_SCREENSHOT)await page.screenshot({path:process.env.SETTINGS_SCREENSHOT,fullPage:true});
+  assert.equal(await page.locator('#casting-view').isVisible(),false);
+  await page.locator('#video-resolution').selectOption('1280x720');
+  await page.locator('#video-bitrate-mode').selectOption('dynamic');
+  await page.locator('#video-bitrate').selectOption('8000');
+  await page.waitForFunction(n=>testReceiver.frames>n+3,settingsFrames);
+  assert.equal(await page.evaluate(()=>testReceiver.browserVideoTrack.readyState),'live');
+  await page.locator('#settings-close').click();
+  assert.equal(await page.locator('#casting-view').isVisible(),true);
+  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('nearhub-cast-settings-v1')).video.resolution),'1280x720');
+  await page.locator('#settings-open').click();
+  await page.locator('#video-resolution').selectOption('1920x1080');
+  await page.locator('#video-bitrate-mode').selectOption('fixed');
+  await page.locator('#video-bitrate').selectOption('12000');
+  await page.locator('#settings-close').click();
   await page.locator('#stop-share-button').click();
   const beforeRestart = await page.evaluate(() => testReceiver.frames);
   await share(false);
@@ -272,7 +290,7 @@ try {
     const audio=[...stats.values()].find(r=>r.type==='outbound-rtp'&&r.kind==='audio');
     return stats.get(audio.codecId).mimeType.toLowerCase();
   }),'audio/opus');
-  await page.evaluate(()=>{testReceiver.armInput=true;});await page.locator('#input-enabled').check();
+  await page.evaluate(()=>{testReceiver.armInput=true;});await page.locator('#input-enabled').evaluate(el=>{el.checked=true;el.dispatchEvent(new Event('change'));});
   await page.waitForFunction(()=>testReceiver.inputActive||testReceiver.error);
   assert.equal(await page.evaluate(()=>testReceiver.error),undefined);
   await page.evaluate(async()=>{
@@ -330,7 +348,7 @@ try {
   await page.waitForFunction(()=>__nearcastTouchbackDiagnostics().touchContacts===0);
   const beforeMouse=await page.evaluate(()=>({frames:testReceiver.frames,streamId:testReceiver.inputStreamId}));
   await page.evaluate(()=>{testReceiver.requestedInputTypes=['mouse'];});
-  await page.locator('#input-enabled').uncheck();await page.locator('#input-enabled').check();
+  await page.locator('#input-enabled').evaluate(el=>{el.checked=false;el.dispatchEvent(new Event('change'));});await page.locator('#input-enabled').evaluate(el=>{el.checked=true;el.dispatchEvent(new Event('change'));});
   await page.waitForFunction(id=>testReceiver.inputStreamId>id&&__nearcastTouchbackDiagnostics().acceptedInputTypes.join(',')==='mouse',beforeMouse.streamId);
   assert.equal(await page.evaluate(()=>testReceiver.nativeOwner.maxContacts),0);
   await page.evaluate(async()=>{
@@ -380,7 +398,7 @@ try {
   await page.evaluate(()=>{testReceiver.nativeApplyDelayMs=0;});
   const mouseStream=await page.evaluate(()=>testReceiver.inputStreamId);
   await page.evaluate(()=>{testReceiver.requestedInputTypes=['touch'];});
-  await page.locator('#input-enabled').uncheck();await page.locator('#input-enabled').check();
+  await page.locator('#input-enabled').evaluate(el=>{el.checked=false;el.dispatchEvent(new Event('change'));});await page.locator('#input-enabled').evaluate(el=>{el.checked=true;el.dispatchEvent(new Event('change'));});
   await page.waitForFunction(id=>testReceiver.inputStreamId>id&&__nearcastTouchbackDiagnostics().acceptedInputTypes.join(',')==='touch',mouseStream);
   await page.evaluate(()=>testReceiver.sendSample(1,0));await page.waitForFunction(()=>__nearcastTouchbackDiagnostics().submittedSeqId===1);
   await page.evaluate(()=>testReceiver.sendSample(2,2));await page.waitForFunction(()=>__nearcastTouchbackDiagnostics().submittedSeqId===2);

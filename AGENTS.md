@@ -1,4 +1,8 @@
-# NearCast Desktop TX 发布约定
+# NearHub Cast 发布约定
+
+## 产品命名
+
+软件、窗口标题、已安装快捷方式和 macOS 应用包显示为 `NearHub Cast`。安装包及安装器标题采用 `NearHub Cast Desktop Installer`，文件名保留版本、平台和架构。尚未安装过旧产品，不保留旧产品名派生的安装身份。Mosapi slug/product-id、协议标识及更新清单名称属于后台契约，保持现有值。模板与打包后命名见 `src-tauri/installer/README.md` 和 `scripts/name-installers.mjs`。
 
 ## 采集架构
 
@@ -17,7 +21,7 @@
 
 ## Mosapi 产品标识
 
-NearCast Desktop TX 的更新查询按平台使用以下 product slug：
+NearHub Cast 的更新查询按平台使用以下 product slug：
 
 | 平台 | product slug | product-id |
 | --- | --- | --- |

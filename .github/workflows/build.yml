@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -31,6 +32,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust-target }}
+      - run: npm ci
       - name: Run JavaScript tests
         run: npm test
       - name: Check Rust backend
@@ -38,9 +40,12 @@ jobs:
       - name: Test Rust backend
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --target ${{ matrix.rust-target }}
       - name: Build Tauri bundle
-        run: npx --yes @tauri-apps/cli@2 build --target ${{ matrix.rust-target }} --bundles ${{ matrix.bundles }}
+        run: node node_modules/@tauri-apps/cli/tauri.js build --target ${{ matrix.rust-target }} --bundles ${{ matrix.bundles }} -- --locked
         env:
           CI: true
+      - name: Name desktop installers
+        if: runner.os == 'Windows'
+        run: node scripts/name-installers.mjs "src-tauri/target/${{ matrix.rust-target }}/release/bundle"
       - uses: actions/upload-artifact@v4
         with:
           name: nearcast-desktop-tx-${{ matrix.rust-target }}

@@ -33,7 +33,7 @@ export function touchbackSummary(info) {
 
 export function touchbackError(status, info) {
   const value = normalizePlatformInfo(info);
-  if (status === 'not_authorized' && value.os === 'macos') return new Error('macOS 反向控制需要在“系统设置 → 隐私与安全性 → 辅助功能”中允许 NearCast Desktop TX，然后重新连接接收端。');
+  if (status === 'not_authorized' && value.os === 'macos') return new Error('macOS 反向控制需要在“系统设置 → 隐私与安全性 → 辅助功能”中允许 NearHub Cast，然后重新连接接收端。');
   if (status === 'not_supported') return new Error('当前平台不支持 Touchback；屏幕分享仍可继续。');
   return new Error(`Touchback 控制失败：${status}`);
 }
@@ -45,7 +45,7 @@ export function screenCaptureError(error, info) {
     return new Error(`${platformSummary(value)}：当前 WebView 不提供屏幕分享，请更新应用或使用受支持的系统。`);
   }
   if (value.os === 'macos' && (original.name === 'NotAllowedError' || /denied|permission|cancel/i.test(original.message))) {
-    return new Error('macOS 屏幕分享需要在“系统设置 → 隐私与安全性 → 屏幕录制”中允许 NearCast Desktop TX，然后重新点击开始分享。');
+    return new Error('macOS 屏幕分享需要在“系统设置 → 隐私与安全性 → 屏幕录制”中允许 NearHub Cast，然后重新点击开始分享。');
   }
   return original;
 }

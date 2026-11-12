@@ -24,10 +24,10 @@ export function appIsRunning(processes, executable) {
 function build() {
   if (process.platform !== 'darwin') throw new Error('This build command requires macOS');
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-  const app = resolve(root, 'src-tauri/target/debug/bundle/macos/NearCast Desktop TX.app');
+  const app = resolve(root, 'src-tauri/target/debug/bundle/macos/NearHub Cast.app');
   const executable = resolve(app, 'Contents/MacOS/nearcast_desktop_tx');
   const processes = execFileSync('/bin/ps', ['-axo', 'pid=,comm='], {encoding: 'utf8'});
-  if (appIsRunning(processes, executable)) throw new Error('请先退出 NearCast Desktop TX，再构建；覆盖运行中的应用会使系统授权失效。');
+  if (appIsRunning(processes, executable)) throw new Error('请先退出 NearHub Cast，再构建；覆盖运行中的应用会使系统授权失效。');
   const identities = execFileSync('/usr/bin/security', ['find-identity', '-v', '-p', 'codesigning'], {encoding: 'utf8'});
   const identity = selectSigningIdentity(identities, process.env.APPLE_SIGNING_IDENTITY);
   console.log(`Building with stable signing identity: ${identity}`);

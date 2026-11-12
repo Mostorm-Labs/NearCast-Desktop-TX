@@ -12,6 +12,11 @@ on:
         type: choice
         options: [alpha, beta, release]
         default: alpha
+      platforms:
+        description: Platforms to build and publish
+        type: choice
+        options: [windows, all]
+        default: windows
 concurrency:
   group: tx-release
   cancel-in-progress: false
@@ -25,6 +30,8 @@ jobs:
       build: ${{ steps.version.outputs.build }}
       display: ${{ steps.version.outputs.display }}
       channel: ${{ steps.version.outputs.channel }}
+      platforms: ${{ steps.version.outputs.platforms }}
+      matrix: ${{ steps.version.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -37,6 +44,7 @@ jobs:
           BUILD_NUMBER: ${{ github.run_number }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
           CHANNEL: ${{ inputs.channel || 'release' }}
+          PLATFORMS: ${{ inputs.platforms || 'all' }}
           UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           MOSAPI_TOKEN: ${{ secrets.MOSAPI_TOKEN }}
         run: |
@@ -44,37 +52,23 @@ jobs:
           test -n "$MOSAPI_TOKEN" || { echo "Configure MOSAPI_TOKEN"; exit 1; }
           test "$RUN_ATTEMPT" = 1 || { echo "Create a new workflow run to allocate a new Build"; exit 1; }
           node --input-type=module <<'JS'
-          import {releaseVersion} from './scripts/release.mjs';
+          import {releaseVersion,releaseMatrix} from './scripts/release.mjs';
           import {appendFileSync} from 'node:fs';
           const v=releaseVersion(process.env.INPUT_VERSION || process.env.REF_NAME.replace(/^v/,''),process.env.BUILD_NUMBER);
           appendFileSync(process.env.GITHUB_OUTPUT,'logical='+v.logical+'\nbuild='+v.build+'\ndisplay='+v.display+'\nchannel='+process.env.CHANNEL+'\n');
+          appendFileSync(process.env.GITHUB_OUTPUT,'platforms='+process.env.PLATFORMS+'\nmatrix='+JSON.stringify(releaseMatrix(process.env.PLATFORMS))+'\n');
           JS
   build:
     needs: version
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            platform: windows
-            arch: x86_64
-            bundles: nsis,msi
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-            platform: macos
-            arch: x86_64
-            bundles: app,dmg
-          - os: macos-15
-            target: aarch64-apple-darwin
-            platform: macos
-            arch: aarch64
-            bundles: app,dmg
+      matrix: ${{ fromJSON(needs.version.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     env:
       MACOSX_DEPLOYMENT_TARGET: '13.0'
       NEARCAST_BUILD_NUMBER: ${{ needs.version.outputs.build }}
       NEARCAST_LOGICAL_VERSION: ${{ needs.version.outputs.logical }}
+      NEARCAST_UPDATE_CHANNEL: ${{ needs.version.outputs.channel }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -93,6 +87,8 @@ jobs:
           targets: ${{ matrix.target }}
       - run: node --test tests/*.test.mjs
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml --target ${{ matrix.target }}
+        env:
+          NEARCAST_UPDATE_CHANNEL: release
       - name: Configure signed release
         run: node scripts/release.mjs config "${{ needs.version.outputs.logical }}" "${{ needs.version.outputs.build }}" "${{ matrix.platform }}"
       - name: Require Apple identity for public releases
@@ -108,6 +104,9 @@ jobs:
           test -n "$APPLE_TEAM_ID"
       - name: Build update bundles
         run: node node_modules/@tauri-apps/cli/tauri.js build --config src-tauri/tauri.release.conf.json --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
+      - name: Name desktop installers
+        if: runner.os == 'Windows'
+        run: node scripts/name-installers.mjs "src-tauri/target/${{ matrix.target }}/release/bundle"
       - name: Name and sign update assets
         run: node scripts/release.mjs prepare "${{ matrix.target }}" "${{ matrix.platform }}" "${{ matrix.arch }}" "${{ needs.version.outputs.display }}" "src-tauri/target/${{ matrix.target }}/release/bundle" release
       - uses: actions/upload-artifact@v4
@@ -135,15 +134,20 @@ jobs:
           path: artifacts
           merge-multiple: true
       - name: Generate signed platform manifests
-        run: node scripts/release.mjs aggregate "${{ needs.version.outputs.display }}" artifacts release "${{ needs.version.outputs.channel }}"
+        run: node scripts/release.mjs aggregate "${{ needs.version.outputs.display }}" artifacts release "${{ needs.version.outputs.channel }}" "${{ needs.version.outputs.platforms }}"
       - name: Bundle one-link release resources
         env:
           DISPLAY_VERSION: ${{ needs.version.outputs.display }}
+          PLATFORMS: ${{ needs.version.outputs.platforms }}
         run: |
           cd release
-          zip -r "../NearCast-Desktop-TX-$DISPLAY_VERSION-release-assets.zip" windows macos
+          if [ "$PLATFORMS" = windows ]; then
+            zip -r "../NearHub-Cast-$DISPLAY_VERSION-release-assets.zip" windows
+          else
+            zip -r "../NearHub-Cast-$DISPLAY_VERSION-release-assets.zip" windows macos
+          fi
           cd ..
-          sha256sum "NearCast-Desktop-TX-$DISPLAY_VERSION-release-assets.zip" > "NearCast-Desktop-TX-$DISPLAY_VERSION-release-assets.zip.sha256"
+          sha256sum "NearHub-Cast-$DISPLAY_VERSION-release-assets.zip" > "NearHub-Cast-$DISPLAY_VERSION-release-assets.zip.sha256"
       - name: Read release notes
         id: notes
         run: |
@@ -154,8 +158,9 @@ jobs:
         env:
           DISPLAY_VERSION: ${{ needs.version.outputs.display }}
         run: |
-          gh release create "v$DISPLAY_VERSION" --target "$GITHUB_SHA" --title "NearCast Desktop TX $DISPLAY_VERSION" --draft --generate-notes
-          gh release upload "v$DISPLAY_VERSION" release/windows/* release/macos/* "NearCast-Desktop-TX-$DISPLAY_VERSION-release-assets.zip" "NearCast-Desktop-TX-$DISPLAY_VERSION-release-assets.zip.sha256"
+          gh release create "v$DISPLAY_VERSION" --target "$GITHUB_SHA" --title "NearHub Cast $DISPLAY_VERSION" --draft --generate-notes
+          find release -type f ! -name changelog.md -print0 | xargs -0 gh release upload "v$DISPLAY_VERSION"
+          gh release upload "v$DISPLAY_VERSION" "NearHub-Cast-$DISPLAY_VERSION-release-assets.zip" "NearHub-Cast-$DISPLAY_VERSION-release-assets.zip.sha256"
       - name: Upload Windows update to Mosapi
         id: windows
         uses: Mostorm-Labs/mosapi-action@0c75fc1737a6f89ce544c82904b5ce1984c87a53 # v1.0.0
@@ -164,7 +169,7 @@ jobs:
           folder-id: '546'
           product-id: '646'
           product-slug: nearcast-tx-windows
-          project-name: NearCast Desktop TX
+          project-name: NearHub Cast
           changelog: ${{ steps.notes.outputs.changelog }}
           version: ${{ needs.version.outputs.display }}
           state: ${{ needs.version.outputs.channel }}
@@ -172,13 +177,14 @@ jobs:
           artifacts: release/windows/*
       - name: Upload macOS update to Mosapi
         id: macos
+        if: needs.version.outputs.platforms == 'all'
         uses: Mostorm-Labs/mosapi-action@0c75fc1737a6f89ce544c82904b5ce1984c87a53 # v1.0.0
         with:
           token: ${{ secrets.MOSAPI_TOKEN }}
           folder-id: '546'
           product-id: '647'
           product-slug: nearcast-tx-macos
-          project-name: NearCast Desktop TX
+          project-name: NearHub Cast
           changelog: ${{ steps.notes.outputs.changelog }}
           version: ${{ needs.version.outputs.display }}
           state: ${{ needs.version.outputs.channel }}
@@ -192,11 +198,14 @@ jobs:
           MACOS_UPDATE: ${{ steps.macos.outputs.update-id }}
           WINDOWS_COUNT: ${{ steps.windows.outputs.uploaded-count }}
           MACOS_COUNT: ${{ steps.macos.outputs.uploaded-count }}
+          PLATFORMS: ${{ needs.version.outputs.platforms }}
         run: |
           test -n "$WINDOWS_UPDATE"
-          test -n "$MACOS_UPDATE"
           test "$WINDOWS_COUNT" = 9
-          test "$MACOS_COUNT" = 9
+          if [ "$PLATFORMS" = all ]; then
+            test -n "$MACOS_UPDATE"
+            test "$MACOS_COUNT" = 9
+          fi
           if [ "$CHANNEL" = release ]; then
             gh release edit "v$DISPLAY_VERSION" --draft=false --latest
           else

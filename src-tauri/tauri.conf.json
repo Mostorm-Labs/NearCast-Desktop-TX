@@ -1,27 +1,34 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "NearCast Desktop TX",
+  "productName": "NearHub Cast",
   "version": "0.1.0",
-  "identifier": "com.mostorm.nearcast.desktop.tx",
+  "identifier": "com.mostorm.nearhub.cast",
   "build": {
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
-        "title": "NearCast Desktop TX",
+        "title": "NearHub Cast",
         "width": 960,
         "height": 640
       }
     ],
     "security": {
       "csp": null,
-      "capabilities": [{
-        "identifier": "main-events",
-        "description": "Receive native LAN discovery snapshots in the sender window",
-        "windows": ["main"],
-        "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
-      }]
+      "capabilities": [
+        {
+          "identifier": "main-events",
+          "description": "Receive native LAN discovery snapshots in the sender window",
+          "windows": [
+            "main"
+          ],
+          "permissions": [
+            "core:event:allow-listen",
+            "core:event:allow-unlisten"
+          ]
+        }
+      ]
     },
     "withGlobalTauri": true
   },
@@ -33,10 +40,27 @@
   },
   "bundle": {
     "active": true,
-    "icon": ["icons/icon.ico", "icons/icon.png"],
-    "targets": ["nsis", "msi", "app", "dmg"],
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "targets": [
+      "nsis",
+      "msi",
+      "app",
+      "dmg"
+    ],
     "windows": {
-      "webviewInstallMode": {"type": "downloadBootstrapper", "silent": true}
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "wix": {
+        "template": "installer/main.wxs"
+      },
+      "nsis": {
+        "template": "installer/installer.nsi"
+      }
     },
     "macOS": {
       "minimumSystemVersion": "13.0",

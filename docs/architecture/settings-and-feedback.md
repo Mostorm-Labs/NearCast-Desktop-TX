@@ -1,0 +1,30 @@
+# 设置页与诊断反馈
+
+设置入口位于左上角，与配对和投屏页面共享同一个 WebView。打开设置只切换可见视图，不刷新页面，不释放 MediaStream、WebRTC 或输入会话。返回时按当前连接状态恢复配对或投屏界面。
+
+通用设置包含分辨率、动态/固定码率、码率、系统声音、反控开关及 Touch/Mouse 显式转换策略。画质和声音在下次分享时生效；反控开关立即生效；转换需点击“应用转换配置”，释放旧输入并重新协商。设置保存于本机 WebView localStorage 的 `nearhub-cast-settings-v1`，升级不清除此键；首次运行默认关闭反控，保存后沿用用户的选择。损坏或无法读取的设置回退默认值。接收端仍需独立启用反控。
+
+检查更新页复用原有后台更新管理器，显示当前版本、构建渠道、下载状态和错误。点击检查会打开可确认安装的弹窗。设置页面在安装期间同样不可操作。安装前停止音视频并释放输入，签名、版本和缓存校验仍由 Rust 执行。测试渠道固定于构建时，不通过前端 URL 或 IPC 选择。
+
+## Feedback
+
+实现参照 RX `scripts/Upload-NearCastLogs.ps1`：
+
+1. 用户填写邮箱、问题描述，并明确同意上传。
+2. Rust 从日志存储生成 `diagnostics.json`，打包为 ZIP（最多 4 MiB），不接受前端任意路径、URL 或产品编号。
+3. 公共 Mosapi `/v1/upload` 接收 multipart：`files` 的 filename 为 `blob`，`fileInfo` 为 `{"name":"nearhub-cast-diagnostics.zip","folder":"diagnostic"}`。
+4. 取得文件 ID 后 POST `/v1/feedbacks`，将附件 ID 关联到 `content.attachments`；只有返回有效反馈 ID 才显示成功。
+
+诊断包含版本、平台、架构及最多三个 1 MiB 轮转日志中的白名单数值指标和状态；不包含音视频、配对码、SDP/ICE、设备密钥、窗口标题或任意文件。上传失败保留表单；单次超时 90 秒，同时只允许一次提交。附件成功但反馈记录失败时，不显示成功，重试会重新上传附件。
+
+Windows 使用 product `646`，macOS 使用 `647`，由 Rust 固定选择。现有 RX 示例使用 `application.connect.id=2`；TX 同时提交 `product.connect.id` 作为平台归属。**这个产品关系字段尚需 Mosapi 后台 schema 和真实服务验证，不能把本地 mock 通过视为线上可用。** 客户端不携带 CI 的 `MOSAPI_TOKEN`；若公共服务不允许匿名 Feedback，需要后台提供面向客户端的受限提交机制，不把管理 token 放入安装包。
+
+## 验证
+
+- `node --test tests/*.test.mjs`：设置保存、异常回退、发布矩阵和签名资产约束。
+- `node tests/settings-browser.integration.mjs`：设置导航、页面返回、保存、Feedback 同意、确认编号及失败重试。
+- `node tests/webcast-browser.integration.mjs`：设置页面打开时实际 RTP 视频仍持续解码，浏览器原轨道保持 live；保留音频、反控和切屏覆盖。
+- `node tests/update-browser.integration.mjs`：启动提示、后台下载、暂不更新、再次打开、安装前清理与失败提示。
+- `cargo test --locked --manifest-path src-tauri/Cargo.toml`：真实本地 HTTP mock 检查 multipart ZIP、附件 ID、平台 product 和 HTTP 401 中止，以及原有清单/包签名和缓存篡改拒绝。
+
+Windows CI/Mosapi/安装重启的最终验收步骤见 [发布约定](../release/version-and-mosapi.md)。macOS 本机安装与更新仍需 macOS 主机验证。
