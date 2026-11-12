@@ -32,6 +32,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust-target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: build-${{ matrix.rust-target }}
       - run: npm ci
       - name: Run JavaScript tests
         run: npm test
