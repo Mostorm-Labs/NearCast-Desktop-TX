@@ -19,7 +19,6 @@ const listen = tauri.event?.listen ?? (async () => () => {});
 const codeView = document.querySelector('#code-view');
 const castingView = document.querySelector('#casting-view');
 const pairForm = document.querySelector('#pair-form');
-const pairDialog=document.querySelector('#pair-dialog');
 const digits = [...document.querySelectorAll('.code-digit')];
 const connectButton = document.querySelector('#connect-button');
 const codeError = document.querySelector('#code-error');
@@ -221,8 +220,6 @@ const setView = status => {
   codeView.hidden = connected;
   castingView.hidden = !connected;
   settingsPage.render();
-  if(connected&&pairDialog.open)pairDialog.close();
-  document.querySelector('#pair-close').disabled=status!=='idle';
   connectButton.disabled = status !== 'idle';
   digits.forEach(input => { input.disabled = status !== 'idle'; });
   shareButton.disabled = capturePending || !['connected', 'sharing'].includes(status);
@@ -340,17 +337,29 @@ trustConfirm.addEventListener('click', async () => { try { await trustManager.co
 trustRetry.addEventListener('click', () => trustManager.prepare());
 trustCancel.addEventListener('click', () => { trustManager.cancel(); trustDevice = null; client.cancelCodeDisplay(); codeDisplayRequestId = null; setCodeDisplayStatus('已取消指纹核对，可现场输入配对码。'); });
 trustRevoke.addEventListener('click', async () => { try { client.cancelCodeDisplay(); codeDisplayRequestId = null; await trustManager.revoke(); setCodeDisplayStatus('已撤销信任。'); } catch (error) { setError(trustError, error); } });
-const closePairing=()=>{
-  if(currentStatus!=='idle')return;
-  trustManager.cancel();trustDevice=null;client.cancelCodeDisplay();codeDisplayRequestId=null;
-  digits.forEach(input=>{input.value='';});setError(codeError,null);pairDialog.close();
-};
-document.querySelector('#pair-close').addEventListener('click',closePairing);
-pairDialog.addEventListener('cancel',event=>{event.preventDefault();closePairing();});
+const connectionTabs=[document.querySelector('#connect-tab-code'),document.querySelector('#connect-tab-devices')];
+const selectConnectionTab=tab=>{
+  const manual=tab===connectionTabs[0];
+  for(const button of connectionTabs){const selected=button===tab;button.setAttribute('aria-selected',String(selected));button.tabIndex=selected?0:-1;document.getElementById(button.getAttribute('aria-controls')).hidden=!selected;}
+  document.querySelector('#connect-heading').textContent=manual?'输入配对码':'选择接收端';
+  document.querySelector('#connect-description').textContent=manual?'输入接收端显示的 4 位配对码，直接连接。':'选择局域网中的设备，输入接收端显示的配对码。';
 
+};
+for(const [index,tab]of connectionTabs.entries()){
+  tab.addEventListener('click',()=>selectConnectionTab(tab));
+  tab.addEventListener('keydown',event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?1:1-index;selectConnectionTab(connectionTabs[next]);connectionTabs[next].focus();}});
+}
+
+document.querySelector('#pair-clear-device').addEventListener('click',()=>{
+  if(currentStatus!=='idle')return;
+  trustManager.cancel();trustDevice=null;selectedDevice=null;selectedEndpoint=defaultEndpoint;client.endpoint=defaultEndpoint;
+  client.cancelCodeDisplay();codeDisplayRequestId=null;setCodeDisplayStatus('');setError(codeError,null);
+  document.querySelector('#pair-device-name').hidden=true;document.querySelector('#pair-clear-device').hidden=true;
+  digits.forEach(input=>{input.value='';});digits[0].focus();
+});
 pairForm.addEventListener('submit', async event => {
   event.preventDefault();
-  if(!selectedDevice){setError(codeError,new Error('请先重新选择接收端。'));return;}
+  if(currentStatus!=='idle')return;
   const pairCode = codeValue();
   if (!/^[A-Z0-9]{4}$/.test(pairCode)) { setError(codeError, new Error('请输入 4 位字母或数字配对码')); return; }
   setError(codeError, null);
@@ -368,7 +377,6 @@ pairForm.addEventListener('submit', async event => {
     setError(codeError, error);
     await client.stop({notify: false});
     setView('idle');
-    if(!pairDialog.open)pairDialog.showModal();
   }
 });
 shareButton.addEventListener('click', async () => {
@@ -417,7 +425,8 @@ const renderDevices = devices => {
         if (selectedDevice?.discoveryId !== device.discoveryId) digits.forEach(input => { input.value = ''; });
         selectedDevice = device; trustDevice = device; selectedEndpoint = defaultEndpoint; client.endpoint = selectedEndpoint;
         document.querySelector('#pair-device-name').textContent=device.displayName;
-        if(!pairDialog.open)pairDialog.showModal();digits[0].focus();setError(codeError, null);
+        document.querySelector('#pair-device-name').hidden=false;document.querySelector('#pair-clear-device').hidden=false;
+        selectConnectionTab(connectionTabs[0]);digits[0].focus();setError(codeError, null);
         setCodeDisplayStatus(device.supportsTrustDisplay ? '正在请求现场核对指纹…' : '该接收端不支持指纹显示，请现场输入配对码。');
         trustManager.select(device);
       });

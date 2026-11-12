@@ -18,23 +18,16 @@
     </section>
 
     <section id="code-view" class="sender-panel">
+      <div class="connection-tabs" role="tablist" aria-label="连接方式">
+        <button id="connect-tab-code" role="tab" aria-selected="true" aria-controls="connect-panel-code" type="button">输入配对码</button>
+        <button id="connect-tab-devices" role="tab" aria-selected="false" aria-controls="connect-panel-devices" tabindex="-1" type="button">查找设备</button>
+      </div>
       <div class="panel-eyebrow">WEBCAST SENDER</div>
-      <h1>选择接收端</h1>
-      <p class="panel-desc">选择局域网中的设备，输入接收端显示的配对码。</p>
+      <h1 id="connect-heading">输入配对码</h1>
+      <p id="connect-description" class="panel-desc">输入接收端显示的 4 位配对码，直接连接。</p>
       <p id="platform-status" class="platform-status" aria-live="polite">正在读取平台能力…</p>
 
-      <section class="devices" aria-labelledby="devices-title">
-        <div class="devices-heading"><div><span class="section-kicker">LOCAL NETWORK</span><h2 id="devices-title">Available receivers</h2></div><button id="refresh-devices" class="refresh" type="button">↻ Scan</button></div>
-        <div id="device-status" class="device-status">Scanning for NearCast receivers…</div>
-        <div id="device-groups"></div>
-      </section>
-    </section>
-
-    <dialog id="pair-dialog" class="pair-dialog" aria-labelledby="pair-title">
-      <div class="pair-dialog-header"><span class="section-kicker">连接接收端</span><button id="pair-close" class="refresh" type="button" aria-label="关闭配对">取消</button></div>
-      <h2 id="pair-title">输入配对码</h2>
-      <p id="pair-device-name" class="panel-desc"></p>
-      <form id="pair-form">
+      <section id="connect-panel-code" role="tabpanel" aria-labelledby="connect-tab-code"><p id="pair-device-name" class="pair-selected-device" hidden></p><button id="pair-clear-device" class="refresh" type="button" hidden>清除设备选择，直接输码</button>      <form id="pair-form">
         <div class="code-input" aria-label="Pairing code">
           <input class="code-digit" maxlength="1" inputmode="text" autocomplete="one-time-code" aria-label="Pairing code digit 1" />
           <input class="code-digit" maxlength="1" inputmode="text" aria-label="Pairing code digit 2" />
@@ -54,8 +47,13 @@
         <button id="connect-button" class="button primary" type="submit">连接接收端</button>
       </form>
       <p id="code-error" class="error" hidden></p>
-
-    </dialog>
+</section>
+      <section id="connect-panel-devices" class="devices" role="tabpanel" aria-labelledby="connect-tab-devices" hidden>
+        <div class="devices-heading"><div><span class="section-kicker">LOCAL NETWORK</span><h2 id="devices-title">Available receivers</h2></div><button id="refresh-devices" class="refresh" type="button">↻ Scan</button></div>
+        <div id="device-status" class="device-status">Scanning for NearCast receivers…</div>
+        <div id="device-groups"></div>
+      </section>
+    </section>
 
     <section id="casting-view" class="sender-panel casting-panel" hidden>
       <div class="cast-icon">⌁</div>

@@ -172,7 +172,7 @@ jobs:
           gh release upload "v$DISPLAY_VERSION" "NearHub-Cast-$DISPLAY_VERSION-release-assets.zip" "NearHub-Cast-$DISPLAY_VERSION-release-assets.zip.sha256"
       - name: Upload Windows update to Mosapi
         id: windows
-        uses: Mostorm-Labs/mosapi-action@0c75fc1737a6f89ce544c82904b5ce1984c87a53 # v1.0.0
+        uses: Mostorm-Labs/mosapi-action@2a454b04db90656e5af273561752f30f7a2d6844 # composite output mapping fixed
         with:
           token: ${{ secrets.MOSAPI_TOKEN }}
           folder-id: '546'
@@ -187,7 +187,7 @@ jobs:
       - name: Upload macOS update to Mosapi
         id: macos
         if: needs.version.outputs.platforms == 'all'
-        uses: Mostorm-Labs/mosapi-action@0c75fc1737a6f89ce544c82904b5ce1984c87a53 # v1.0.0
+        uses: Mostorm-Labs/mosapi-action@2a454b04db90656e5af273561752f30f7a2d6844 # composite output mapping fixed
         with:
           token: ${{ secrets.MOSAPI_TOKEN }}
           folder-id: '546'

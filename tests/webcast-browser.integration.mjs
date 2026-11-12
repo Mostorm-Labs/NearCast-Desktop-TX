@@ -233,10 +233,11 @@ try {
   assert.equal(await page.locator('.device-name').textContent(),'Test NearCast Board');
   assert.deepEqual(await page.locator('.group-title').allTextContents(),['NEARCAST RECEIVERS']);
   assert.match(await page.locator('#device-status').textContent(),/^1 device found/);
-  assert.equal(await page.locator('#pair-dialog').evaluate(el=>el.open),false);
+  assert.equal(await page.locator('#pair-form').isVisible(),true);
+  await page.locator('#connect-tab-devices').click();
   assert.equal(await page.locator('#pair-form').isVisible(),false);
   await page.locator('.device-row.selectable').click();
-  assert.equal(await page.locator('#pair-dialog').evaluate(el=>el.open),true);
+  assert.equal(await page.locator('#connect-tab-code').getAttribute('aria-selected'),'true');
   assert.equal(await page.locator('#pair-device-name').textContent(),'Test NearCast Board');
   await page.locator('.code-digit').first().evaluate(input=>{
     input.dispatchEvent(new CompositionEvent('compositionstart',{data:''}));
@@ -246,14 +247,17 @@ try {
   });
   assert.deepEqual(await page.locator('.code-digit').evaluateAll(inputs=>inputs.map(x=>x.value)),['','','','']);
   assert.equal(await page.locator('.code-digit').first().evaluate(input=>input===document.activeElement),true);
-  await page.locator('#pair-close').click();
-  assert.equal(await page.locator('#pair-dialog').evaluate(el=>el.open),false);
+  await page.locator('#connect-tab-devices').click();
+  await page.locator('#connect-tab-code').click();
+  assert.equal(await page.locator('#pair-form').isVisible(),true);
+  await page.locator('#pair-clear-device').click();
+  assert.equal(await page.locator('#pair-device-name').isVisible(),false);
+  await page.locator('#connect-tab-devices').click();
   await page.locator('.device-row.selectable').click();
   const share=async()=>{await page.locator('#share-button').click();};
   for (const [index, value] of [...'1234'].entries()) await page.locator('.code-digit').nth(index).fill(value);
   await page.locator('#connect-button').click();
   await page.waitForFunction(() => testReceiver.releaseAnswer || testReceiver.error);
-  assert.equal(await page.locator('#pair-dialog').evaluate(el=>el.open),false);
   assert.equal(await page.locator('#casting-view').isVisible(), true);
   assert.equal(await page.locator('#input-enabled').isChecked(), false);
   assert.equal(await page.locator('#share-button').isDisabled(), true, 'sharing waits for the control connection');
@@ -434,6 +438,16 @@ try {
   await page.waitForFunction(()=>document.querySelector('#diagnostics-export-status').textContent.includes('nearcast-diagnostics-test.json'));
   assert.ok((await page.evaluate(()=>testReceiver.logSamples)).every(row=>Object.keys(row).every(key=>['event','status','metrics'].includes(key))));
   assert.deepEqual(errors,[]);
+  await page.reload();
+  await page.waitForFunction(()=>testReceiver.discoveryServices);
+  for(const [index,value]of [...'1234'].entries())await page.locator('.code-digit').nth(index).fill(value);
+  await page.locator('#connect-button').click();
+  await page.waitForFunction(()=>testReceiver.releaseAnswer);
+  await page.evaluate(()=>testReceiver.releaseAnswer());
+  await page.waitForFunction(()=>testReceiver.channelOpen&&!document.querySelector('#share-button').disabled);
+  assert.equal(await page.locator('#target-name').textContent(),'NearCast');
+  await page.locator('#leave-button').click();
+  await page.waitForFunction(()=>!document.querySelector('#code-view').hidden);
   console.log(JSON.stringify({result:'PASS',videoBackend:'browser',originalTrack:true,independentPcmOpus:true,screenOnlyInput:true,multiDisplayCalibration:true,negativeCoordinates:true,layoutInvalidation:true,screenReselection:true,touchMouseTouch:true,wheelBackpressure:true,windowAndMultiDisplayVideo:true,senderReuse:true,frames:await page.evaluate(()=>testReceiver.frames)},null,2));
 } finally {
   await browser?.close();
