@@ -7,6 +7,11 @@
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
+  <header id="window-titlebar" class="window-titlebar" hidden>
+    <div id="window-drag" class="window-drag"><span class="window-app-icon" aria-hidden="true">N</span><span>NearHub Cast</span></div>
+    <div class="window-buttons"><button id="window-minimize" type="button" aria-label="最小化窗口" title="最小化窗口"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6h10"/></svg></button><button id="window-maximize" type="button" aria-label="最大化窗口" title="最大化窗口"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 1.5h9v9h-9z"/></svg></button><button id="window-close" type="button" aria-label="关闭窗口" title="关闭窗口"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m1.5 1.5 9 9m0-9-9 9"/></svg></button></div>
+  </header>
+  <p id="window-error" class="window-error" role="status" hidden></p>
   <main class="webcast-sender">
     <header class="topbar"><button id="settings-open" class="settings-entry" type="button" aria-label="打开设置">⚙ 设置</button><div class="logo"><span class="logo-mark">N</span><span>NearHub Cast</span></div><div class="update-heading"><span id="app-version"></span><button id="update-button" type="button" class="refresh">检查更新</button></div></header>
 
@@ -29,12 +34,12 @@
 
       <section id="connect-panel-code" role="tabpanel" aria-labelledby="connect-tab-code"><p id="pair-device-name" class="pair-selected-device" hidden></p><button id="pair-clear-device" class="refresh" type="button" hidden>清除设备选择，直接输码</button>      <form id="pair-form">
         <div class="code-input" aria-label="Pairing code">
-          <input class="code-digit" maxlength="1" inputmode="text" autocomplete="one-time-code" aria-label="Pairing code digit 1" />
-          <input class="code-digit" maxlength="1" inputmode="text" aria-label="Pairing code digit 2" />
-          <input class="code-digit" maxlength="1" inputmode="text" aria-label="Pairing code digit 3" />
-          <input class="code-digit" maxlength="1" inputmode="text" aria-label="Pairing code digit 4" />
+          <input class="code-digit" maxlength="1" readonly pattern="[A-Z0-9]" inputmode="url" autocomplete="one-time-code" aria-label="Pairing code digit 1" />
+          <input class="code-digit" maxlength="1" readonly pattern="[A-Z0-9]" inputmode="url" aria-label="Pairing code digit 2" />
+          <input class="code-digit" maxlength="1" readonly pattern="[A-Z0-9]" inputmode="url" aria-label="Pairing code digit 3" />
+          <input class="code-digit" maxlength="1" readonly pattern="[A-Z0-9]" inputmode="url" aria-label="Pairing code digit 4" />
         </div>
-        <p id="pair-input-help" class="pair-help" role="status">请输入 4 位英文字母或数字，请使用英文输入法。</p>
+        <p id="pair-input-help" class="pair-help" role="status">请输入 4 位英文字母或数字，每格一位。</p>
         <p id="code-display-status" class="code-display-status" aria-live="polite"></p>
         <details id="trust-card" class="trust-card" hidden aria-live="polite">
           <summary id="trust-title" class="trust-title">现场核对接收端指纹</summary>
@@ -63,6 +68,7 @@
       <div id="preview-wrap" class="preview-wrap" hidden><video id="preview" autoplay muted playsinline></video><span class="preview-badge">LOCAL PREVIEW</span></div>
       <section class="macos-interaction" aria-label="反向控制">
         <p id="input-state" aria-live="polite">反控未启用</p>
+        <p id="input-flow" class="quality-help" aria-live="off"></p>
         <p id="capture-help" class="quality-help">反控需要双方启用；整屏分享在屏幕识别成功后支持反控，窗口仅投屏。</p>
         <button id="input-reconnect" class="refresh" type="button" disabled>重建反控连接</button>
         <button id="input-cleanup" class="refresh" type="button" hidden>重试释放输入</button>

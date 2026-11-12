@@ -1,0 +1,13 @@
+{
+  "app": {
+    "windows": [{
+      "label": "main",
+      "title": "NearHub Cast",
+      "width": 960,
+      "height": 780,
+      "minWidth": 640,
+      "minHeight": 480,
+      "decorations": false
+    }]
+  }
+}

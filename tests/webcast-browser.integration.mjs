@@ -102,6 +102,7 @@ try {
           return;
         }
         const message = JSON.parse(event.data);
+        if(message.action==='nearcast-share-state'){(state.shareStates??=[]).push(message.data);}
         if (message.action === 'webrtc-signal') signal(message.data.type, message.data.payload, 'datachannel');
         if (message.action === 'nearcast-input-source') {
           state.sourceMessages.push(message.data);
@@ -161,6 +162,7 @@ try {
     }});
     let audioCaptureId=null,audioSequence=0,audioPosition=0;
     globalThis.__TAURI__ = {core: {invoke: async (command,args={}) => {
+      if(command==='nearcast_window_action'){(state.windowActions??=[]).push(args.action.kind);return{maximized:false,x:0,y:0,scaleFactor:1};}
       if(command==='nearcast_platform_info')return{os:'windows',screenCapture:true,nativeCapture:false,captureBackend:'browser',systemAudio:true,touchback:true};
       if(command==='nearcast_mdns_start'){state.discoveryServices=args.services;return null;}
       if(command.startsWith('nearcast_capture_'))throw new Error('Browser default must not invoke WGC/preview IPC: '+command);
@@ -255,7 +257,7 @@ try {
   await page.locator('#connect-tab-devices').click();
   await page.locator('.device-row.selectable').click();
   const share=async()=>{await page.locator('#share-button').click();};
-  for (const [index, value] of [...'1234'].entries()) await page.locator('.code-digit').nth(index).fill(value);
+  await page.locator('.code-digit').first().focus();await page.keyboard.type('1234');
   await page.locator('#connect-button').click();
   await page.waitForFunction(() => testReceiver.releaseAnswer || testReceiver.error);
   assert.equal(await page.locator('#casting-view').isVisible(), true);
@@ -269,6 +271,7 @@ try {
   assert.equal(await page.locator('#casting-view').isVisible(), true);
   await page.locator('#cast-error').waitFor({state:'visible'});
   assert.equal(await page.locator('#cast-error').isVisible(), true);
+  assert.equal(await page.evaluate(()=>testReceiver.windowActions?.includes('minimize')??false),false);
   await page.evaluate(() => { testReceiver.mode = 'capture'; });
   await share(false);
   await page.waitForFunction(() => testReceiver.frames > 0 || testReceiver.error);
@@ -280,6 +283,7 @@ try {
   assert.equal(await page.evaluate(()=>document.querySelector('#preview').srcObject.getVideoTracks()[0]===testReceiver.browserVideoTrack),true,'the original browser track must reach preview/WebRTC');
   assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().capture.backend),'browser');
   assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().capture.audio.state),'capturing');
+  await page.waitForFunction(()=>testReceiver.windowActions?.includes('minimize'));
   const settingsFrames=await page.evaluate(()=>testReceiver.frames);
   await page.locator('#settings-open').click();
   assert.equal(await page.locator('#settings-general').isVisible(),true);
@@ -298,7 +302,12 @@ try {
   await page.locator('#video-bitrate-mode').selectOption('fixed');
   await page.locator('#video-bitrate').selectOption('12000');
   await page.locator('#settings-close').click();
-  await page.locator('#stop-share-button').click();
+  // Browser's native Stop sharing button emits ended on the display track.
+  await page.evaluate(()=>testReceiver.browserVideoTrack.dispatchEvent(new Event('ended')));
+  await page.waitForFunction(()=>document.querySelector('#preview').srcObject===null);
+  await page.waitForFunction(()=>testReceiver.windowActions.at(-1)==='show');
+  await page.waitForFunction(()=>testReceiver.shareStates.at(-1).sharing===false);
+  assert.equal(await page.evaluate(()=>testReceiver.receiverPeer.connectionState),'connected');
   const beforeRestart = await page.evaluate(() => testReceiver.frames);
   await share(false);
   await page.waitForFunction(() => testReceiver.signals.filter(x => x.type === 'offer').length >= 3);
@@ -417,6 +426,25 @@ try {
   assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().lastNativeExecutionMs),1);
   await page.waitForFunction(n=>testReceiver.frames>n+2,beforeWheel.frames);
   await page.evaluate(()=>{testReceiver.nativeApplyDelayMs=0;});
+  const beforeTitle=await page.evaluate(()=>({discarded:__nearcastTouchbackDiagnostics().discardedSamples,frames:testReceiver.frames}));
+  await page.evaluate(async()=>{
+    const {encodeInputFrame}=await import('/touchback/typed-codec.mjs');
+    testReceiver.titleSample=(seqId,eventKind,buttons)=>testReceiver.sendInputBytes(encodeInputFrame({streamId:testReceiver.inputStreamId,seqId,cursor:seqId,inputType:'mouse',eventKind,buttons,modifiers:0,x:32000,y:1000}));
+    testReceiver.titleSample(130,1,1);
+  });
+  await page.waitForFunction(()=>__nearcastTouchbackDiagnostics().submittedSeqId===130);
+  await page.evaluate(()=>{testReceiver.nativeApplyDelayMs=537;testReceiver.titleSample(131,1,0);});
+  await page.waitForTimeout(30);
+  await page.evaluate(()=>testReceiver.titleSample(132,0,0));
+  await page.waitForFunction(n=>__nearcastTouchbackDiagnostics().discardedSamples>n,beforeTitle.discarded);
+  assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().state),'active');
+  assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().controlChannelReady),true);
+  assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().mouseButtons),0);
+  await page.evaluate(()=>{testReceiver.nativeApplyDelayMs=0;testReceiver.titleSample(133,1,1);});
+  await page.waitForFunction(()=>__nearcastTouchbackDiagnostics().submittedSeqId===133);
+  await page.evaluate(()=>testReceiver.titleSample(134,1,0));
+  await page.waitForFunction(()=>__nearcastTouchbackDiagnostics().submittedSeqId===134);
+  await page.waitForFunction(n=>testReceiver.frames>n+2,beforeTitle.frames);
   const mouseStream=await page.evaluate(()=>testReceiver.inputStreamId);
   await page.evaluate(()=>{testReceiver.requestedInputTypes=['touch'];});
   await page.locator('#input-enabled').evaluate(el=>{el.checked=false;el.dispatchEvent(new Event('change'));});await page.locator('#input-enabled').evaluate(el=>{el.checked=true;el.dispatchEvent(new Event('change'));});
@@ -440,7 +468,7 @@ try {
   assert.deepEqual(errors,[]);
   await page.reload();
   await page.waitForFunction(()=>testReceiver.discoveryServices);
-  for(const [index,value]of [...'1234'].entries())await page.locator('.code-digit').nth(index).fill(value);
+  await page.locator('.code-digit').first().focus();await page.keyboard.type('1234');
   await page.locator('#connect-button').click();
   await page.waitForFunction(()=>testReceiver.releaseAnswer);
   await page.evaluate(()=>testReceiver.releaseAnswer());

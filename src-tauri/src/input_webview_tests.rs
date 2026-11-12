@@ -19,7 +19,7 @@ fn own_webview_click_feedback_and_close_keep_the_ui_pumping() {
     let mut context = tauri::generate_context!();
     context.config_mut().app.windows.clear();
     let app=tauri::Builder::default().any_thread().manage(Report(Arc::new(Mutex::new(sent))))
-        .invoke_handler(tauri::generate_handler![input_fixture_report,crate::nearcast_input_feedback,crate::nearcast_input_execution_status])
+        .invoke_handler(tauri::generate_handler![input_fixture_report,crate::nearcast_input_feedback,crate::nearcast_input_execution_status,crate::window_controls::nearcast_window_action])
         .setup(move|app|{
             let window=tauri::WebviewWindowBuilder::new(app,"main",tauri::WebviewUrl::App("index.html".into()))
                 .title("NearCast isolated input regression").inner_size(500.0,340.0)
@@ -79,6 +79,31 @@ fn own_webview_click_feedback_and_close_keep_the_ui_pumping() {
                     let mut events=vec![];let until=Instant::now()+Duration::from_secs(3);
                     while Instant::now()<until{if let Ok(event)=received.recv_timeout(Duration::from_millis(100)){events.push(event);}if ["down","up","feedback"].iter().all(|v|events.iter().any(|s|s==v)){break;}}
                     assert!(["down","up","feedback"].iter().all(|v|events.iter().any(|s|s==v)),"{events:?}");
+                    // Non-client title-bar input enters a different Windows
+                    // move loop than the WebView's client-area button above.
+                    let mut bounds=windows::Win32::Foundation::RECT::default();unsafe{GetWindowRect(hwnd,&mut bounds).unwrap();}
+                    let title=POINT{x:bounds.left+220,y:bounds.top+15};
+                    let packed=((title.y as u32)<<16)|(title.x as u32&0xffff);
+                    assert_eq!(unsafe{SendMessageW(hwnd,WM_NCHITTEST,Some(windows::Win32::Foundation::WPARAM(0)),Some(windows::Win32::Foundation::LPARAM(packed as isize)))}.0,HTCAPTION as isize);
+                    for (kind,buttons) in [(0,0),(1,1),(1,0)]{
+                        let action=serde_json::from_value(serde_json::json!({"inputType":"mouse","eventKind":kind,"buttons":buttons,"modifiers":0,"x":title.x,"y":title.y})).unwrap();
+                        let revision=binding["revision"].as_str().unwrap().to_owned();let lease=lease.clone();
+                        let result=tauri::async_runtime::block_on(crate::native_input_task(move||crate::input_native::apply("webview-test".into(),lease,revision,action))).unwrap();
+                        assert_eq!(result["status"],"submitted","{result}");std::thread::sleep(Duration::from_millis(80));
+                    }
+                    window.eval("fixtureHeartbeat()").unwrap();
+                    let until=Instant::now()+Duration::from_secs(2);let mut title_heartbeat=false;
+                    while Instant::now()<until{if received.recv_timeout(Duration::from_millis(50)).ok().as_deref()==Some("heartbeat"){title_heartbeat=true;break;}}
+                    assert!(title_heartbeat,"title-bar click left WebView UI blocked");
+                    // Exercise the custom button's real async native IPC path.
+                    for kind in ["toggleMaximize","toggleMaximize","move","minimize","hide","show"] {
+                        let action=if kind=="move"{serde_json::json!({"kind":kind,"x":bounds.left,"y":bounds.top})}else{serde_json::json!({"kind":kind})};
+                        window.eval(format!("__TAURI__.core.invoke('nearcast_window_action',{{action:{action}}}).then(()=>__TAURI__.core.invoke('input_fixture_report',{{kind:'window-action'}}));")).unwrap();
+                        let until=Instant::now()+Duration::from_secs(3);let mut complete=false;
+                        while Instant::now()<until{if received.recv_timeout(Duration::from_millis(50)).ok().as_deref()==Some("window-action"){complete=true;break;}}
+                        assert!(complete,"custom window command {kind} blocked its WebView reply");
+                    }
+                    window.unminimize().unwrap();
                     let (lock_ready,locked)=mpsc::channel();let (unlock,release)=mpsc::channel();
                     let lock_thread=std::thread::spawn(move||crate::input_native::hold_fixture_owner(lock_ready,release));
                     locked.recv_timeout(Duration::from_secs(1)).unwrap();

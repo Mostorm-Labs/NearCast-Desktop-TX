@@ -9,6 +9,7 @@ test('Tauri bundle declares Windows installers and macOS 13 minimum', () => {
   const config = JSON.parse(fs.readFileSync(path.join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'));
   assert.equal(config.bundle.active, true);
   assert.equal(config.productName,'NearHub Cast');
+  assert.equal(config.mainBinaryName,'NearHub Cast');
   assert.equal(config.app.windows[0].title,'NearHub Cast');
   assert.equal(config.identifier,'com.mostorm.nearhub.cast');
   assert.equal(config.bundle.windows.wix.upgradeCode,undefined,'new product uses its own default installation identity');
@@ -16,6 +17,9 @@ test('Tauri bundle declares Windows installers and macOS 13 minimum', () => {
   assert.equal(config.bundle.windows.webviewInstallMode.type, 'downloadBootstrapper');
   assert.equal(config.bundle.macOS.minimumSystemVersion, '13.0');
   assert.equal(config.bundle.macOS.infoPlist, 'Info.plist');
+  const windows=JSON.parse(fs.readFileSync(path.join(root,'src-tauri','tauri.windows.conf.json'),'utf8'));
+  assert.equal(windows.app.windows[0].decorations,false);
+  assert.equal(windows.app.windows[0].label,'main');
 });
 
 test('macOS bundle explains screen capture and Bonjour discovery', () => {

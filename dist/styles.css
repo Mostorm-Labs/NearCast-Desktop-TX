@@ -1,6 +1,9 @@
 :root { color-scheme: dark; font-family: Montserrat, Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color: #fff; background: #10121c; font-synthesis: none; }
 [hidden] { display: none !important; }
 * { box-sizing: border-box; }
+/* Keep wheel, touch and keyboard scrolling without painting scrollbar chrome. */
+html, body, * { scrollbar-width: none; }
+::-webkit-scrollbar { display: none; width: 0; height: 0; }
 body { margin: 0; min-width: 520px; min-height: 100vh; overflow-x: hidden; background: #10121c url("./assets/background.webp") center/cover fixed no-repeat; }
 body::before { content: ""; position: fixed; inset: 0; background: linear-gradient(135deg, #161a29cc 0%, #171a28aa 46%, #090b13d9 100%); pointer-events: none; }
 .webcast-sender { position: relative; min-height: 100vh; padding: 21px 32px 24px; display: flex; flex-direction: column; align-items: center; }
@@ -73,3 +76,5 @@ h1 { margin: 10px 0 0; color: #fff; font-size: clamp(28px, 4vw, 38px); line-heig
 
 .connection-tabs{display:flex;gap:4px;padding:5px;margin:0 0 30px;border:1px solid #ffffff20;border-radius:12px;background:#080d1980}.connection-tabs button{flex:1;padding:12px 20px;border:0;border-radius:8px;color:#98a8c2;background:transparent;font:inherit;cursor:pointer}.connection-tabs button[aria-selected=true]{background:#438fff30;color:#b4eeff;box-shadow:inset 0 0 0 1px #72dfff30}#connect-panel-code{margin-top:24px}#connect-panel-code .code-input{justify-content:center}#connect-panel-code .button{margin-top:25px}.connection-tabs button:disabled{opacity:.5}
 .pair-selected-device{margin:0 0 10px;color:#9ce9ff;font-size:14px}#connect-panel-code .pair-help{font-size:12px;line-height:1.6;color:#98a8c2}
+
+.window-titlebar{position:fixed;top:0;left:0;right:0;height:38px;z-index:1000;display:flex;align-items:stretch;background:#151a27;border-bottom:1px solid #ffffff14;user-select:none}.window-drag{display:flex;align-items:center;gap:9px;flex:1;min-width:0;padding:0 14px;color:#bac9dc;font-size:12px;touch-action:none}.window-app-icon{display:grid;place-items:center;width:19px;height:19px;border-radius:5px;color:#07111e;background:#79dfff;font-weight:800}.window-buttons{display:flex}.window-buttons button{display:grid;place-items:center;width:46px;border:0;border-radius:0;background:transparent;color:#bdcadc;touch-action:manipulation;cursor:default}.window-buttons button:hover{background:#ffffff15}.window-buttons button:active{background:#ffffff25}.window-buttons #window-close:hover{background:#c8424d;color:white}.window-buttons svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.1;pointer-events:none}.custom-window .webcast-sender{padding-top:59px}.window-error{position:fixed;top:38px;left:0;right:0;z-index:1001;margin:0;padding:10px 16px;background:#6b2635;color:white;font-size:12px}

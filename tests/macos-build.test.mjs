@@ -22,7 +22,7 @@ test('macOS permission builds refuse ad-hoc signing and missing or ambiguous ide
 });
 
 test('macOS build refuses to overwrite its own running bundle while allowing other apps', () => {
-  const executable = '/workspace/NearHub Cast.app/Contents/MacOS/nearcast_desktop_tx';
+  const executable = '/workspace/NearHub Cast.app/Contents/MacOS/NearHub Cast';
   assert.equal(appIsRunning(` 123 ${executable}\n 456 /Applications/Other.app/Contents/MacOS/other`, executable), true);
-  assert.equal(appIsRunning(` 123 /other/NearHub Cast.app/Contents/MacOS/nearcast_desktop_tx`, executable), false);
+  assert.equal(appIsRunning(` 123 /other/NearHub Cast.app/Contents/MacOS/NearHub Cast`, executable), false);
 });

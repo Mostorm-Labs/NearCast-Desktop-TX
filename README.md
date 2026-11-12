@@ -24,8 +24,8 @@ npm test
 cargo check --manifest-path src-tauri/Cargo.toml
 
 # 构建并启动 Release 发送端（已内置页面）
-cargo build --release --manifest-path src-tauri/Cargo.toml
-.\src-tauri\target\release\nearcast_desktop_tx.exe
+node node_modules/@tauri-apps/cli/tauri.js build --no-bundle -- --locked
+& ".\src-tauri\target\release\NearHub Cast.exe"
 ```
 
 macOS 本地调试请构建并打开 `.app`：
@@ -101,4 +101,4 @@ Release 使用速度优化等级 3、ThinLTO、单编译单元及符号裁剪。
 
 `src-tauri/tauri.conf.json` 已开启 `nsis`、`msi`、macOS `.app` 和 `.dmg` bundle；macOS 最低版本固定为 13.0。`.github/workflows/build.yml` 使用 Windows runner、macOS 15 Intel runner（部署目标 13.0）和 macOS 15 Apple Silicon runner 构建。当前开发机是 Windows，不能在本机编译或验收 macOS bundle，macOS 产物需要使用 GitHub Actions 或真实 macOS 主机。
 
-跨电脑测试优先使用 `src-tauri/target/release/bundle/nsis/NearHub Cast Desktop Installer_0.1.0_x64-setup.exe`，安装包按当前用户安装并检查 WebView2；下载运行时需要联网。裸 EXE 为 `src-tauri/target/release/nearcast_desktop_tx.exe`，目标电脑需要已有 WebView2 Runtime。应用的 WebView2 数据和设备信任保存在当前用户的应用数据目录。当前产物尚未代码签名。
+跨电脑测试优先使用 `src-tauri/target/release/bundle/nsis/NearHub Cast Desktop Installer_0.1.0_x64-setup.exe`，安装包按当前用户安装并检查 WebView2；下载运行时需要联网。Tauri 构建后的裸 EXE 和安装目录内主程序均为 `NearHub Cast.exe`，目标电脑需要已有 WebView2 Runtime。应用的 WebView2 数据和设备信任保存在当前用户的应用数据目录。当前产物尚未代码签名。

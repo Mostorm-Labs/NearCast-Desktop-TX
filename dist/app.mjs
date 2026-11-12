@@ -12,9 +12,14 @@ import {mountUpdates} from './update/update-ui.mjs';
 import {createDiagnostics} from './diagnostics.mjs';
 import {loadPreferences,savePreferences,mountSettings,mountFeedback} from './settings.mjs';
 import {mountPairingInput} from './pairing-input.mjs';
+import {mountWindowControls} from './window-controls.mjs';
+import {createSharingWindow} from './sharing-window.mjs';
 
 const tauri = globalThis.__TAURI__ ?? {};
 const invoke = tauri.core?.invoke ?? (async () => false);
+const sharingWindow=tauri.core?.invoke?createSharingWindow({invoke,onError:error=>{
+  const message=document.querySelector('#window-error');message.textContent='窗口显示操作失败：'+String(error?.message??error);message.hidden=false;
+}}):null;
 const listen = tauri.event?.listen ?? (async () => () => {});
 const codeView = document.querySelector('#code-view');
 const castingView = document.querySelector('#casting-view');
@@ -160,6 +165,8 @@ globalThis.__nearcastTouchbackDiagnostics = () => touchback ? {...touchback.diag
 const controlDiagnostics = document.querySelector('#touchback-diagnostics');
 const renderControlDiagnostics = () => {
   if (controlDiagnostics) controlDiagnostics.textContent = JSON.stringify({...globalThis.__nearcastTouchbackDiagnostics(),media:client?.mediaDiagnostics??null}, null, 2);
+  const flow=touchback?.diagnostics()?.inputFlow;
+  document.querySelector('#input-flow').textContent=flow&&inputEnabled.checked?`最近 1 秒：接收 ${flow.receivedPerSecond} / 执行 ${flow.submittedPerSecond} 次 · 最近桥接等待 ${Math.round(flow.lastBridgeOverheadMs)} ms`:'';
   const audio=captureProvider?.diagnostics()?.audio;
   if(systemAudioStatus)systemAudioStatus.textContent=audio?.error?`系统声音不可用，视频继续：${audio.error}`:audio?.state==='capturing'?'正在分享默认播放设备的系统声音':captureProvider?.current?'本次分享没有音频轨道':'开始分享后采集系统声音';
 };
@@ -226,7 +233,7 @@ const setView = status => {
   deviceGroups.querySelectorAll('.device-row.selectable').forEach(row => { row.disabled = status !== 'idle'; });
   castStatus.textContent = status === 'sharing' ? 'Your screen is being shared to the receiver.' : status === 'connected' ? 'Receiver is ready for casting.' : 'Connecting to receiver…';
 };
-mountPairingInput({inputs:digits,help:document.querySelector('#pair-input-help'),onChange:()=>setError(codeError,null)});
+const pairingInput=mountPairingInput({inputs:digits,help:document.querySelector('#pair-input-help'),onChange:()=>setError(codeError,null)});
 
 const buildTouchback = () => new WebCastTouchbackSender({
   provider: inputProvider,
@@ -318,6 +325,7 @@ client = new LauncherWebCastClient({
     shareButton.hidden = Boolean(stream);
     stopShareButton.hidden = !stream;
     if (stream) preview.play?.().catch(() => {});
+    void sharingWindow?.sharing(stream);
   },
 });
 
@@ -355,7 +363,7 @@ document.querySelector('#pair-clear-device').addEventListener('click',()=>{
   trustManager.cancel();trustDevice=null;selectedDevice=null;selectedEndpoint=defaultEndpoint;client.endpoint=defaultEndpoint;
   client.cancelCodeDisplay();codeDisplayRequestId=null;setCodeDisplayStatus('');setError(codeError,null);
   document.querySelector('#pair-device-name').hidden=true;document.querySelector('#pair-clear-device').hidden=true;
-  digits.forEach(input=>{input.value='';});digits[0].focus();
+  pairingInput.clear();digits[0].focus();
 });
 pairForm.addEventListener('submit', async event => {
   event.preventDefault();
@@ -388,7 +396,7 @@ shareButton.addEventListener('click', async () => {
   finally { capturePending = false; shareButton.disabled = !['connected', 'sharing'].includes(currentStatus); }
 });
 stopShareButton.addEventListener('click', async () => { setError(castError, null); await client.stopStream(); });
-leaveButton.addEventListener('click', async () => { setError(castError, null); touchback.fence(); await client.stop(); digits.forEach(input => { input.value = ''; }); });
+leaveButton.addEventListener('click', async () => { setError(castError, null); touchback.fence(); await client.stop(); pairingInput.clear(); });
 window.addEventListener('beforeunload', () => { touchback.fence(); trustManager.cancel(); client.stop({notify: false}); });
 
 const renderDevices = devices => {
@@ -422,7 +430,7 @@ const renderDevices = devices => {
       if (device.selectable) row.addEventListener('click', () => {
         if (currentStatus !== 'idle') return;
         client.cancelCodeDisplay(); codeDisplayRequestId = null;
-        if (selectedDevice?.discoveryId !== device.discoveryId) digits.forEach(input => { input.value = ''; });
+        if (selectedDevice?.discoveryId !== device.discoveryId) pairingInput.clear();
         selectedDevice = device; trustDevice = device; selectedEndpoint = defaultEndpoint; client.endpoint = selectedEndpoint;
         document.querySelector('#pair-device-name').textContent=device.displayName;
         document.querySelector('#pair-device-name').hidden=false;document.querySelector('#pair-clear-device').hidden=false;
@@ -497,6 +505,15 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
 setView('idle');
 platformReady = loadPlatformInfo(invoke).then(async info => {
   platformInfo = info;
+  if(info.os==='windows')mountWindowControls({document,invoke,beforeClose:async()=>{
+    if(capturePending)throw new Error('请先完成或取消分享范围选择。');
+    await sharingWindow?.shutdown();
+    try{
+      await touchback.setEnabled(false);await touchback.fence('window close');
+      if(touchback.diagnostics()?.cleanupPending)throw new Error('输入尚未释放，请重试释放后关闭。');
+      await client.stop();await captureProvider?.stop();diagnosticLogger?.stop();
+    }catch(error){sharingWindow?.resume();throw error;}
+  }});
   document.querySelector('#system-audio-settings').hidden=false;
   document.querySelector('#capture-help').textContent = '系统选屏后会短暂显示四角校验标记；识别成功的整屏支持多屏反控。窗口仅投屏。';
   captureProvider = new BrowserCaptureMediaDevices({platform:info.os,invoke,mediaDevices:navigator.mediaDevices,
@@ -533,11 +550,13 @@ if (tauri.core?.invoke) {
   const updates = mountUpdates({document, invoke, listen, isSharing: () => Boolean(client.stream),
     beforeInstall: async () => {
       if (capturePending) throw new Error('正在选择分享范围，请先完成或取消分享。');
-      await touchback.setEnabled(false);
-      await touchback.fence('software update');
-      if (touchback.diagnostics()?.cleanupPending) throw new Error('输入尚未释放，请先重试释放输入后再更新。');
-      await client.stop();
-      await captureProvider?.stop();
+      await sharingWindow?.shutdown();
+      try{
+        await touchback.setEnabled(false);
+        await touchback.fence('software update');
+        if (touchback.diagnostics()?.cleanupPending) throw new Error('输入尚未释放，请先重试释放输入后再更新。');
+        await client.stop();await captureProvider?.stop();
+      }catch(error){sharingWindow?.resume();throw error;}
     },
   });
   window.addEventListener('beforeunload', () => updates.stop());

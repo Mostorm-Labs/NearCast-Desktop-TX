@@ -137,6 +137,59 @@ test('queued input that exceeds the age budget is discarded before native submis
   assert.equal(calls.filter(([name])=>name==='apply').length,1);assert.equal(engine.state,'closed');
 });
 
+test('delayed title-bar mouse release discards aged idle hover and keeps the stream usable',async()=>{
+  let now=0,finish;
+  const {engine,calls,provider}=await fixture({}, {now:()=>now});
+  await engine.open(request(),{sessionId:'AUTH-SID'});
+  const mouse=(seqId,eventKind,buttons)=>({streamId:7,seqId,cursor:seqId,inputType:'mouse',dataBytes:12,eventKind,buttons,modifiers:0,x:300,y:100});
+  await engine.accept(mouse(1,1,1));
+  provider.apply=()=>new Promise(resolve=>{finish=resolve;});
+  const release=engine.accept(mouse(2,1,0));while(!finish)await delay(0);
+  const hover=engine.accept(mouse(3,0,0));now=537;
+  provider.apply=async()=>({status:'submitted',nativeDurationMs:1});
+  finish({status:'submitted',nativeDurationMs:17});await release;
+  assert.equal((await hover).status,'discarded');
+  assert.equal(engine.state,'active');assert.equal(engine.snapshot().discardedSamples,1);
+  assert.equal(engine.snapshot().mouseButtons,0);assert.equal(engine.snapshot().receivedSeqId,3);
+  assert.equal(engine.snapshot().submittedSeqId,2);
+  assert.equal(calls.some(([name])=>name==='releaseOwned'),false);
+  await engine.accept(mouse(4,1,1));await engine.accept(mouse(5,1,0));
+  assert.equal(engine.snapshot().submittedSeqId,5);assert.equal(engine.state,'active');
+  await engine.close('done');
+});
+
+test('aged held-button motion and release still fail closed instead of replaying a delayed drag',async()=>{
+  for(const [kind,buttons]of [[0,1],[1,0]]){
+    let now=0,finish;const {engine}=await fixture({apply:()=>new Promise(resolve=>{finish=resolve;})},{now:()=>now});
+    await engine.open(request(),{sessionId:'AUTH-SID'});
+    const mouse=(seqId,eventKind,buttons)=>({streamId:7,seqId,cursor:seqId,inputType:'mouse',dataBytes:12,eventKind,buttons,modifiers:0,x:300,y:100});
+    const down=engine.accept(mouse(1,1,1));while(!finish)await delay(0);
+    const queued=engine.accept(mouse(2,kind,buttons));const rejected=assert.rejects(queued,/Input queue age/);
+    now=537;finish({status:'submitted'});await down;await rejected;
+    assert.equal(engine.state,'closed');
+  }
+});
+
+test('drag flow reports received and submitted rates and preserves the latest full-distance point',async()=>{
+  let now=0,finish;const actions=[];
+  const {engine,provider}=await fixture({apply:async action=>{actions.push(action);return{status:'submitted',nativeDurationMs:1};}},{now:()=>now});
+  await engine.open(request(),{sessionId:'AUTH-SID'});
+  const mouse=(seqId,eventKind,buttons,x)=>({streamId:7,seqId,cursor:seqId,inputType:'mouse',dataBytes:12,eventKind,buttons,modifiers:0,x,y:100});
+  await engine.accept(mouse(1,1,1,0));
+  provider.apply=action=>{actions.push(action);return new Promise(resolve=>{finish=resolve;});};
+  const first=engine.accept(mouse(2,0,1,100));while(!finish)await delay(0);
+  const pending=[];for(let seq=3;seq<=12;seq++)pending.push(engine.accept(mouse(seq,0,1,seq===12?65535:seq*100)));
+  now=20;provider.apply=async action=>{actions.push(action);return{status:'submitted',nativeDurationMs:1};};
+  finish({status:'submitted',nativeDurationMs:1});await first;await Promise.all(pending);
+  const flow=engine.snapshot().inputFlow;
+  assert.equal(flow.receivedPerSecond,12);assert.equal(flow.submittedPerSecond,3);
+  assert.equal(flow.lastReceivedPosition.x,65535);assert.equal(flow.lastSubmittedPosition.x,1919);
+  assert.equal(actions.at(-1).x,1919);assert.equal(engine.snapshot().coalescedSamples,9);
+  await engine.accept(mouse(13,1,0,65535));assert.equal(engine.snapshot().mouseButtons,0);
+  now=1200;assert.equal(engine.snapshot().inputFlow.receivedPerSecond,0);
+  await engine.close('done');
+});
+
 test('revoked source remains unauthorized after blocked cleanup and an explicit successful retry',async()=>{
   let release=false;const {engine}=await fixture({releaseOwned:async()=>release?{status:'released'}:{status:'blocked'}});
   const params=touch();await engine.open(params,{sessionId:'AUTH-SID'});

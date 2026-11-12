@@ -91,6 +91,8 @@ export class LauncherWebCastClient {
     this.signalingChain = Promise.resolve();
     this.mediaSenders = new Map();
     this.mediaDiagnostics = {video: null, audio: null, updatedAt: 0};
+    this.shareRevision=0n;
+    this.sharingActive=false;
   }
 
   setStatus(status) {
@@ -128,6 +130,29 @@ export class LauncherWebCastClient {
       catch { /* A closing channel can still report open; fall back to WSS. */ }
     }
     this.send({type, [type === 'ice-candidate' ? 'candidate' : type]: payload});
+  }
+
+  publishShareState() {
+    if(this.channel?.readyState!=='open'||!this.context.roomId||!this.context.userId||!this.context.hostUserId)return;
+    // Replay the current revision when a control channel is replaced. RX must
+    // scope revisions to the media peer, never to an individual DataChannel.
+    try { this.channel.send(JSON.stringify({action:'nearcast-share-state',data:{version:1,
+      roomId:this.context.roomId,senderUserId:this.context.userId,receiverUserId:this.context.hostUserId,
+      revision:String(this.shareRevision),sharing:this.sharingActive}})); }
+    catch { /* Ordered channel closed concurrently; replay after replacement. */ }
+  }
+  setShareState(sharing) {
+    if(this.sharingActive!==sharing){this.sharingActive=sharing;this.shareRevision++;}
+    this.publishShareState();
+  }
+  shareOffer(offer) {
+    // Carry the lifecycle on the same SDP transaction over DC or WSS. The
+    // control/input channel can be retired independently of desktop media.
+    if(typeof offer.sdp!=='string'||!this.context.roomId)return offer;
+    const marker=`a=x-nearcast-share-state:${this.shareRevision} ${this.sharingActive?1:0}\r\n`;
+    const sdp=offer.sdp.replace(/^a=x-nearcast-share-state:.*\r?\n/gm,'');
+    const index=sdp.search(/^m=/m);
+    return{...offer,sdp:index<0?sdp:sdp.slice(0,index)+marker+sdp.slice(index)};
   }
 
   queueSignal(operation) {
@@ -298,7 +323,7 @@ export class LauncherWebCastClient {
     if(this.channel&&this.channel!==channel&&!['closed','closing'].includes(this.channel.readyState)){channel.close?.();return false;}
     this.channel=channel;
     channel.binaryType = 'arraybuffer';
-    channel.onopen = () => { if (current() && this.channel === channel) { this.setStatus(this.stream ? 'sharing' : 'connected'); this.onControlChannel(channel, {...this.context}); } };
+    channel.onopen = () => { if (current() && this.channel === channel) { this.setStatus(this.stream ? 'sharing' : 'connected'); this.onControlChannel(channel, {...this.context}); this.publishShareState(); } };
     channel.onmessage = event => {
       if (!current() || this.channel !== channel) return;
       if (typeof event.data === 'string') {
@@ -349,6 +374,7 @@ export class LauncherWebCastClient {
         }
         track.onended = () => { if (this.stream === stream) this.stopStream().catch(error => this.fail(error)); };
       }
+      this.setShareState(true);
       // NearCast's native receiver accepts H.264 / Opus, not Chromium's
       // default VP8 preference. Keep codec selection at the media boundary.
       for (const transceiver of pc.getTransceivers?.() ?? []) {
@@ -360,7 +386,7 @@ export class LauncherWebCastClient {
       }
       await this.queueSignal(async () => {
         if (this.pc !== pc || this.closed) return;
-        const offer = await pc.createOffer();
+        const offer = this.shareOffer(await pc.createOffer());
         if (this.pc !== pc || this.closed) return;
         await pc.setLocalDescription(offer);
         if (this.pc !== pc || this.closed) return;
@@ -381,12 +407,26 @@ export class LauncherWebCastClient {
     const current = this.stream;
     this.stream = null;
     for (const track of current.getTracks()) track.stop();
-    for (const sender of this.mediaSenders.values()) await sender?.replaceTrack(null);
-    this.onStream(null);
-    if (this.pc && this.status === 'sharing') this.setStatus('connected');
+    try {
+      try { this.setShareState(false); } catch { /* A replacement channel replays the stopped state. */ }
+      for (const sender of this.mediaSenders.values()) await sender?.replaceTrack(null);
+      const pc=this.pc;
+      if(pc&&!this.closed&&this.socket){await this.queueSignal(async()=>{
+        if(this.pc!==pc||this.stream||this.closed)return;
+        const offer=this.shareOffer(await pc.createOffer());
+        await pc.setLocalDescription(offer);
+        if(this.pc===pc&&!this.stream&&!this.closed)this.sendSignal('offer',offer);
+      });}
+    } finally {
+      // The system sharing bar ends capture independently of signaling. Always
+      // restore the sender UI even when detaching a failed peer's track fails.
+      this.onStream(null);
+      if (this.pc && this.status === 'sharing') this.setStatus('connected');
+    }
   }
 
   closePeerConnection() {
+    this.sharingActive=false;this.shareRevision=0n;
     this.pendingCandidates = [];
     this.remoteReady = false;
     this.signalingChain = Promise.resolve();

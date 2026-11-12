@@ -2,6 +2,8 @@
 
 ## 产品命名
 
+Tauri 打包后的主程序使用 `mainBinaryName=NearHub Cast`，Windows 安装目录内为 `NearHub Cast.exe`，macOS 应用内为 `Contents/MacOS/NearHub Cast`。Cargo crate 名仅为内部构建标识；不可将裸 `cargo build` 的默认文件名当成最终安装文件名。
+
 软件、窗口标题、已安装快捷方式和 macOS 应用包显示为 `NearHub Cast`。安装包及安装器标题采用 `NearHub Cast Desktop Installer`，文件名保留版本、平台和架构。尚未安装过旧产品，不保留旧产品名派生的安装身份。Mosapi slug/product-id、协议标识及更新清单名称属于后台契约，保持现有值。模板与打包后命名见 `src-tauri/installer/README.md` 和 `scripts/name-installers.mjs`。
 
 ## 采集架构

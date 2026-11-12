@@ -26,6 +26,12 @@ RX 手势控制直接产生 typed Mouse wheel 时，TX 保持原生输出。每�
 
 250ms 队列期限及总容量保持。滚轮合并保留最早一包的入队时间，不能用持续新消息延长旧增量的寿命。普通帧无 ACK，stream 状态使用最后实际提交的 seqId。诊断 coalescedSamples 反映减少的本机调用，lastNativeExecutionMs 保留共享路由下全部原生执行耗时；控制诊断 DOM 最多约每 150ms 更新一次。
 
+Windows 标题栏移动循环可能使 WebView IPC 结果晚于实际 SendInput 完成。若原生按钮已经释放，后续超过队列期限的无按钮、无修饰键 Mouse Move 可以丢弃并继续同一输入流；计入 discardedSamples，不推进 submittedSeqId，不注入过期坐标。这个例外要求当前没有 Touch、按键或连续滚动，且消息本身只表示空闲悬停。按钮转换、按住按钮移动、Touch 和滚轮仍保留原来的 250ms 期限及失败清理路径。
+
+Windows 主窗口使用无原生装饰的自绘标题栏。页面内按钮执行最小化、最大化/还原、关闭，窗口调用在后台任务完成；关闭先停止投屏、释放输入，再走原有原生退出清理。拖动区域用 pointer capture 和有序、仅保留最新位置的 set_position 实现，不使用 start_dragging 或 WM_NCLBUTTONDOWN，避免进入原生标题栏移动循环。最大化时可双击标题区域或点击还原，暂不支持拖动最大化窗口自动还原；macOS 继续使用系统标题栏。
+
+inputFlow 以最近十个 100ms 时间桶显示接收/提交样本数；lastBridgeOverheadMs 为最近一次完整 apply 等待减去原生执行时间，含桥接、调度和策略开销。lastReceivedPosition 是 0–65535 协议坐标，lastSubmittedPosition 是物理屏幕坐标。移动合并只替换未执行的中间位置，保留最终位置，不按比例削减拖动距离。计数为零也可能是窗口期内没有事件，不能单凭合并总数判断 RX 发得少。
+
 ## 验证
 
 Rust 规划测试覆盖五键、组合、拖拽、滚轮方向、无坐标 cancel/modifiers、越界/非法形状拒绝、部分提交和失败 reset。JS 原生适配测试覆盖全部 Mouse 字段无损传递；Edge 集成覆盖真实 DataChannel 上 Touch→Mouse→Touch、帧序列、独立视频连续和诊断。测试使用 fixture 的原生桥接，不替代真实 RX 验收。

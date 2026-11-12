@@ -372,11 +372,28 @@ test('uses Launcher DataChannel signaling for media renegotiation and handles it
   await socket.receive({type: 'answer', answer: {type: 'answer', sdp: 'initial-answer'}});
   const channel = client.channel; channel.open();
   await client.startScreenShare();
-  assert.deepEqual(JSON.parse(channel.sent.at(-1)), {action: 'webrtc-signal', data: {type: 'offer', payload: {type: 'offer', sdp: 'offer-2'}}});
+  assert.deepEqual(channel.sent.map(value=>JSON.parse(value)).findLast(value=>value.action==='webrtc-signal'), {action: 'webrtc-signal', data: {type: 'offer', payload: {type: 'offer', sdp: 'offer-2'}}});
   await channel.onmessage({data: JSON.stringify({action: 'webrtc-signal', data: {type: 'answer', payload: {type: 'answer', sdp: 'media-answer'}}})});
   assert.equal(client.pc.remoteDescriptions.at(-1).sdp, 'media-answer');
   assert.equal(controls.length, 0);
   await client.stop();
+});
+
+test('share lifecycle sends explicit stop, keeps pairing, and replays latest revision on new control channel',async()=>{
+  const fixture=streamFixture();
+  const client=new LauncherWebCastClient({WebSocketImpl:FakeSocket,RTCPeerConnectionImpl:FakePeerConnection,mediaDevices:{getDisplayMedia:async()=>fixture.stream}});
+  const connecting=client.connect('1234'),socket=FakeSocket.instances.at(-1);socket.open();await connecting;
+  await socket.receive({type:'joined',roomId:'room-1',userId:'sender-1',hostUserId:'host-1'});
+  client.channel.open();const original=client.channel,pc=client.pc;
+  const shares=channel=>channel.sent.map(v=>JSON.parse(v)).filter(v=>v.action==='nearcast-share-state').map(v=>v.data);
+  assert.deepEqual(shares(original).map(s=>[s.sharing,s.revision]),[[false,'0']]);
+  await client.startScreenShare();await client.stopStream();
+  assert.deepEqual(shares(original).map(s=>[s.sharing,s.revision]),[[false,'0'],[true,'1'],[false,'2']]);
+  assert.equal(client.pc,pc);assert.equal(client.socket,socket);assert.equal(client.status,'connected');
+  assert.equal(socket.sent.some(m=>m.type==='peer_leave'),false);
+  const next=client.recreateControlChannel({replace:true});next.open();
+  assert.deepEqual(shares(next),[{version:1,roomId:'room-1',senderUserId:'sender-1',receiverUserId:'host-1',revision:'2',sharing:false}]);
+  await client.startScreenShare();assert.equal(shares(next).at(-1).revision,'3');await client.stop();
 });
 
 test('buffers early ICE until the answer is applied instead of failing the session', async () => {

@@ -51,9 +51,22 @@ export class InputEngine{
     this.state='closed';this.generation=0;this.bindingToken=0;this.binding=null;this.owner=null;this.stream=null;this.input=new InputState();this.ingress=new InputState();
     this.nextIds=new Map();this.commands=new Map();this.closedIds=new Map();this.queue=[];this.pumping=false;
     this.nativeTail=Promise.resolve();this.cleanupActual=null;this.lastError=null;
+    this.flowBuckets=new Map();this.lastReceivedPosition=null;this.lastSubmittedPosition=null;
     this.stats={receivedSamples:0,validatedSamples:0,submittedSamples:0,submittedRecords:0,coalescedSamples:0,discardedSamples:0,failedSamples:0,queuePeak:0,lastNativeMs:0,lastNativeExecutionMs:0,lastQueueWaitMs:0,queueWaitPeakMs:0,cleanupMs:0};
   }
   notify(){try{this.onState(this.snapshot());}catch{/* Observability never owns input lifecycle. */}}
+  markFlow(kind){
+    const bucket=Math.floor(this.now()/100),counts=this.flowBuckets.get(bucket)??{received:0,submitted:0};
+    counts[kind]++;this.flowBuckets.set(bucket,counts);
+    for(const key of this.flowBuckets.keys())if(key<bucket-9)this.flowBuckets.delete(key);
+  }
+  inputFlow(){
+    const bucket=Math.floor(this.now()/100);let received=0,submitted=0;
+    for(const [key,count]of this.flowBuckets)if(key>=bucket-9){received+=count.received;submitted+=count.submitted;}
+    return{windowMs:1000,receivedPerSecond:received,submittedPerSecond:submitted,
+      lastBridgeOverheadMs:Math.max(0,this.stats.lastNativeMs-this.stats.lastNativeExecutionMs),
+      lastReceivedPosition:this.lastReceivedPosition,lastSubmittedPosition:this.lastSubmittedPosition};
+  }
   touchFeedback(stage,sample){
     try{
       if(stage==='clear')this.onTouchFeedback({stage});
@@ -65,7 +78,7 @@ export class InputEngine{
     contractFingerprint:INPUT_CONTRACT.fingerprint,acceptedInputTypes:[...(this.stream?.acceptedInputTypes??[])],outputPolicy:this.provider.snapshot?.().outputPolicy??'native',
     geometryRevision:this.binding?.geometry?.revision??null,receivedSeqId:this.ingress.seqId,submittedSeqId:this.input.seqId,queueLength:this.queue.length,touchContacts:this.input.contacts.size,
     mouseButtons:this.input.buttons,mouseModifiers:this.input.modifiers,scrollActive:Boolean(this.input.scroll),cleanupPending:['closing','cleanup_blocked'].includes(this.state),
-    lastError:this.lastError,...this.stats};}
+    lastError:this.lastError,inputFlow:this.inputFlow(),...this.stats};}
   enqueueNative(task){const result=this.nativeTail.then(task,task);this.nativeTail=result.then(()=>{},()=>{});return result;}
   async bindSource(binding){
     if(this.binding&&same(this.binding,binding))return;
@@ -160,6 +173,8 @@ export class InputEngine{
     let candidate;
     try{candidate=this.ingress.candidate(sample,this.stream);this.stats.validatedSamples++;}
     catch(error){this.stats.failedSamples++;return this.fault(error).catch(()=>{}).then(()=>{throw error;});}
+    this.markFlow('received');
+    this.lastReceivedPosition=sample.inputType==='mouse'&&sample.x!==undefined?{inputType:'mouse',units:'normalized-65535',x:sample.x,y:sample.y}:null;
     const records=sample.inputType==='touch'?sample.records.length:1;
     const tail=this.queue.at(-1),sameGeneration=tail?.generation===this.generation;
     const wheel=sameGeneration?accumulateWheel(tail.sample,sample,this.mapper.descriptor.region):null;
@@ -184,6 +199,15 @@ export class InputEngine{
       if(item.generation!==this.generation||this.state!=='active'){item.resolve({status:'stale'});continue;}
       try{
         this.stats.lastQueueWaitMs=this.now()-item.queuedAt;this.stats.queueWaitPeakMs=Math.max(this.stats.queueWaitPeakMs,this.stats.lastQueueWaitMs);
+        // A native title-bar move loop may delay WebView IPC completion after
+        // SendInput has already released the button. An old, unpressed hover
+        // carries no lifecycle or delta: discard it without killing the stream.
+        // Held buttons, modifiers, Touch and wheel still use the strict budget.
+        if(this.stats.lastQueueWaitMs>this.maxQueueAgeMs&&item.sample.inputType==='mouse'&&item.sample.eventKind===0&&
+          item.sample.buttons===0&&item.sample.modifiers===0&&this.input.buttons===0&&this.input.modifiers===0&&
+          this.input.contacts.size===0&&!this.input.scroll){
+          this.stats.discardedSamples++;item.resolve({status:'discarded'});this.notify();continue;
+        }
         requireInput(this.stats.lastQueueWaitMs<=this.maxQueueAgeMs,'TIMEOUT','Input queue age');
         const action=this.mapper.map(item.sample),started=this.now();
         const result=await timeout(this.enqueueNative(()=>this.provider.apply(action,owner)),this.operationTimeoutMs);
@@ -191,6 +215,7 @@ export class InputEngine{
         this.stats.lastNativeExecutionMs=result?.nativeDurationMs??0;
         if(item.generation!==this.generation||this.owner!==owner){item.resolve({status:'stale'});continue;}
         requireInput(result?.status==='submitted','UNAVAILABLE',result?.error??'Native submission unconfirmed');
+        this.markFlow('submitted');this.lastSubmittedPosition=action.inputType==='mouse'&&action.x!==undefined?{inputType:'mouse',units:this.mapper.descriptor.units,x:action.x,y:action.y}:null;
         this.touchFeedback('submitted',item.sample);this.input=item.candidate;this.stats.submittedSamples++;this.stats.submittedRecords+=item.records;item.resolve({status:'submitted'});this.notify();
       }catch(error){this.stats.failedSamples++;await this.fault(error).catch(()=>{});item.reject(error);}
     }}finally{this.pumping=false;}
