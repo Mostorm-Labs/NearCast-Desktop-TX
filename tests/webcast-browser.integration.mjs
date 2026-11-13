@@ -106,6 +106,7 @@ try {
           return;
         }
         const message = JSON.parse(event.data);
+        if(message.action==='nearcast-source'){(state.sourceInfoMessages??=[]).push(message.data);}
         if(message.action==='nearcast-share-state'){(state.shareStates??=[]).push(message.data);}
         if (message.action === 'webrtc-signal') signal(message.data.type, message.data.payload, 'datachannel');
         if (message.action === 'nearcast-input-source') {
@@ -286,6 +287,8 @@ try {
   assert.equal(await page.evaluate(()=>testReceiver.captureOptions.audio),false,'Windows audio must not open another display picker');
   assert.equal(await page.evaluate(()=>document.querySelector('#preview').srcObject.getVideoTracks()[0]===testReceiver.browserVideoTrack),true,'the original browser track must reach preview/WebRTC');
   assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().capture.backend),'browser');
+  await page.waitForFunction(()=>testReceiver.sourceInfoMessages?.at(-1)?.source.displaySurface==='monitor');
+  assert.deepEqual(await page.evaluate(()=>testReceiver.sourceInfoMessages.at(-1).source),{platform:'windows',clientKind:'desktop',product:'nearhub-cast',displaySurface:'monitor'});
   assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().capture.audio.state),'capturing');
   await page.waitForFunction(()=>testReceiver.windowActions?.includes('minimize'));
   const settingsFrames=await page.evaluate(()=>testReceiver.frames);
@@ -344,6 +347,7 @@ try {
     await page.evaluate(([kind,count])=>{testReceiver.captureKind=kind;testReceiver.displayCount=count;},[kind,displays]);
     await share();
     await page.waitForFunction(()=>document.querySelector('#preview').srcObject?.getVideoTracks()[0]?.readyState==='live');
+    await page.waitForFunction(surface=>testReceiver.sourceInfoMessages.at(-1).source.displaySurface===surface,kind);
     if(blocked){
       await page.waitForFunction(reason=>__nearcastTouchbackDiagnostics().detail?.includes(reason),blocked);
       assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().sourceReady),false);

@@ -396,6 +396,28 @@ test('share lifecycle sends explicit stop, keeps pairing, and replays latest rev
   await client.startScreenShare();assert.equal(shares(next).at(-1).revision,'3');await client.stop();
 });
 
+test('source metadata distinguishes desktop and web independently of input permission and replays after channel replacement',async()=>{
+  const fixture=streamFixture();let surface='monitor';fixture.track.getSettings=()=>({displaySurface:surface});
+  const identity={platform:'windows',clientKind:'desktop',product:'nearhub-cast'};
+  const client=new LauncherWebCastClient({WebSocketImpl:FakeSocket,RTCPeerConnectionImpl:FakePeerConnection,
+    sourceIdentity:identity,mediaDevices:{getDisplayMedia:async()=>fixture.stream}});
+  const connecting=client.connect('1234'),socket=FakeSocket.instances.at(-1);socket.open();await connecting;
+  await socket.receive({type:'joined',roomId:'room-1',userId:'sender-1',hostUserId:'host-1'});client.channel.open();
+  const source=()=>client.channel.sent.map(JSON.parse).filter(m=>m.action==='nearcast-source').at(-1).data;
+  assert.deepEqual(source(),{version:1,roomId:'room-1',senderUserId:'sender-1',receiverUserId:'host-1',revision:'1',source:{...identity,displaySurface:'unknown'}});
+  for(const selected of ['monitor','window','browser']){
+    surface=selected;await client.startScreenShare();assert.equal(source().source.displaySurface,selected);
+    assert.equal(source().source.clientKind,'desktop');
+  }
+  const current=source();client.recreateControlChannel({replace:true}).open();assert.deepEqual(source(),current);
+  await client.stopStream();assert.equal(source().source.displaySurface,'unknown');
+  assert.ok(BigInt(source().revision)>BigInt(current.revision));await client.stop();
+  const web=new LauncherWebCastClient({WebSocketImpl:FakeSocket,RTCPeerConnectionImpl:FakePeerConnection});
+  const start=web.connect('1234'),ws=FakeSocket.instances.at(-1);ws.open();await start;
+  await ws.receive({type:'joined',roomId:'room-2',userId:'web-1',hostUserId:'host-2'});web.channel.open();
+  assert.equal(web.channel.sent.map(JSON.parse).find(m=>m.action==='nearcast-source').data.source.clientKind,'web');await web.stop();
+});
+
 test('buffers early ICE until the answer is applied instead of failing the session', async () => {
   class StrictPeer extends FakePeerConnection {
     async addIceCandidate(candidate) {

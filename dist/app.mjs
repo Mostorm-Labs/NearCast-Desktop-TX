@@ -1,4 +1,5 @@
 import {LauncherWebCastClient, DEFAULT_ENDPOINT} from './webcast/launcher-webcast-client.mjs';
+import {browserPlatform} from './webcast/source-info.mjs';
 import {ReceiverTrust, formatFingerprint} from './webcast/receiver-trust.mjs';
 import {WebCastTouchbackSender} from './webcast/touchback-sender.mjs';
 import {showInputConsent} from './touchback/consent-ui.mjs';
@@ -305,6 +306,7 @@ inputReconnect.addEventListener('click', async () => {
   catch (error) { inputState.textContent = error.message; }
 });
 client = new LauncherWebCastClient({
+  sourceIdentity:()=>({clientKind:tauri.core?.invoke?'desktop':'web',platform:tauri.core?.invoke?platformInfo?.os??'unknown':browserPlatform(),product:tauri.core?.invoke?'nearhub-cast':'webcast'}),
   endpoint: selectedEndpoint,
   videoQuality,
   codeDisplayTransport: ({instance, request}) => invoke('nearcast_code_display', {instance, request}),

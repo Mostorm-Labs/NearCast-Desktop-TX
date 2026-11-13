@@ -5,6 +5,7 @@ const CODE_DISPLAY_RESULT_TYPE = 'nearcast.code_display.result';
 const CODE_DISPLAY_VERSION = 1;
 const CODE_DISPLAY_STATUSES = new Set(['shown', 'unavailable', 'rate_limited', 'not_supported']);
 import {DEFAULT_VIDEO_QUALITY, normalizeVideoQuality, videoCaptureConstraints, applyVideoTrackConstraints, applyVideoEncodingParameters} from './video-quality.mjs';
+import {browserPlatform,captureSourceInfo} from './source-info.mjs';
 let codeDisplaySequence = 0;
 
 const normalizeEndpoint = endpoint => {
@@ -56,6 +57,7 @@ export class LauncherWebCastClient {
     codeDisplayTransport = postCodeDisplay,
     codeDisplayTimeoutMs = 6000,
     videoQuality = DEFAULT_VIDEO_QUALITY,
+    sourceIdentity = () => ({clientKind:'web',platform:browserPlatform(),product:'webcast'}),
   } = {}) {
     if (typeof WebSocketImpl !== 'function') throw new TypeError('WebSocket implementation required');
     if (typeof RTCPeerConnectionImpl !== 'function') throw new TypeError('RTCPeerConnection implementation required');
@@ -75,6 +77,8 @@ export class LauncherWebCastClient {
     this.codeDisplayTransport = codeDisplayTransport;
     this.codeDisplayTimeoutMs = codeDisplayTimeoutMs;
     this.videoQuality = normalizeVideoQuality(videoQuality);
+    this.sourceIdentity = sourceIdentity;
+    this.sourceRevision=0n;this.sourceKey=null;
     this.socket = null;
     this.pc = null;
     this.channel = null;
@@ -140,6 +144,16 @@ export class LauncherWebCastClient {
       roomId:this.context.roomId,senderUserId:this.context.userId,receiverUserId:this.context.hostUserId,
       revision:String(this.shareRevision),sharing:this.sharingActive}})); }
     catch { /* Ordered channel closed concurrently; replay after replacement. */ }
+  }
+  publishSourceInfo() {
+    if(this.channel?.readyState!=='open'||!this.context.roomId||!this.context.userId||!this.context.hostUserId)return;
+    const identity=typeof this.sourceIdentity==='function'?this.sourceIdentity():this.sourceIdentity;
+    const source=captureSourceInfo(identity,this.stream?.getVideoTracks?.()[0]),key=JSON.stringify(source);
+    if(key!==this.sourceKey){this.sourceKey=key;this.sourceRevision++;}
+    try { this.channel.send(JSON.stringify({action:'nearcast-source',data:{version:1,
+      roomId:this.context.roomId,senderUserId:this.context.userId,receiverUserId:this.context.hostUserId,
+      revision:String(this.sourceRevision),source}})); }
+    catch { /* Replay the current source on the next authenticated channel. */ }
   }
   setShareState(sharing) {
     if(this.sharingActive!==sharing){this.sharingActive=sharing;this.shareRevision++;}
@@ -323,7 +337,7 @@ export class LauncherWebCastClient {
     if(this.channel&&this.channel!==channel&&!['closed','closing'].includes(this.channel.readyState)){channel.close?.();return false;}
     this.channel=channel;
     channel.binaryType = 'arraybuffer';
-    channel.onopen = () => { if (current() && this.channel === channel) { this.setStatus(this.stream ? 'sharing' : 'connected'); this.onControlChannel(channel, {...this.context}); this.publishShareState(); } };
+    channel.onopen = () => { if (current() && this.channel === channel) { this.setStatus(this.stream ? 'sharing' : 'connected'); this.publishSourceInfo(); this.onControlChannel(channel, {...this.context}); this.publishShareState(); } };
     channel.onmessage = event => {
       if (!current() || this.channel !== channel) return;
       if (typeof event.data === 'string') {
@@ -374,7 +388,7 @@ export class LauncherWebCastClient {
         }
         track.onended = () => { if (this.stream === stream) this.stopStream().catch(error => this.fail(error)); };
       }
-      this.setShareState(true);
+      this.publishSourceInfo();this.setShareState(true);
       // NearCast's native receiver accepts H.264 / Opus, not Chromium's
       // default VP8 preference. Keep codec selection at the media boundary.
       for (const transceiver of pc.getTransceivers?.() ?? []) {
@@ -406,6 +420,7 @@ export class LauncherWebCastClient {
     if (!this.stream) return;
     const current = this.stream;
     this.stream = null;
+    this.publishSourceInfo();
     for (const track of current.getTracks()) track.stop();
     try {
       try { this.setShareState(false); } catch { /* A replacement channel replays the stopped state. */ }
@@ -426,6 +441,7 @@ export class LauncherWebCastClient {
   }
 
   closePeerConnection() {
+    this.sourceRevision=0n;this.sourceKey=null;
     this.sharingActive=false;this.shareRevision=0n;
     this.pendingCandidates = [];
     this.remoteReady = false;
