@@ -15,13 +15,6 @@
   <main class="webcast-sender">
     <header class="topbar"><button id="settings-open" class="settings-entry" type="button" aria-label="打开设置">⚙ 设置</button><div class="logo"><span class="logo-mark">N</span><span>NearHub Cast</span></div><div class="update-heading"><span id="app-version"></span><button id="update-button" type="button" class="refresh">检查更新</button></div></header>
 
-    <section id="macos-permissions" class="permissions-panel" aria-labelledby="permissions-title" hidden>
-      <div class="permissions-heading"><h2 id="permissions-title">macOS 权限</h2><button id="refresh-permissions" class="refresh" type="button">刷新状态</button></div>
-      <p class="permissions-help">点击开关前往系统设置修改，返回后自动刷新。授权后如未生效，请重新启动应用。</p>
-      <div id="permission-rows" class="permission-grid"></div>
-      <p id="permissions-error" class="error" role="status" hidden></p>
-    </section>
-
     <section id="code-view" class="sender-panel">
       <div class="connection-tabs" role="tablist" aria-label="连接方式">
         <button id="connect-tab-code" role="tab" aria-selected="true" aria-controls="connect-panel-code" type="button">输入配对码</button>
@@ -89,7 +82,7 @@
 
     <section id="settings-view" class="settings-page" aria-labelledby="settings-title" hidden>
       <div class="settings-header"><div><span class="section-kicker">NEARHUB CAST</span><h1 id="settings-title" tabindex="-1">设置</h1></div><button id="settings-close" class="button secondary" type="button">返回投屏</button></div>
-      <nav class="settings-tabs" aria-label="设置分类"><button type="button" data-settings-tab="general" aria-pressed="true">通用设置</button><button type="button" data-settings-tab="updates" aria-pressed="false">检查更新</button><button type="button" data-settings-tab="feedback" aria-pressed="false">Feedback</button></nav>
+      <nav class="settings-tabs" aria-label="设置分类"><button type="button" data-settings-tab="general" aria-pressed="true">通用设置</button><button type="button" data-settings-tab="permissions" data-settings-platform="macos" aria-pressed="false" hidden>macOS 权限</button><button type="button" data-settings-tab="updates" aria-pressed="false">检查更新</button><button type="button" data-settings-tab="feedback" aria-pressed="false">Feedback</button></nav>
       <section id="settings-general" class="settings-content" aria-label="通用设置">
         <h2>投屏与声音</h2>
       <section class="video-quality" aria-labelledby="video-quality-title">
@@ -143,6 +136,15 @@
         </details>
         </section>
         <p id="settings-save-status" class="quality-help" role="status">画质与声音在下次分享时生效；反控开关立即生效。输入转换需点击应用。</p>
+      </section>
+      <section id="settings-permissions" class="settings-content" aria-label="macOS 权限" hidden>
+        <section id="macos-permissions" class="permissions-panel" aria-labelledby="permissions-title">
+          <div class="permissions-heading"><h2 id="permissions-title">macOS 权限</h2><button id="refresh-permissions" class="refresh" type="button">刷新状态</button></div>
+          <p class="permissions-help">点击开关前往系统设置配置 NearHub Cast；开关显示当前检测状态，应用不能代替你授权。返回后自动刷新，也可手动刷新状态。授权后如系统要求重启，请重新打开应用。</p>
+          <div id="permission-rows" class="permission-grid"></div>
+          <p id="permissions-error" class="error" role="status" hidden></p>
+        </section>
+        <p class="quality-help">本地网络用于发现和连接接收端；分享屏幕前需要录屏权限；允许接收端控制本机前需要辅助功能权限。本地网络“网络可用”表示当前访问检测通过，具体授权请在系统设置中确认。</p>
       </section>
       <section id="settings-updates" class="settings-content" aria-label="检查更新" hidden><h2>软件更新</h2><p>当前版本 <span id="settings-version">—</span></p><p id="settings-update-status" role="status">启动后自动检查更新。</p><p class="quality-help">后台检查并下载更新；安装前由你确认，安装时会结束投屏。</p><button id="settings-update-check" class="button primary" type="button">检查更新</button><p id="settings-update-error" class="error" hidden></p></section>
       <section id="settings-feedback" class="settings-content" aria-label="Feedback" hidden><h2>Feedback</h2><p>描述问题并上传本机诊断，帮助我们定位投屏或反控故障。</p><form id="feedback-form"><label>邮箱（用于回复）<input id="feedback-email" type="email" maxlength="254" required autocomplete="email" /></label><label>问题描述<textarea id="feedback-message" rows="5" maxlength="4000" required placeholder="发生了什么？可以如何复现？"></textarea></label><label class="feedback-consent"><input id="feedback-consent" type="checkbox" required /> 同意将问题描述、邮箱及诊断 ZIP 上传到 Mosapi。诊断包含版本、平台和有界运行日志，不含配对码、音视频或设备信任密钥。</label><button id="feedback-submit" class="button primary" type="submit">打包诊断并发送</button><p id="feedback-status" role="status"></p></form></section>

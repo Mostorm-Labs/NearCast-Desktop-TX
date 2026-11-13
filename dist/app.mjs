@@ -60,7 +60,6 @@ const videoResolution = document.querySelector('#video-resolution');
 const videoBitrateMode = document.querySelector('#video-bitrate-mode');
 const videoBitrate = document.querySelector('#video-bitrate');
 const videoQualitySummary = document.querySelector('#video-quality-summary');
-const permissionsPanel = document.querySelector('#macos-permissions');
 const permissionRows = document.querySelector('#permission-rows');
 const refreshPermissionsButton = document.querySelector('#refresh-permissions');
 const permissionsError = document.querySelector('#permissions-error');
@@ -150,7 +149,8 @@ let selectedEndpoint = defaultEndpoint;
 let selectedDevice = null;
 let activeDevice = null;
 let currentStatus = 'idle';
-const settingsPage=mountSettings({document,isConnected:()=>['joined','connected','sharing'].includes(currentStatus)});
+const settingsPage=mountSettings({document,isConnected:()=>['joined','connected','sharing'].includes(currentStatus),
+  onSelectTab:tab=>{if(tab==='permissions')void refreshPermissions();}});
 mountFeedback({document,invoke});
 let codeDisplayRequestId = null;
 let trustDevice = null;
@@ -537,7 +537,7 @@ platformReady = loadPlatformInfo(invoke).then(async info => {
     onStatus: state => { if(state.binding==='calibrating')document.querySelector('#capture-help').textContent='正在识别分享的屏幕，请稍候；四角校验标记将自动消失。';else document.querySelector('#capture-help').textContent=state.displayBinding?.state==='bound'?'已确认分享的屏幕，可开启反控。':'系统选屏后自动识别屏幕；窗口仅投屏，识别失败可停止后重试。';if (state.error) setError(castError, new Error(state.error)); },
   });
   client.mediaDevices = captureProvider;
-  permissionsPanel.hidden = info.os !== 'macos';
+  settingsPage.setPlatform(info.os);
   if (info.os === 'macos') { renderPermissions(); refreshPermissions(); }
   platformStatus.textContent = platformSummary(info);
   touchbackStatus.textContent = touchbackSummary(info);

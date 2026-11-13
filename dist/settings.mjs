@@ -13,19 +13,33 @@ export function savePreferences(value,storage=globalThis.localStorage){
   storage.setItem('nearhub-cast-settings-v1',JSON.stringify({video:normalizeVideoQuality(value.video),systemAudio:value.systemAudio===true,inputEnabled:value.inputEnabled===true,policy:normalizeOutputPolicy(value.policy)}));
 }
 // A page in the same WebView keeps MediaStream and DataChannel owners alive.
-export function mountSettings({document,isConnected}){
+export function mountSettings({document,isConnected,onSelectTab=()=>{}}){
   const view=document.querySelector('#settings-view'),open=document.querySelector('#settings-open');
-  let active=false;
+  const tabs=[...document.querySelectorAll('[data-settings-tab]')];
+  let active=false,platform='unknown',selectedTab='general';
+  const available=tab=>!tab.dataset.settingsPlatform||tab.dataset.settingsPlatform===platform;
   const render=()=>{
     view.hidden=!active;document.querySelector('#code-view').hidden=active||isConnected();document.querySelector('#casting-view').hidden=active||!isConnected();
     open.setAttribute('aria-expanded',String(active));
+    for(const tab of tabs){
+      tab.hidden=!available(tab);
+      const selected=available(tab)&&tab.dataset.settingsTab===selectedTab;
+      tab.setAttribute('aria-pressed',String(selected));
+      document.getElementById('settings-'+tab.dataset.settingsTab).hidden=!selected;
+    }
   };
-  open.addEventListener('click',()=>{active=true;render();document.querySelector('#settings-title').focus();});
+  open.addEventListener('click',()=>{active=true;render();document.querySelector('#settings-title').focus();onSelectTab(selectedTab);});
   document.querySelector('#settings-close').addEventListener('click',()=>{active=false;render();open.focus();});
-  for(const button of document.querySelectorAll('[data-settings-tab]'))button.addEventListener('click',()=>{
-    for(const tab of document.querySelectorAll('[data-settings-tab]')){const selected=tab===button;tab.setAttribute('aria-pressed',String(selected));document.getElementById('settings-'+tab.dataset.settingsTab).hidden=!selected;}
+  for(const button of tabs)button.addEventListener('click',()=>{
+    if(!available(button))return;
+    selectedTab=button.dataset.settingsTab;render();onSelectTab(selectedTab);
   });
-  return{render,get active(){return active;}};
+  render();
+  return{render,setPlatform(value){
+    platform=value;
+    if(!tabs.some(tab=>available(tab)&&tab.dataset.settingsTab===selectedTab))selectedTab='general';
+    render();
+  },get active(){return active;}};
 }
 export function mountFeedback({document,invoke}){
   const form=document.querySelector('#feedback-form'),button=document.querySelector('#feedback-submit'),status=document.querySelector('#feedback-status');

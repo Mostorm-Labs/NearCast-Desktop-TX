@@ -17,21 +17,44 @@ const server=createServer(async(req,res)=>{
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 let browser;
 try{
-  browser=await chromium.launch({channel:'msedge',headless:true});
+  browser=await chromium.launch({channel:process.env.BROWSER_CHANNEL||'msedge',headless:true});
   const page=await browser.newPage({viewport:{width:960,height:640}});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('http://127.0.0.1:'+server.address().port+'/index.html');
   await page.evaluate(async()=>{
     const {mountSettings,mountFeedback,savePreferences,loadPreferences}=await import('/settings.mjs');
-    globalThis.testSettings={connected:false,calls:[],fail:false};
+    globalThis.testSettings={connected:false,calls:[],fail:false,selectedTabs:[]};
     const state=testSettings;
-    globalThis.settings=mountSettings({document,isConnected:()=>state.connected});
+    globalThis.settings=mountSettings({document,isConnected:()=>state.connected,onSelectTab:tab=>state.selectedTabs.push(tab)});
     mountFeedback({document,invoke:async(command,data)=>{state.calls.push({command,data});if(state.fail)throw Error('HTTP 503');await new Promise(resolve=>setTimeout(resolve,80));return{status:'submitted',id:99};}});
     savePreferences({...loadPreferences(),video:{resolution:'1280x720',bitrateMode:'dynamic',bitrateKbps:4000}});
   });
   await page.locator('#settings-open').click();
   assert.equal(await page.locator('#settings-general').isVisible(),true);
   assert.equal(await page.locator('#code-view').isVisible(),false);
+  const permissionsTab=page.locator('[data-settings-tab=permissions]');
+  assert.equal(await permissionsTab.count(),1,'permissions must be reachable from settings navigation');
+  assert.equal(await permissionsTab.isVisible(),false,'platform is unknown until the native result arrives');
+  await page.evaluate(()=>settings.setPlatform('macos'));
+  await permissionsTab.click();
+  assert.equal(await page.locator('#macos-permissions').isVisible(),true);
+  assert.equal(await page.locator('#macos-permissions').evaluate(el=>Boolean(el.closest('#settings-permissions')?.closest('#settings-view'))),true);
+  assert.equal(await page.locator('#settings-general').isVisible(),false);
+  assert.equal(await permissionsTab.getAttribute('aria-pressed'),'true');
+  assert.equal(await page.evaluate(()=>testSettings.selectedTabs.at(-1)),'permissions','opening permissions should request a fresh native check');
+  await page.locator('#settings-close').click();
+  assert.equal(await page.locator('#macos-permissions').isVisible(),false,'permission panel must not spill onto pairing or casting pages');
+  assert.equal(await page.locator('#code-view').isVisible(),true);
+  await page.locator('#settings-open').click();
+  assert.equal(await page.locator('#macos-permissions').isVisible(),true,'return to the selected settings category');
+  await page.evaluate(()=>settings.setPlatform('windows'));
+  assert.equal(await permissionsTab.isVisible(),false);
+  assert.equal(await page.locator('#macos-permissions').isVisible(),false);
+  assert.equal(await page.locator('#settings-general').isVisible(),true,'changing platform retires a macOS-only selection');
+  await page.evaluate(()=>settings.setPlatform('macos'));
+  await permissionsTab.click();
+  await page.locator('[data-settings-tab=general]').click();
+  assert.equal(await page.locator('#macos-permissions').isVisible(),false);
   await page.locator('[data-settings-tab=feedback]').click();
   await page.locator('#feedback-email').fill('test@example.com');await page.locator('#feedback-message').fill('Synthetic feedback fixture');
   await page.locator('#feedback-submit').click();assert.equal(await page.evaluate(()=>testSettings.calls.length),0);
@@ -51,5 +74,5 @@ try{
   await page.reload();
   assert.equal(await page.evaluate(async()=>(await import('/settings.mjs')).loadPreferences().video.resolution),'1280x720');
   assert.deepEqual(errors,[]);
-  console.log('PASS: separate settings navigation, persistence, Feedback consent, confirmed submission and retry');
+  console.log('PASS: platform-gated permissions tab, settings navigation, persistence, Feedback consent, confirmed submission and retry');
 }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
