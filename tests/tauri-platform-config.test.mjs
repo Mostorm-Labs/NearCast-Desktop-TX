@@ -20,6 +20,7 @@ test('Tauri bundle declares Windows installers and macOS 13 minimum', () => {
   const windows=JSON.parse(fs.readFileSync(path.join(root,'src-tauri','tauri.windows.conf.json'),'utf8'));
   assert.equal(windows.app.windows[0].decorations,false);
   assert.equal(windows.app.windows[0].label,'main');
+  assert.equal(windows.app.windows[0].url,'settings-migration.html');
 });
 
 test('macOS bundle explains screen capture and Bonjour discovery', () => {

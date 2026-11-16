@@ -290,6 +290,9 @@ test('continuous Mouse wheel backlog accumulates every delta without crossing Be
   const actions=calls.filter(([name])=>name==='apply').map(([,a])=>a);
   assert.deepEqual(actions.map(a=>[a.wheelPhase,a.wheelX,a.wheelY,a.modifiers]),[[1,64,-128,0],[2,2560,-10240,0],[2,-64,128,0],[2,-64,128,2],[3,0,0,2]]);
   assert.equal(engine.streamState(7,'AUTH-SID').lastSeqId,84);assert.equal(engine.snapshot().scrollActive,false);
+  const scroll=engine.snapshot().scroll.regionQ16_16;
+  for(const field of ['positiveX','negativeX','positiveY','negativeY'])assert.equal(scroll.received[field],scroll.submitted[field]);
+  assert.equal(scroll.received.samples,84);assert.equal(scroll.submitted.samples,5);
   assert.equal(engine.snapshot().coalescedSamples,79);assert.equal(engine.state,'active');
 });
 

@@ -11,7 +11,7 @@ pub fn fingerprint(der: &[u8]) -> Result<String, String> {
 pub fn valid_pin(pin: &str) -> bool { pin.len() == 64 && pin.bytes().all(|c| c.is_ascii_digit() || (b'A'..=b'F').contains(&c)) }
 
 #[derive(Debug)]
-struct KeyVerifier { expected: Option<String> }
+pub(crate) struct KeyVerifier { pub(crate) expected: Option<String> }
 impl ServerCertVerifier for KeyVerifier {
     fn verify_server_cert(&self, cert: &CertificateDer<'_>, _: &[CertificateDer<'_>], _: &ServerName<'_>, _: &[u8], _: UnixTime) -> Result<ServerCertVerified, rustls::Error> {
         let pin = fingerprint(cert.as_ref()).map_err(rustls::Error::General)?;

@@ -47,7 +47,7 @@ macOS 界面顶部提供“本地网络”“录屏与系统录音”“辅助�
 
 启动后输入接收端显示的 4 位配对码，点击“连接”，待接收端确认后点击“开始分享屏幕”。默认使用 WebView 系统选择器，展示屏幕/窗口预览。视频原始轨道直接交给 WebRTC，不经过 WGC 回读、像素 IPC 或 Canvas。点击“停止分享”会停止媒体轨道但保留连接，点击“断开连接”会关闭 WebRTC/WebSocket 并清理 Touchback 状态。
 
-连接后可以在“Video quality”面板选择采集分辨率、动态码率或固定目标码率。默认使用 1920×1080、固定 12 Mbps，适合先观察桌面文字清晰度。可选分辨率为 Auto、1280×720、1920×1080、2560×1440 和 3840×2160；可选目标码率为 2、4、8、12 和 20 Mbps。配置在下一次开始分享时生效，两种模式都会把选择的数值作为 `maxBitrate` 上限；动态模式允许 WebRTC 根据网络和编码器自适应降码率，固定模式尽量维持选择的目标。屏幕轨道会标记为 `contentHint=detail`，提示编码器优先保留文字和细节。目标码率受网络、接收端和浏览器 H.264 编码器能力影响，不代表每秒流量恒定。
+连接后可以在“Video quality”面板选择采集分辨率、动态码率或固定目标码率。默认使用 1920×1080、30 FPS 上限、固定 12 Mbps，适合先观察桌面文字清晰度。可选分辨率为 Auto、1280×720、1920×1080、2560×1440 和 3840×2160；可选目标码率为 2、4、8、12 和 20 Mbps。配置在下一次开始分享时生效，两种模式都会把选择的数值作为 `maxBitrate` 上限；动态模式允许 WebRTC 根据网络和编码器自适应降码率，固定模式尽量维持选择的目标。采集轨道与 WebRTC 发送均限制到 30 FPS，开始投屏保持主窗口当前状态。屏幕轨道会标记为 `contentHint=detail`，提示编码器优先保留文字和细节。目标码率受网络、接收端和浏览器 H.264 编码器能力影响，不代表每秒流量恒定。
 
 发送端等待控制 DataChannel 建立后才启用分享按钮。初始 Offer 使用 WebSocket，携带 Launcher 的 roomId/userId/hostUserId/targetId；随后优先用 `webrtc-signal` DataChannel 消息协商 H.264/Opus，ICE 在 Answer 到达前排队。Windows 只弹出一次系统选屏窗口；视频由浏览器采集，WASAPI 默认播放设备音频使用独立本机会话，不依赖视频采集目标。停止分享时清空音视频 sender 的 track，重新选择时复用原 sender，避免出现重复视频轨道。取消或拒绝屏幕选择会保留连接并在分享页显示错误。
 
@@ -79,7 +79,7 @@ Tauri 原生仅浏览 `_nearcast._tcp.local.`，设备列表只展示 NearCast �
 
 保存信任后才会通过 Rust rustls 桥接 POST `/nearcast/code-display`，reason 为 `sender-device-selected`；TLS 握手必须先通过已保存 SPKI 校验，才发送 HTTP。公钥变化会阻止显示码并要求重新现场核对，同一公钥续签或换 IP 不会丢失信任。只接收 `shown`、`unavailable`、`rate_limited`、`not_supported`，从不读取响应或 TXT 中的配对码。随后仍需现场读取并手动输入四位码；信任不会加入房间、授权媒体或 Touchback，也不会通过 WebSocket 回退请求。
 
-TXT HTTPS endpoint 只用于显示码，选择设备不会覆盖 Launcher 配对信令地址。云端正常时继续使用 `wss://cast.nearhub.us`；要加入接收端的独立本地 fallback 房间，需要用 `?ws=` 明确指定该房间的 WSS endpoint，并输入该本地房间的码。
+“局域网投屏”默认开启：选择支持的新 RX，现场输入它显示的本地配对码，原生桥接连接该设备的本地 WSS，双方不配置公网 STUN/TURN。关闭开关后，下次连接使用原有云端协商与云端码；两种模式不自动回退。旧 RX 可手动选择云端模式。mDNS 仅提供 local/cloud 就绪提示，实际放码请求重新检查所选服务和运行标识，连接验证已保存的设备公钥。详见 [本地信令](docs/architecture/local-signaling.md)。
 
 这两个固定 HTTPS 操作直接连接已发现地址，不使用代理、重定向、Cookie 或环境认证，限制请求为 1 KiB、响应为 4 KiB，并设置网络时限。mDNS 不能自动建立信任。指纹缺失、核对过期、信任文件损坏或保存失败时仍可现场输入配对码。已保存的设备信任只用于这两个原生 HTTPS 操作；本地 WSS 仍由 WebView2 验证证书，不能用此信任绕过它。
 

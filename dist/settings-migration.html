@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><script>
+// Startup only: read the old top-level origin before opening the branded one.
+// Native code checks this exact page, current window and bounded settings JSON.
+(async()=>{
+  if(location.origin!=='http://tauri.localhost'||parent!==window)return;
+  let preferences=null;
+  try{preferences=localStorage.getItem('nearhub-cast-settings-v1');}catch{}
+  try{await __TAURI__.core.invoke('nearcast_migrate_legacy_settings',{preferences});}catch{}
+  location.replace('http://cast.nearhub.localhost/index.html');
+})();
+</script>

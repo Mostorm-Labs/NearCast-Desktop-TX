@@ -6,6 +6,7 @@ const CODE_DISPLAY_VERSION = 1;
 const CODE_DISPLAY_STATUSES = new Set(['shown', 'unavailable', 'rate_limited', 'not_supported']);
 import {DEFAULT_VIDEO_QUALITY, normalizeVideoQuality, videoCaptureConstraints, applyVideoTrackConstraints, applyVideoEncodingParameters} from './video-quality.mjs';
 import {browserPlatform,captureSourceInfo} from './source-info.mjs';
+import {MediaDiagnosticsReader} from './media-diagnostics.mjs';
 let codeDisplaySequence = 0;
 
 const normalizeEndpoint = endpoint => {
@@ -64,6 +65,7 @@ export class LauncherWebCastClient {
     this.WebSocketImpl = WebSocketImpl;
     this.RTCPeerConnectionImpl = RTCPeerConnectionImpl;
     this.mediaDevices = mediaDevices;
+    this.socketFactory=null;this.rtcConfiguration=undefined;
     this.endpoint = endpoint;
     this.onStatus = onStatus ?? (() => {});
     this.onError = onError ?? (() => {});
@@ -95,6 +97,7 @@ export class LauncherWebCastClient {
     this.signalingChain = Promise.resolve();
     this.mediaSenders = new Map();
     this.mediaDiagnostics = {video: null, audio: null, updatedAt: 0};
+    this.mediaDiagnosticsReader = new MediaDiagnosticsReader();
     this.shareRevision=0n;
     this.sharingActive=false;
   }
@@ -105,14 +108,12 @@ export class LauncherWebCastClient {
   }
 
   async refreshMediaDiagnostics() {
-    const read = async sender => {
-      if (!sender || typeof sender.getStats !== 'function') return null;
-      const stats = await sender.getStats();
-      const row = [...stats.values()].find(value => value.type === 'outbound-rtp' && value.kind === sender.track?.kind);
-      if (!row) return null;
-      return {framesSent: row.framesSent ?? 0, framesEncoded: row.framesEncoded ?? 0, framesPerSecond: row.framesPerSecond ?? null, totalEncodeTime: row.totalEncodeTime ?? 0, qualityLimitationReason: row.qualityLimitationReason ?? 'none'};
-    };
-    const [video, audio] = await Promise.all([read(this.mediaSenders.get('video')), read(this.mediaSenders.get('audio'))]);
+    const pc = this.pc, stream = this.stream;
+    if (!stream) return this.mediaDiagnostics = {video: null, audio: null, updatedAt: Date.now()};
+    const videoSender = this.mediaSenders.get('video'), audioSender = this.mediaSenders.get('audio');
+    const read = sender => this.mediaDiagnosticsReader.read(sender).catch(() => null);
+    const [video, audio] = await Promise.all([read(videoSender), read(audioSender)]);
+    if (this.pc !== pc || this.stream !== stream || this.mediaSenders.get('video') !== videoSender || this.mediaSenders.get('audio') !== audioSender) return this.mediaDiagnostics;
     this.mediaDiagnostics = {video, audio, updatedAt: Date.now()};
     return this.mediaDiagnostics;
   }
@@ -199,7 +200,7 @@ export class LauncherWebCastClient {
     }
   }
 
-  requestCodeDisplay({device, reason = 'sender-device-selected'} = {}) {
+  requestCodeDisplay({device, reason = 'sender-device-selected',backend} = {}) {
     if (device?.trustRequired && device.trustState !== 'trusted') throw new TypeError('请先现场核对并信任接收端指纹');
     if (device?.protocol !== 'webcast' || !device.selectable || !device.capabilities?.has('webcast') || !device.capabilities.has('code-display-v1') || !device.supportsCodeDisplay) throw new TypeError('Receiver does not support code display');
     if (!Number.isFinite(device.expiresAt) || device.expiresAt <= Date.now()) throw new RangeError('Receiver discovery expired; scan again');
@@ -210,14 +211,17 @@ export class LauncherWebCastClient {
     if (endpoint.protocol === 'wss:') endpoint.protocol = 'https:';
     if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new TypeError('Code display endpoint must be https without credentials');
     const url = new URL('/nearcast/code-display', endpoint).toString();
-    for (const pending of this.pendingCodeDisplay.values()) if (pending.deviceId === deviceId && pending.url === url) return pending.requestId;
+    if(backend&&!['local','cloud'].includes(backend))throw new Error('Invalid signaling backend');
+    const explicit=Boolean(backend&&device.signaling);
+    if(backend==='local'&&!explicit)throw new Error('Receiver does not support local signaling');
+    for (const pending of this.pendingCodeDisplay.values()) if (pending.deviceId === deviceId && pending.url === url&&pending.backend===backend) return pending.requestId;
     const requestId = `code-display-${Date.now().toString(36)}-${(++codeDisplaySequence).toString(36)}`;
-    const request = {type: CODE_DISPLAY_REQUEST_TYPE, version: CODE_DISPLAY_VERSION, deviceId, requestId, reason: reason.trim()};
+    const request = {type: CODE_DISPLAY_REQUEST_TYPE, version: explicit?2:CODE_DISPLAY_VERSION, deviceId, requestId, reason: reason.trim(),...(explicit?{backend,runtimeInstanceId:device.signaling.runtimeInstanceId}:{})};
     if (utf8Length(JSON.stringify(request)) > 1024) throw new RangeError('Code display request is too large');
     // Selecting another receiver retires the previous display request and its response.
     this.cancelCodeDisplay();
     const controller = new AbortController();
-    const pending = {...request, url, controller};
+    const pending = {...request, backend, url, controller};
     this.pendingCodeDisplay.set(requestId, pending);
     const fail = error => {
       if (this.pendingCodeDisplay.get(requestId) !== pending) return;
@@ -227,9 +231,10 @@ export class LauncherWebCastClient {
     pending.timer = setTimeout(() => fail(new Error('Code display request timed out')), this.codeDisplayTimeoutMs);
     Promise.resolve().then(() => this.codeDisplayTransport({url, instance: device.instance, request, signal: controller.signal})).then(result => {
       if (this.pendingCodeDisplay.get(requestId) !== pending) return;
-      if (result?.type !== CODE_DISPLAY_RESULT_TYPE || result.version !== 1 || result.requestId !== requestId || !CODE_DISPLAY_STATUSES.has(result.status) || (result.deviceId && result.deviceId !== deviceId)) throw new Error('Invalid code display response');
+      if (result?.type !== CODE_DISPLAY_RESULT_TYPE || result.version !== request.version || result.requestId !== requestId || !CODE_DISPLAY_STATUSES.has(result.status) || (result.deviceId && result.deviceId !== deviceId)||
+        explicit&&(result.backend!==backend||result.deviceId!==deviceId||result.runtimeInstanceId!==request.runtimeInstanceId)) throw new Error('Invalid or stale backend code display response');
       this.pendingCodeDisplay.delete(requestId); clearTimeout(pending.timer);
-      this.onCodeDisplayResult({type: CODE_DISPLAY_RESULT_TYPE, version: 1, requestId, deviceId, status: result.status});
+      this.onCodeDisplayResult({type: CODE_DISPLAY_RESULT_TYPE, version: request.version, requestId, deviceId, status: result.status,...(explicit?{backend,runtimeInstanceId:request.runtimeInstanceId}:{})});
     }).catch(fail);
     return requestId;
   }
@@ -248,7 +253,7 @@ export class LauncherWebCastClient {
     if (this.socket?.readyState === 1) return Promise.resolve();
     if (this.socketOpenPromise) return this.socketOpenPromise;
     const url = normalizeEndpoint(this.endpoint);
-    const socket = new this.WebSocketImpl(url);
+    const socket = this.socketFactory?this.socketFactory(url):new this.WebSocketImpl(url);
     this.socket = socket;
     this.socketOpenPromise = new Promise((resolve, reject) => {
       socket.onopen = () => {
@@ -311,7 +316,7 @@ export class LauncherWebCastClient {
 
   async initializePeerConnection(createOffer = true) {
     if (this.pc) return;
-    const pc = new this.RTCPeerConnectionImpl(); this.pc = pc;
+    const pc = new this.RTCPeerConnectionImpl(this.rtcConfiguration); this.pc = pc;
     const current = () => this.pc === pc && !this.closed;
     pc.onicecandidate = event => {
       if (current() && event.candidate) {
@@ -420,6 +425,8 @@ export class LauncherWebCastClient {
     if (!this.stream) return;
     const current = this.stream;
     this.stream = null;
+    this.mediaDiagnostics = {video: null, audio: null, updatedAt: 0};
+    this.mediaDiagnosticsReader = new MediaDiagnosticsReader();
     this.publishSourceInfo();
     for (const track of current.getTracks()) track.stop();
     try {
@@ -447,6 +454,8 @@ export class LauncherWebCastClient {
     this.remoteReady = false;
     this.signalingChain = Promise.resolve();
     this.mediaSenders.clear();
+    this.mediaDiagnostics = {video: null, audio: null, updatedAt: 0};
+    this.mediaDiagnosticsReader = new MediaDiagnosticsReader();
     this.onSessionEnded();
     if (this.stream) { const stream = this.stream; this.stream = null; for (const track of stream.getTracks()) track.stop(); this.onStream(null); }
     if (this.channel) { const channel = this.channel; this.channel = null; channel.onmessage = null; channel.onopen = null; channel.onclose = null; channel.close?.(); }

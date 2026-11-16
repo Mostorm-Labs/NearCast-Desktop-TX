@@ -7,6 +7,7 @@ const RESOLUTION_VALUES = Object.freeze({
 });
 
 export const DEFAULT_VIDEO_QUALITY = Object.freeze({resolution: '1920x1080', bitrateMode: 'fixed', bitrateKbps: 12000});
+export const VIDEO_FRAME_RATE = 30;
 export const VIDEO_RESOLUTIONS = Object.freeze(Object.keys(RESOLUTION_VALUES));
 export const VIDEO_BITRATES_KBPS = Object.freeze([2000, 4000, 8000, 12000, 20000]);
 
@@ -23,13 +24,13 @@ export function normalizeVideoQuality(value = {}) {
 export function videoCaptureConstraints(quality = DEFAULT_VIDEO_QUALITY) {
   const normalized = normalizeVideoQuality(quality);
   const dimensions = RESOLUTION_VALUES[normalized.resolution];
-  return dimensions ? {width: {ideal: dimensions.width}, height: {ideal: dimensions.height}} : true;
+  return {...(dimensions ? {width: {ideal: dimensions.width}, height: {ideal: dimensions.height}} : {}),
+    frameRate: {ideal: VIDEO_FRAME_RATE, max: VIDEO_FRAME_RATE}};
 }
 
 export async function applyVideoTrackConstraints(track, quality = DEFAULT_VIDEO_QUALITY) {
   if (!track || typeof track.applyConstraints !== 'function') return false;
   const constraints = videoCaptureConstraints(quality);
-  if (constraints === true) return false;
   await track.applyConstraints(constraints);
   return true;
 }
@@ -42,7 +43,7 @@ export async function applyVideoEncodingParameters(sender, quality = DEFAULT_VID
   parameters.encodings = encodings.map(encoding => {
     const next = {...encoding};
     next.maxBitrate = normalized.bitrateKbps * 1000;
-    next.maxFramerate = 60;
+    next.maxFramerate = VIDEO_FRAME_RATE;
     next.scaleResolutionDownBy = 1;
     return next;
   });

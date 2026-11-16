@@ -140,6 +140,9 @@ fn execute_with(
         send(&inputs)
     };
     model::commit_prefix(state, plan, sent);
+    for step in plan.steps.iter().take(sent){
+        if let Event::Wheel(horizontal,delta)=step.event{crate::wheel_diagnostics::submitted(horizontal,delta);}
+    }
     if sent != inputs.len() {
         return Err(SubmissionError {
             error: format!(
@@ -299,5 +302,15 @@ mod tests {
             Some(1)
         );
         assert_eq!(state, State::default());
+    }
+    #[test]
+    fn wheel_diagnostics_count_only_the_os_confirmed_prefix(){
+        let before=crate::wheel_diagnostics::snapshot();let mut state=State::default();
+        let plan=model::plan(state,Action{kind:2,buttons:0,modifiers:0,x:10.0,y:10.0,
+            wheel:Some(model::Wheel{unit:0,phase:0,x:120,y:-240})},0,1920.0,1080.0).unwrap();
+        // Move and horizontal wheel succeed; vertical wheel does not.
+        assert!(execute_with(&mut state,&plan,[0.0,0.0,1920.0,1080.0],|_|(2,5)).is_err());
+        let after=crate::wheel_diagnostics::snapshot();assert_eq!(after.positive_x-before.positive_x,120);
+        assert_eq!(after.negative_y-before.negative_y,0);
     }
 }

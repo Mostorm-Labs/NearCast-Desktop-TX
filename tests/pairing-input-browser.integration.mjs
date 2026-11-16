@@ -11,7 +11,7 @@ const server=createServer(async(req,res)=>{
     const path=resolve(root,'.'+new URL(req.url,'http://localhost').pathname);
     if(!path.startsWith(root+sep)){res.writeHead(403).end();return;}
     res.setHeader('content-type',path.endsWith('.mjs')?'text/javascript':path.endsWith('.css')?'text/css':'text/html');
-    res.end((await readFile(path,'utf8')).replace('<script type="module" src="./app.mjs"></script>',''));
+    res.end((await readFile(path,'utf8')).replace('<script type="module" src="./bootstrap.mjs"></script>',''));
   }catch{res.writeHead(404).end();}
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));

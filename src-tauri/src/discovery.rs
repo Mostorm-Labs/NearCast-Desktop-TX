@@ -49,6 +49,13 @@ impl DiscoveryCache {
     pub fn trust_display_target(&self, instance: &str, device_id: &str) -> Result<ResolvedTarget, String> {
         self.display_target(instance, device_id, "trust-display-v1")
     }
+    pub fn local_signal_target(&self,instance:&str,device_id:&str,runtime:&str)->Result<ResolvedTarget,String>{
+        let entry=self.entries.get(&format!("_nearcast._tcp.local.:{instance}")).ok_or("Receiver discovery expired; scan again")?;
+        if runtime.is_empty()||entry.txt.get("runtime").map(String::as_str)!=Some(runtime)||entry.txt.get("local-state").map(String::as_str)!=Some("ready"){
+            return Err("本地投屏服务尚未就绪或已重启，请重新选择接收端。".into());
+        }
+        self.display_target(instance,device_id,"signaling-select-v1")
+    }
     fn display_target(&self, instance: &str, device_id: &str, capability: &str) -> Result<ResolvedTarget, String> {
         let entry = self.entries.get(&format!("_nearcast._tcp.local.:{instance}")).ok_or("Receiver discovery expired; scan again")?;
         let id = entry.txt.get("deviceId").or_else(|| entry.txt.get("device_id")).or_else(|| entry.txt.get("id"));
@@ -97,6 +104,17 @@ mod tests {
             [("id", "board"), ("capability", "webcast,code-display-v1"), ("endpoint", "https://unrelated.invalid:1234")].as_slice()).unwrap()
     }
 
+    #[test]
+    fn local_signaling_requires_the_current_advertised_runtime_and_ready_backend(){
+        let info=ServiceInfo::new("_nearcast._tcp.local.","Board","board.local.","192.0.2.21",78,
+            [("id","board"),("capability","webcast,signaling-select-v1"),("runtime","runtime-1"),("local-state","ready")].as_slice()).unwrap();
+        let mut cache=DiscoveryCache::default();cache.apply(ServiceEvent::ServiceResolved(info));
+        assert!(cache.local_signal_target("Board._nearcast._tcp.local.","board","runtime-1").is_ok());
+        assert!(cache.local_signal_target("Board._nearcast._tcp.local.","board","old-runtime").is_err());
+        assert!(cache.local_signal_target("Board._nearcast._tcp.local.","different","runtime-1").is_err());
+        cache.entries.values_mut().next().unwrap().txt.insert("local-state".into(),"unavailable".into());
+        assert!(cache.local_signal_target("Board._nearcast._tcp.local.","board","runtime-1").is_err());
+    }
     #[test]
     fn native_cache_keeps_service_until_dns_removal_instead_of_txt_lease_expiry() {
         let mut cache = DiscoveryCache::default();

@@ -85,6 +85,7 @@ pub fn snapshot() -> Value {
         "phaseElapsedMs":if c.complete{0.0}else{c.phase_started.elapsed().as_secs_f64()*1000.0},"slowestPhase":c.slowest_phase,"slowestPhaseMs":c.slowest_phase_ms,
         "threadId":c.thread_id,"complete":c.complete})).unwrap_or(Value::Null),Err(_)=>json!({"phase":"diagnostic_busy"})};
     if result.is_object() {
+        result["wheelSubmitted"]=json!(crate::wheel_diagnostics::snapshot());
         if let Ok(slow) = SLOW_CALL.try_lock() {
             if let Some(slow) = slow.as_ref() {
                 result["lastSlowCall"] = slow.clone();

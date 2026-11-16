@@ -4,12 +4,19 @@ use tauri::{AppHandle, Emitter, Manager, State};
 mod code_display;
 mod discovery;
 mod pinned_tls;
+mod local_signaling;
+use local_signaling::{nearcast_local_signal_open,nearcast_local_signal_send,nearcast_local_signal_close};
 mod trust;
 mod input_geometry;
 mod update;
 mod diagnostics;
+mod wheel_diagnostics;
 mod feedback;
 mod window_controls;
+#[cfg(windows)]
+mod local_origin;
+#[cfg(windows)]
+use local_origin::{nearcast_migrate_legacy_settings,nearcast_take_legacy_settings};
 mod display_binding;
 #[cfg(any(windows,test))]
 mod native_audio;
@@ -90,9 +97,10 @@ fn nearcast_trust_confirm(app: AppHandle, device_id: String, candidate_id: Strin
 fn nearcast_trust_cancel(trust: State<'_, TrustState>) -> Result<(), String> { trust.0.lock().map_err(|_| "Trust state poisoned")?.cancel(); Ok(()) }
 
 #[tauri::command]
-fn nearcast_trust_revoke(app: AppHandle, device_id: String, trust: State<'_, TrustState>) -> Result<(), String> {
+fn nearcast_trust_revoke(app: AppHandle, device_id: String, trust: State<'_, TrustState>,signals:State<'_,local_signaling::State>) -> Result<(), String> {
     let mut manager = trust.0.lock().map_err(|_| "Trust state poisoned")?;
     trust::TrustStore::load(trust_path(&app)?)?.revoke(&device_id)?;
+    signals.revoke(&device_id);
     manager.cancel(); Ok(())
 }
 
@@ -319,11 +327,15 @@ async fn nearcast_display_binding_release(source_id:String)->Result<(),String>{
     tauri::async_runtime::spawn_blocking(move||display_binding::release(source_id)).await.map_err(|e|e.to_string())?
 }
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(windows)]
+    let builder = local_origin::register(builder);
+    builder
         .plugin(tauri_plugin_updater::Builder::new().pubkey(include_str!("../update.pub").trim()).build())
         .manage(update::State::default())
         .manage(MdnsState(Mutex::new(None)))
         .manage(TrustState::default())
+        .manage(local_signaling::State::default())
         .setup(|app| { let _=diagnostics::initialize(app.handle());Ok(()) })
         .on_window_event(|window, event| {
             #[cfg(windows)]
@@ -340,11 +352,12 @@ pub fn run() {
             if matches!(event, tauri::WindowEvent::Destroyed) { let _ = macos_input::reset(); }
             let _=(window,event);
         })
-        .invoke_handler(tauri::generate_handler![window_controls::nearcast_window_action,nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_input_feedback, nearcast_input_execution_status, nearcast_system_audio_start, nearcast_audio_read, nearcast_audio_stop, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info, nearcast_display_binding_begin, nearcast_display_binding_confirm, nearcast_display_binding_cancel, nearcast_display_binding_release, nearcast_diagnostics_record, nearcast_diagnostics_export, nearcast_feedback_submit, nearcast_update_initialize, nearcast_update_check, nearcast_update_download, nearcast_update_install])
+        .invoke_handler(tauri::generate_handler![#[cfg(windows)] nearcast_migrate_legacy_settings, #[cfg(windows)] nearcast_take_legacy_settings, nearcast_local_signal_open,nearcast_local_signal_send,nearcast_local_signal_close,window_controls::nearcast_window_action,nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_input_feedback, nearcast_input_execution_status, nearcast_system_audio_start, nearcast_audio_read, nearcast_audio_stop, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info, nearcast_display_binding_begin, nearcast_display_binding_confirm, nearcast_display_binding_cancel, nearcast_display_binding_release, nearcast_diagnostics_record, nearcast_diagnostics_export, nearcast_feedback_submit, nearcast_update_initialize, nearcast_update_check, nearcast_update_download, nearcast_update_install])
         .build(tauri::generate_context!())
         .expect("error while building NearHub Cast")
-        .run(|_, event| {
+        .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
+                app.state::<local_signaling::State>().stop_all();
                 diagnostics::shutdown();
                 input_native::shutdown();
                 display_binding::shutdown();

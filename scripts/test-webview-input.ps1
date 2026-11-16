@@ -1,3 +1,4 @@
+param([ValidateSet('input','local-origin')][string]$Fixture='input')
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'This desktop integration fixture requires Windows.' }
 $txRoot = Split-Path -Parent $PSScriptRoot
@@ -28,7 +29,8 @@ try {
         # builds already embed their Tauri manifest and are never modified here.
         & $txManifestTool '-nologo' '-manifest' $txManifest "-outputresource:$txExecutable;#1"
         if ($LASTEXITCODE -ne 0) { throw 'Unable to embed the fixture manifest.' }
-        & $txExecutable own_webview_click_feedback_and_close_keep_the_ui_pumping --ignored --nocapture --test-threads=1
+        $txTestFilter=if($Fixture -eq 'local-origin'){'branded_origin_preserves_ipc_capture_and_settings'}else{'own_webview_click_feedback_and_close_keep_the_ui_pumping'}
+        & $txExecutable $txTestFilter --ignored --nocapture --test-threads=1
         if ($LASTEXITCODE -ne 0) { throw 'WebView input regression failed.' }
     } finally { Remove-Item -LiteralPath $txManifest }
 } finally { Pop-Location }

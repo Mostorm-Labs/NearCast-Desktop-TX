@@ -5,6 +5,7 @@ import {INPUT_CONTRACT,INPUT_WIRE} from '../touchback/axtp-input-contract.mjs';
 import {SESSION_CONTRACT} from '../touchback/axtp-session-contract.mjs';
 import {proveCaptureGeometry} from '../touchback/capture-geometry.mjs';
 import {requestInputConsent} from '../touchback/consent-request.mjs';
+import {ScrollDiagnostics} from '../touchback/scroll-diagnostics.mjs';
 const text=value=>typeof value==='string'&&value.length>0&&value.length<=128;
 const targetFields=['sessionId','sessionGeneration','slotId','bindingGeneration','lifecycleGeneration'];
 const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))):item);
@@ -17,6 +18,7 @@ export class WebCastTouchbackSender{
     this.engine=null;this.server=null;this.channel=null;this.generation=0;this.refreshVersion=0;
     this.enabled=false;this.track=null;this.captureSeen=false;this.target=null;this.identity=null;this.source=null;this.sourceKey=null;
     this.retiring=new Set();this.lastProbe=null;this.reason='LOCAL_INPUT_DISABLED';this.detail=null;this.wireStateKey=null;
+    this.scrollDiagnostics=new ScrollDiagnostics();
     this.stats={textReceived:0,binaryReceived:0,recentControl:[],lastOpenRequest:null,receivedTouchSamples:0,receivedMouseSamples:0,lastReceivedInput:null};
     this.onConsentRequest=onConsentRequest;this.onEnabledChanged=onEnabledChanged;this.consent=null;this.consentController=null;this.consentIds=new Set();
   }
@@ -38,7 +40,7 @@ export class WebCastTouchbackSender{
       displaySurface:this.track?.getSettings?.().displaySurface??null,controlConsent:this.consent??{}}}));
   }
   makeEngine(generation){
-    const engine=new InputEngine({...this.engineOptions,provider:this.provider,onTouchFeedback:event=>{if(this.engine===engine&&generation===this.generation)this.feedback(event);},onState:snapshot=>{
+    const engine=new InputEngine({...this.engineOptions,provider:this.provider,scrollDiagnostics:this.scrollDiagnostics,onTouchFeedback:event=>{if(this.engine===engine&&generation===this.generation)this.feedback(event);},onState:snapshot=>{
       const retired=this.retiring.has(engine);if(snapshot.state==='closed')this.retiring.delete(engine);
       if(this.engine!==engine||generation!==this.generation){if(retired&&snapshot.state==='closed')void this.refreshSource();return;}
       const key=[snapshot.state,snapshot.streamId,snapshot.cleanupPending].join(':');

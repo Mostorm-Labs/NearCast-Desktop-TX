@@ -65,12 +65,12 @@ test('applies selected capture resolution and fixed video bitrate to the sender'
   const connecting = client.connect('1234'); const socket = FakeSocket.instances.at(-1); socket.open(); await connecting;
   await socket.receive({type: 'joined'}); await wait();
   await client.startScreenShare();
-  assert.deepEqual(captures[0], {video: {width: {ideal: 1920}, height: {ideal: 1080}}, audio: false});
+  assert.deepEqual(captures[0], {video: {width: {ideal: 1920}, height: {ideal: 1080}, frameRate:{ideal:30,max:30}}, audio: false});
   assert.equal(parameters.encodings[0].maxBitrate, 8000000);
-  assert.equal(parameters.encodings[0].maxFramerate, 60);
+  assert.equal(parameters.encodings[0].maxFramerate, 30);
   assert.equal(parameters.degradationPreference, 'maintain-resolution');
   assert.equal(fixture.track.contentHint, 'detail');
-  assert.deepEqual(fixture.track.appliedConstraints.at(-1), {width: {ideal: 1920}, height: {ideal: 1080}});
+  assert.deepEqual(fixture.track.appliedConstraints.at(-1), {width: {ideal: 1920}, height: {ideal: 1080}, frameRate:{ideal:30,max:30}});
   await client.stop();
 });
 
@@ -94,8 +94,22 @@ test('reports outbound video encoder statistics for frame-rate diagnosis', async
   const connecting = client.connect('1234'); const socket = FakeSocket.instances.at(-1); socket.open(); await connecting;
   await socket.receive({type: 'joined'}); await wait(); await client.startScreenShare();
   await client.refreshMediaDiagnostics();
-  assert.deepEqual(client.mediaDiagnostics.video, {framesSent: 41, framesEncoded: 39, framesPerSecond: 29.5, totalEncodeTime: 1.24, qualityLimitationReason: 'none'});
+  const value=client.mediaDiagnostics.video;
+  assert.equal(value.framesSent,41);assert.equal(value.framesEncoded,39);assert.equal(value.framesPerSecond,29.5);
+  assert.equal(value.totalEncodeTime,1.24);assert.equal(value.qualityLimitationReason,'none');
+  assert.equal(value.encodedIntervalFps,null);
   await client.stop();
+  assert.equal(client.mediaDiagnostics.video,null);
+});
+
+test('late media statistics cannot populate a replacement sharing session', async()=>{
+  const client=new LauncherWebCastClient({WebSocketImpl:FakeSocket,RTCPeerConnectionImpl:FakePeerConnection});
+  let finish;const sender={track:{kind:'video'},getStats:()=>new Promise(resolve=>finish=resolve)};
+  client.stream={};client.pc={};client.mediaSenders.set('video',sender);
+  const reading=client.refreshMediaDiagnostics();client.stream={};
+  finish(new Map([['out',{type:'outbound-rtp',kind:'video',framesEncoded:10}]]));await reading;
+  assert.equal(client.mediaDiagnostics.video,null);
+  client.stream=null;await client.refreshMediaDiagnostics();assert.equal(client.mediaDiagnostics.video,null);
 });
 
 test('requests display audio and attaches one Opus sender when the picker returns audio', async () => {
@@ -138,10 +152,19 @@ test('leaves bitrate adaptive when dynamic mode is selected', async () => {
   await socket.receive({type: 'joined'}); await wait();
   await client.startScreenShare();
   assert.equal(parameters.encodings[0].maxBitrate, 8000000);
-  assert.equal(parameters.encodings[0].maxFramerate, 60);
+  assert.equal(parameters.encodings[0].maxFramerate, 30);
+  assert.deepEqual(fixture.track.appliedConstraints.at(-1),{frameRate:{ideal:30,max:30}},'Auto resolution also caps capture at 30 FPS');
   assert.equal(parameters.degradationPreference, 'balanced');
   assert.equal(parameters.encodings[0].scaleResolutionDownBy, 1);
   await client.stop();
+});
+
+test('capture stop updates UI even if RTP sender detach fails',async()=>{
+  const stopped=[],streams=[],client=new LauncherWebCastClient({WebSocketImpl:class{},RTCPeerConnectionImpl:class{},onStream:s=>streams.push(s)});
+  client.stream={getTracks:()=>[{stop:()=>stopped.push(true)}]};client.pc={};client.status='sharing';
+  client.mediaSenders.set('video',{replaceTrack:async()=>{throw Error('peer failed');}});
+  await assert.rejects(client.stopStream(),/peer failed/);
+  assert.equal(stopped.length,1);assert.deepEqual(streams,[null]);assert.equal(client.status,'connected');
 });
 
 test('requires a four-character pairing code before opening Launcher signaling', async () => {
@@ -200,6 +223,19 @@ test('does not request code display for an unselected device or accept mismatche
   assert.equal(socket.sent.some(message => message.type === 'nearcast.code_display.request'), false);
   await socket.receive({type: 'nearcast.code_display.result', version: 1, requestId: 'unknown', status: 'shown'});
   assert.deepEqual(results, []);
+});
+
+test('backend display requests and replies bind the selected service and receiver runtime',async()=>{
+  const results=[],errors=[],requests=[];let stale=false;
+  const client=new LauncherWebCastClient({WebSocketImpl:FakeSocket,RTCPeerConnectionImpl:FakePeerConnection,
+    codeDisplayTransport:async({request})=>{requests.push(request);return{...request,type:'nearcast.code_display.result',status:'shown',runtimeInstanceId:stale?'restarted':request.runtimeInstanceId};},
+    onCodeDisplayResult:value=>results.push(value),onCodeDisplayError:value=>errors.push(value)});
+  const device=receiverDevice({signaling:{runtimeInstanceId:'runtime-1',local:'ready',cloud:'ready'}});
+  client.requestCodeDisplay({device,backend:'local'});await wait();
+  assert.equal(requests[0].version,2);assert.equal(requests[0].backend,'local');assert.equal(results[0].runtimeInstanceId,'runtime-1');
+  stale=true;client.requestCodeDisplay({device,backend:'cloud'});await wait();
+  assert.equal(requests[1].backend,'cloud');assert.equal(results.length,1);assert.equal(errors.length,1);
+  assert.throws(()=>client.requestCodeDisplay({device:receiverDevice(),backend:'local'}),/local signaling/);
 });
 
 test('rejects AirPlay, missing capabilities, stale leases and insecure display requests before transport', () => {

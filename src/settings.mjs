@@ -1,16 +1,16 @@
 import {DEFAULT_VIDEO_QUALITY,normalizeVideoQuality,VIDEO_RESOLUTIONS,VIDEO_BITRATES_KBPS} from './webcast/video-quality.mjs';
 import {normalizeOutputPolicy,DEFAULT_OUTPUT_POLICY} from './touchback/output-policy.mjs';
 export function loadPreferences(storage=globalThis.localStorage){
-  const defaults={video:{...DEFAULT_VIDEO_QUALITY},systemAudio:true,inputEnabled:false,policy:{...DEFAULT_OUTPUT_POLICY}};
+  const defaults={video:{...DEFAULT_VIDEO_QUALITY},localSignaling:true,systemAudio:true,inputEnabled:false,policy:{...DEFAULT_OUTPUT_POLICY}};
   try{
     const value=JSON.parse(storage.getItem('nearhub-cast-settings-v1'))??{};
     const video=normalizeVideoQuality({...defaults.video,...value.video});
     if(!VIDEO_RESOLUTIONS.includes(video.resolution)||!VIDEO_BITRATES_KBPS.includes(video.bitrateKbps))throw new Error('Invalid saved quality');
-    return{video,systemAudio:value.systemAudio!==false,inputEnabled:value.inputEnabled===true,policy:normalizeOutputPolicy(value.policy??defaults.policy)};
+    return{video,localSignaling:value.localSignaling!==false,systemAudio:value.systemAudio!==false,inputEnabled:value.inputEnabled===true,policy:normalizeOutputPolicy(value.policy??defaults.policy)};
   }catch{return defaults;}
 }
 export function savePreferences(value,storage=globalThis.localStorage){
-  storage.setItem('nearhub-cast-settings-v1',JSON.stringify({video:normalizeVideoQuality(value.video),systemAudio:value.systemAudio===true,inputEnabled:value.inputEnabled===true,policy:normalizeOutputPolicy(value.policy)}));
+  storage.setItem('nearhub-cast-settings-v1',JSON.stringify({video:normalizeVideoQuality(value.video),localSignaling:value.localSignaling!==false,systemAudio:value.systemAudio===true,inputEnabled:value.inputEnabled===true,policy:normalizeOutputPolicy(value.policy)}));
 }
 // A page in the same WebView keeps MediaStream and DataChannel owners alive.
 export function mountSettings({document,isConnected}){

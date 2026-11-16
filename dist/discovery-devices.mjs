@@ -44,6 +44,10 @@ export function normalizeDiscoveryDevice(service, nowMs = Number(service?.nowMs 
   const hardwareId = canonicalDeviceId(advertisedDeviceId || txt.deviceid);
   const discoveryId = hardwareId ? `${protocol}:${hardwareId}` : `${protocol}:${text(service?.instance) || displayName}`;
   const ttlSeconds = Number(txt.ttl ?? 60);
+  const signaling=capabilities.has('signaling-select-v1')&&capabilities.has('code-display-v2')&&
+    /^[A-Za-z0-9-]{1,128}$/.test(text(txt.runtime))?{runtimeInstanceId:text(txt.runtime),
+      revision:/^[0-9]{1,20}$/.test(text(txt['status-rev']))?text(txt['status-rev']):'0',
+      local:txt['local-state']==='ready'?'ready':'unavailable',cloud:txt['cloud-state']==='ready'?'ready':'unavailable'}:null;
   if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) throw new RangeError('ttl');
   if (isWebCast && !endpoint) throw new RangeError('webcast endpoint');
   return {
@@ -61,6 +65,7 @@ export function normalizeDiscoveryDevice(service, nowMs = Number(service?.nowMs 
     version: text(txt.version || txt.srcvers),
     capability: isWebCast ? text(txt.capability) : '',
     capabilities,
+    signaling,
     supportsCodeDisplay: isWebCast && capabilities.has('code-display-v1'),
     supportsTrustDisplay: isWebCast && capabilities.has('trust-display-v1'),
     supportsTouchback: isWebCast && capabilities.has('touchback-v1'),
