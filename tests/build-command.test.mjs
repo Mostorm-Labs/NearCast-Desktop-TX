@@ -22,3 +22,14 @@ test('one application build increments once and gives Cargo and the bundler matc
   assert.deepEqual(bundleVersionConfig({semver:'0.1.0+7',build:7},'macos',{APPLE_SIGNING_IDENTITY:'stable'}),
     {version:'0.1.0+7',bundle:{macOS:{bundleVersion:'7',signingIdentity:'stable'}}});
 });
+
+test('blank Apple secrets are absent from Tauri environment while real credentials survive',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'tx-apple-env-'));
+  try{
+    await writeFile(join(root,'build-version.json'),JSON.stringify({logicalVersion:'0.1.0',build:6}));
+    let child;
+    await buildDesktop(['--target','aarch64-apple-darwin'],{root,env:{APPLE_CERTIFICATE:'',APPLE_ID:'  ',APPLE_SIGNING_IDENTITY:'-',APPLE_TEAM_ID:'configured-team'},run:(_cmd,_args,options)=>{child=options.env;return{status:0};}});
+    assert.equal('APPLE_CERTIFICATE' in child,false);assert.equal('APPLE_ID' in child,false);
+    assert.equal(child.APPLE_SIGNING_IDENTITY,'-');assert.equal(child.APPLE_TEAM_ID,'configured-team');
+  }finally{await rm(root,{recursive:true,force:true});}
+});

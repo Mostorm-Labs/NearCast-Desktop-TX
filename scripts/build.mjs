@@ -17,8 +17,13 @@ export async function buildDesktop(args=[],{root=projectRoot,env=process.env,hos
   else version=await allocateVersion({root});
   const divider=args.indexOf('--'),tauriArgs=divider<0?args:args.slice(0,divider),cargoArgs=divider<0?[]:args.slice(divider);
   console.log('Building NearHub Cast '+version.display);
+  const buildEnv={...env,NEARCAST_BUILD_VERSION:version.display};
+  // Tauri treats an empty certificate variable as a certificate to import.
+  // Preserve configured credentials; omit only absent/blank Apple variables.
+  for(const key of ['APPLE_CERTIFICATE','APPLE_CERTIFICATE_PASSWORD','APPLE_SIGNING_IDENTITY','APPLE_ID','APPLE_PASSWORD','APPLE_TEAM_ID'])
+    if(!buildEnv[key]?.trim())delete buildEnv[key];
   const result=run(process.execPath,[resolve(root,'node_modules/@tauri-apps/cli/tauri.js'),'build',...tauriArgs,'--config',JSON.stringify(bundleVersionConfig(version,platform,env)),...cargoArgs],
-    {cwd:root,env:{...env,NEARCAST_BUILD_VERSION:version.display},stdio:'inherit'});
+    {cwd:root,env:buildEnv,stdio:'inherit'});
   if(result.error)throw result.error;
   return result.status??1;
 }
