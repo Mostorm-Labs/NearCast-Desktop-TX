@@ -1,13 +1,13 @@
 // Generated from exact AXTP/Runtime commits by scripts/sync-axtp-typed-input.mjs.
 export const INPUT_CONTRACT = Object.freeze({
-  "sourceCommit": "48144141775da6c35e579d2498d88c0b0449ed61",
-  "runtimeCommit": "22a21721f6ccb7d48eb980c1a94ff309325e446f",
-  "axentCommit": "21ba313b79cba13e9eb189860fed27a8493f35c4",
-  "version": "0.18.0-dev.feac6fa2a4b9",
-  "fingerprint": "feac6fa2a4b9c927708c077746166259ffeb7d5f06dc6972b29f1fc30954c2d0",
+  "sourceCommit": "5b855a27a92d4d28ad97262f5b497aa130804c7a",
+  "runtimeCommit": "ce4c9c9929f7b40f5d24b540be420fa08c8f0038",
+  "axentCommit": "6829dc7989a2e381060b628ef54137f5f3ddeea0",
+  "version": "0.18.0-dev.0082a3428b1e",
+  "fingerprint": "0082a3428b1e8038e74c2883ab4372cf2169c7b3c1c9407d41eeb70f87b324e8",
   "published": false,
   "corpusSha256": "f4ec706d34353b2532f84f3cd9a228145671d7c9345258293a9bff0b6d637645",
-  "protocolSha256": "4779a95953da7b1834655e061bb1a2f02998473899711fc4d131ae87d96058a7"
+  "protocolSha256": "9e24fdeb3efb2b5c542e3f0b8b8da2b1d2478e96dd2d42d4b085044ee14b805e"
 });
 export const INPUT_WIRE = {
   "format": "input-sample-v1",
