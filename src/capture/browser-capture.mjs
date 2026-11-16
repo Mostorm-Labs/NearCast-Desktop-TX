@@ -1,5 +1,6 @@
 import {createSystemAudioTrack} from './native-audio.mjs';
 import {calibrateDisplayBinding} from './display-binding.mjs';
+import {VIDEO_FRAME_RATE} from '../webcast/video-quality.mjs';
 
 // A capture provider returns the browser's original MediaStream and tracks.
 // It owns lifecycle and audio composition, never reads or transports pixels.
@@ -14,7 +15,7 @@ export class BrowserCaptureMediaDevices {
     const generation=++this.generation;
     // This call must precede every await: WebKit/WebView requires activation.
     let selected;
-    try { selected=this.mediaDevices.getDisplayMedia({video:video===false?false:{frameRate:{ideal:60}},audio:this.platform==='windows'?false:audio,systemAudio:'include',surfaceSwitching:'exclude'}); }
+    try { selected=this.mediaDevices.getDisplayMedia({video:video===false?false:{frameRate:{ideal:VIDEO_FRAME_RATE,max:VIDEO_FRAME_RATE}},audio:this.platform==='windows'?false:audio,systemAudio:'include',surfaceSwitching:'exclude'}); }
     catch(error){return Promise.reject(error);}
     const previous=this.current;
     const retired=this.stopBarrier;

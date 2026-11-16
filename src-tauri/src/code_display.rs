@@ -6,10 +6,12 @@ fn validate_request(url: &str, request: &Value) -> Result<tauri::Url, String> {
         return Err("Code-display requires the fixed HTTPS endpoint without credentials or query".into());
     }
     let object = request.as_object().ok_or("Invalid code-display request")?;
-    let fields = ["type", "version", "deviceId", "requestId", "reason"];
-    if object.len() != fields.len() || object.keys().any(|key| !fields.contains(&key.as_str())) || request["type"] != "nearcast.code_display.request" || request["version"].as_u64() != Some(1) {
+    let v2=request["version"].as_u64()==Some(2);
+    let fields: &[&str]=if v2{&["type","version","deviceId","requestId","reason","backend","runtimeInstanceId"]}else{&["type", "version", "deviceId", "requestId", "reason"]};
+    if object.len() != fields.len() || object.keys().any(|key| !fields.contains(&key.as_str())) || request["type"] != "nearcast.code_display.request" || (!v2&&request["version"].as_u64() != Some(1)) {
         return Err("Invalid code-display request".into());
     }
+    if v2&&(!matches!(request["backend"].as_str(),Some("local"|"cloud"))||request["runtimeInstanceId"].as_str().is_none_or(|s|s.is_empty()||s.len()>128)){return Err("Invalid signaling backend request".into());}
     for (key, limit) in [("deviceId", 128), ("requestId", 128), ("reason", 64)] {
         let value = request[key].as_str().ok_or("Invalid code-display request field")?;
         if value.trim().is_empty() || value.len() > limit { return Err("Invalid code-display request field".into()); }
@@ -31,6 +33,12 @@ pub fn post(url: &str, request: &Value, pin: &str) -> Result<Value, String> {
     let parsed = validate_request(url, request)?;
     let body = serde_json::to_vec(request).map_err(|_| "Invalid code-display request")?;
     let response = crate::pinned_tls::post(&parsed, &body, pin)?;
+    if request["version"]==2 {
+        let value:Value=serde_json::from_slice(&response).map_err(|_|"Invalid backend code response")?;
+        if value["type"]!="nearcast.code_display.result"||value["version"]!=2||["requestId","deviceId","backend","runtimeInstanceId"].iter().any(|k|value[k]!=request[k])||
+            !matches!(value["status"].as_str(),Some("shown"|"unavailable"|"rate_limited"|"not_supported")){return Err("Stale or mismatched backend code response".into());}
+        return Ok(json!({"type":"nearcast.code_display.result","version":2,"requestId":value["requestId"],"deviceId":value["deviceId"],"backend":value["backend"],"runtimeInstanceId":value["runtimeInstanceId"],"status":value["status"]}));
+    }
     project_response(&response, request["requestId"].as_str().unwrap())
 }
 

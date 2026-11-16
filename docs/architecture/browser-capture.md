@@ -2,7 +2,9 @@
 
 当前默认路径为浏览器视频、Windows 系统混音、仅可证明的整屏反控。原生 WGC 像素采集、窗口缩略图及原生边框已移除。
 
-成功开始分享、WebRTC 轨道挂载完成后自动最小化发送端主窗口到任务栏，不结束 WebView 或媒体会话。用户通过系统分享条的 Stop sharing 停止采集，视频轨道 ended 进入同一 stopStream 路径，清理音视频与反控后恢复并聚焦主窗口。接收端断开也恢复；取消选屏或开始失败不最小化。显示操作串行，停止不会被较晚完成的最小化覆盖；退出/更新流程抑制自动恢复。系统分享条的文字、位置和隐藏按钮由 WebView2 管理，应用不替换它。长时间最小化状态的真实音视频与反控稳定性仍需现场验收。
+开始分享、停止分享和接收端断开均保持发送端当前窗口状态，不自动最小化或抢回焦点。用户仍可通过标题栏手动最小化／还原。系统分享条的 Stop sharing 使视频轨道 ended 进入同一 stopStream 路径并清理音视频与反控；分享条的文字、位置和隐藏按钮由 WebView2 管理，应用不替换它。
+
+浏览器选屏请求与后续轨道约束均使用 `frameRate: {ideal: 30, max: 30}`，WebRTC sender 的 `maxFramerate` 同时设为 30。Auto 分辨率也保留此上限。初次选屏仍保留来源原始尺寸以完成物理屏幕校准，随后应用所选输出分辨率。帧率调整不修改已保存的分辨率、码率或编码降级策略；实际帧率仍受来源变化、系统、编码器和传输自适应影响。
 
 停止分享保留配对和 WebRTC peer；通过 ordered control DataChannel 发送 `nearcast-share-state`，data 为 `{version:1,roomId,senderUserId,receiverUserId,revision:"2",sharing:false}`。首次开通道 false/0，成功开始 true/1，停止 false/2，重新开始 true/3；重建通道重发当前状态。revision 按 peer 单调递增。RX 需配套实现清帧、释放 presentation、回到等待分享及同 peer 恢复，单独升级 TX 不能让旧 RX 清除最后一帧。同一生命周期也通过 SDP 的会话级 `a=x-nearcast-share-state:<revision> <0|1>` 属性随 offer 发送，可在反控通道关闭时沿 WSS 完成停止通知。RX 修复分支 `codex/share-stop-return-to-waiting` 从 main `304c9d7` 创建，随后按用户要求合入 `codex/touchback-rx-joint-debug` 的 `049d17a`，工作树为 `rx-share-lifecycle/NearCast`。
 

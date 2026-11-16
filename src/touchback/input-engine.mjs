@@ -3,6 +3,7 @@ import {INPUT_CONTRACT} from './axtp-input-contract.mjs';
 import {InputState} from './input-state.mjs';
 import {GeometryMapper} from './geometry-mapper.mjs';
 import {integer} from './frame-codec.mjs';
+import {ScrollDiagnostics} from './scroll-diagnostics.mjs';
 
 const text=value=>typeof value==='string'&&value.length>0&&value.length<=128;
 const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))):item);
@@ -46,12 +47,13 @@ const timeout=(promise,ms,code='TIMEOUT')=>new Promise((resolve,reject)=>{
 });
 
 export class InputEngine{
-  constructor({provider,initialStreamId=1,operationTimeoutMs=3000,cleanupTimeoutMs=3000,maxQueuedSamples=64,maxQueuedRecords=2048,maxQueuedBytes=65536,maxQueueAgeMs=250,now=()=>performance.now(),onState=()=>{},onTouchFeedback=()=>{}}={}){
+  constructor({provider,initialStreamId=1,operationTimeoutMs=3000,cleanupTimeoutMs=3000,maxQueuedSamples=64,maxQueuedRecords=2048,maxQueuedBytes=65536,maxQueueAgeMs=250,now=()=>performance.now(),onState=()=>{},onTouchFeedback=()=>{},scrollDiagnostics=new ScrollDiagnostics()}={}){
     Object.assign(this,{provider,initialStreamId,operationTimeoutMs,cleanupTimeoutMs,maxQueuedSamples,maxQueuedRecords,maxQueuedBytes,maxQueueAgeMs,now,onState,onTouchFeedback});
     this.state='closed';this.generation=0;this.bindingToken=0;this.binding=null;this.owner=null;this.stream=null;this.input=new InputState();this.ingress=new InputState();
     this.nextIds=new Map();this.commands=new Map();this.closedIds=new Map();this.queue=[];this.pumping=false;
     this.nativeTail=Promise.resolve();this.cleanupActual=null;this.lastError=null;
     this.flowBuckets=new Map();this.lastReceivedPosition=null;this.lastSubmittedPosition=null;
+    this.scrollDiagnostics=scrollDiagnostics;
     this.stats={receivedSamples:0,validatedSamples:0,submittedSamples:0,submittedRecords:0,coalescedSamples:0,discardedSamples:0,failedSamples:0,queuePeak:0,lastNativeMs:0,lastNativeExecutionMs:0,lastQueueWaitMs:0,queueWaitPeakMs:0,cleanupMs:0};
   }
   notify(){try{this.onState(this.snapshot());}catch{/* Observability never owns input lifecycle. */}}
@@ -78,7 +80,7 @@ export class InputEngine{
     contractFingerprint:INPUT_CONTRACT.fingerprint,acceptedInputTypes:[...(this.stream?.acceptedInputTypes??[])],outputPolicy:this.provider.snapshot?.().outputPolicy??'native',
     geometryRevision:this.binding?.geometry?.revision??null,receivedSeqId:this.ingress.seqId,submittedSeqId:this.input.seqId,queueLength:this.queue.length,touchContacts:this.input.contacts.size,
     mouseButtons:this.input.buttons,mouseModifiers:this.input.modifiers,scrollActive:Boolean(this.input.scroll),cleanupPending:['closing','cleanup_blocked'].includes(this.state),
-    lastError:this.lastError,inputFlow:this.inputFlow(),...this.stats};}
+    lastError:this.lastError,inputFlow:this.inputFlow(),scroll:this.scrollDiagnostics.snapshot(),...this.stats};}
   enqueueNative(task){const result=this.nativeTail.then(task,task);this.nativeTail=result.then(()=>{},()=>{});return result;}
   async bindSource(binding){
     if(this.binding&&same(this.binding,binding))return;
@@ -150,6 +152,7 @@ export class InputEngine{
         requireInput(this.owner===owner&&generation===this.generation&&this.state==='opening','CANCELED','Stale prepare completion');
         requireInput(prepared?.status==='ready','UNAVAILABLE',prepared?.error??'Native prepare rejected');
         this.mapper=geometry;this.stream={...result,streamId:nextId,revision:String(generation)};this.input=new InputState();this.ingress=new InputState();this.state='active';
+        this.scrollDiagnostics.opened();
         entry.result=structuredClone(this.stream);this.notify();return structuredClone(this.stream);
       }catch(error){
         if(this.owner===owner&&this.state==='opening')await this.fault(error).catch(()=>{});
@@ -174,6 +177,7 @@ export class InputEngine{
     try{candidate=this.ingress.candidate(sample,this.stream);this.stats.validatedSamples++;}
     catch(error){this.stats.failedSamples++;return this.fault(error).catch(()=>{}).then(()=>{throw error;});}
     this.markFlow('received');
+    this.scrollDiagnostics.record('received',sample);
     this.lastReceivedPosition=sample.inputType==='mouse'&&sample.x!==undefined?{inputType:'mouse',units:'normalized-65535',x:sample.x,y:sample.y}:null;
     const records=sample.inputType==='touch'?sample.records.length:1;
     const tail=this.queue.at(-1),sameGeneration=tail?.generation===this.generation;
@@ -215,6 +219,7 @@ export class InputEngine{
         this.stats.lastNativeExecutionMs=result?.nativeDurationMs??0;
         if(item.generation!==this.generation||this.owner!==owner){item.resolve({status:'stale'});continue;}
         requireInput(result?.status==='submitted','UNAVAILABLE',result?.error??'Native submission unconfirmed');
+        this.scrollDiagnostics.record('submitted',item.sample,this.stats.lastNativeMs,this.stats.lastNativeExecutionMs);
         this.markFlow('submitted');this.lastSubmittedPosition=action.inputType==='mouse'&&action.x!==undefined?{inputType:'mouse',units:this.mapper.descriptor.units,x:action.x,y:action.y}:null;
         this.touchFeedback('submitted',item.sample);this.input=item.candidate;this.stats.submittedSamples++;this.stats.submittedRecords+=item.records;item.resolve({status:'submitted'});this.notify();
       }catch(error){this.stats.failedSamples++;await this.fault(error).catch(()=>{});item.reject(error);}

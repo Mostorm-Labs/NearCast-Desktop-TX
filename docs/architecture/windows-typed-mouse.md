@@ -22,6 +22,15 @@ Mouse 能力：buttonsMask=31、modifierMask=15、allowChords=true、wheelUnits=
 
 ## 高频滚动与队列
 
+滚轮诊断版不修改倍率或输入策略。TX `scroll` 按 detent120／regionQ16_16 分别保存接收与提交的
+正负双轴总量、样本数、Touch 计数和桥接／原生耗时；跨同一软件运行期的输入通道重建保留累计值。
+Windows `nativeWheel` 仅统计 SendInput 返回的成功前缀中的 WHEEL/HWHEEL 单位，包含部分提交，
+不是浏览器实际消费的像素距离。native 进程计数可能包含别的输入转换，默认 Native 输出时才与
+协议 detent120 总量直接比较。原生 Touch 不会增加滚轮量。
+发生变化时约每秒写入既有轮转日志，导出前补一次快照；无输入记录、页面地址或配对信息。
+RX 日志 `Scroll diagnostics` 保存手势位移 DIP、当前倍率与 DPI、生成和成功发送的 detent120 总量。
+本轮测试应只控制一路，正向／反向分开，对比差值，不能拿输入包数等同于滚动量。
+
 RX 手势控制直接产生 typed Mouse wheel 时，TX 保持原生输出。每包先校验完整合同、序列和滚动生命周期；在未提交队列中，仅把同 stream、单位、阶段、锚点、按钮和修饰键的连续增量相加。detent120 的 None 和连续滚动 Changed 可合并，Began/Ended/Cancelled、方向反转、按键或锚点变化均为边界。合并保留双轴总量，不丢弃滚动位移，检查 i32 及平台转换范围；零轴可累积，正负轴不相互抵消。
 
 250ms 队列期限及总容量保持。滚轮合并保留最早一包的入队时间，不能用持续新消息延长旧增量的寿命。普通帧无 ACK，stream 状态使用最后实际提交的 seqId。诊断 coalescedSamples 反映减少的本机调用，lastNativeExecutionMs 保留共享路由下全部原生执行耗时；控制诊断 DOM 最多约每 150ms 更新一次。

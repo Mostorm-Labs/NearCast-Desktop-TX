@@ -49,6 +49,8 @@ pub async fn nearcast_window_action(
         }
         let position=window.outer_position().map_err(|e| e.to_string())?;
         Ok(json!({"maximized":window.is_maximized().map_err(|e| e.to_string())?,
+            "minimized":window.is_minimized().map_err(|e| e.to_string())?,
+            "visible":window.is_visible().map_err(|e| e.to_string())?,
             "x":position.x,"y":position.y,"scaleFactor":window.scale_factor().map_err(|e| e.to_string())?}))
     }).await.map_err(|e| e.to_string())?
 }

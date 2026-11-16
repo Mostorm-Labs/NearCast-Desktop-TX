@@ -34,6 +34,8 @@ try {
   await page.addInitScript(({pcmFixture}) => {
     globalThis.testReceiver = {signals: [], receivedTracks: [], frames: 0, mode: 'capture',sourceMessages:[],inputRpcId:100,discoveryListeners:{}};
     const state = globalThis.testReceiver;
+    // This legacy/cloud interoperability case explicitly selects cloud mode.
+    localStorage.setItem('nearhub-cast-settings-v1',JSON.stringify({localSignaling:false}));
     const receiver = new RTCPeerConnection({iceServers: []});
     state.receiverPeer=receiver;
     const NativePeer=globalThis.RTCPeerConnection;
@@ -143,6 +145,9 @@ try {
       }
       close() { this.readyState = 3; this.onclose?.({code: 1000}); }
     };
+    const CloudSocket=globalThis.WebSocket;
+    state.useNativeSignal=false;
+    globalThis.WebSocket=new Proxy(CloudSocket,{construct(target,args){state.cloudSocketCount=(state.cloudSocketCount??0)+1;return Reflect.construct(target,args);}});
     // Only capture is substituted. SDP, ICE, DTLS, SCTP and RTP use Edge.
     Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', {value: async options => {
       state.browserPickerCalls=(state.browserPickerCalls??0)+1;
@@ -167,6 +172,17 @@ try {
     }});
     let audioCaptureId=null,audioSequence=0,audioPosition=0;
     globalThis.__TAURI__ = {core: {invoke: async (command,args={}) => {
+      if(command==='nearcast_trust_status')return{trusted:true,deviceId:args.deviceId,fingerprint:'A'.repeat(64)};
+      if(command==='nearcast_code_display')return{type:'nearcast.code_display.result',version:args.request.version,requestId:args.request.requestId,deviceId:args.request.deviceId,
+        backend:args.request.backend,runtimeInstanceId:args.request.runtimeInstanceId,status:'shown'};
+      if(command==='nearcast_local_signal_open'){
+        state.nativeSignalId=args.connectionId;state.nativeSignal=new CloudSocket();
+        state.nativeSignal.onopen=()=>state.discoveryListeners['nearcast://local-signal']({payload:{kind:'open',connection_id:args.connectionId}});
+        state.nativeSignal.onmessage=event=>state.discoveryListeners['nearcast://local-signal']({payload:{kind:'message',connection_id:args.connectionId,data:event.data}});
+        return null;
+      }
+      if(command==='nearcast_local_signal_send'){state.nativeSignal.send(args.data);return null;}
+      if(command==='nearcast_local_signal_close'){if(args.connectionId===state.nativeSignalId)state.nativeSignal.close();return null;}
       if(command==='nearcast_window_action'){(state.windowActions??=[]).push(args.action.kind);return{maximized:false,x:0,y:0,scaleFactor:1};}
       if(command==='nearcast_platform_info')return{os:'windows',screenCapture:true,nativeCapture:false,captureBackend:'browser',systemAudio:true,touchback:true};
       if(command==='nearcast_mdns_start'){state.discoveryServices=args.services;return null;}
@@ -285,12 +301,14 @@ try {
   await page.waitForFunction(async()=>[...await testReceiver.receiverPeer.getStats()].some(([,row])=>row.type==='inbound-rtp'&&row.kind==='audio'&&row.totalAudioEnergy>0.00001));
   assert.equal(await page.evaluate(()=>testReceiver.browserPickerCalls),2,'one picker for cancellation and one successful selection');
   assert.equal(await page.evaluate(()=>testReceiver.captureOptions.audio),false,'Windows audio must not open another display picker');
+  assert.deepEqual(await page.evaluate(()=>testReceiver.captureOptions.video),{frameRate:{ideal:30,max:30}});
   assert.equal(await page.evaluate(()=>document.querySelector('#preview').srcObject.getVideoTracks()[0]===testReceiver.browserVideoTrack),true,'the original browser track must reach preview/WebRTC');
   assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().capture.backend),'browser');
   await page.waitForFunction(()=>testReceiver.sourceInfoMessages?.at(-1)?.source.displaySurface==='monitor');
   assert.deepEqual(await page.evaluate(()=>testReceiver.sourceInfoMessages.at(-1).source),{platform:'windows',clientKind:'desktop',product:'nearhub-cast',displaySurface:'monitor'});
   assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().capture.audio.state),'capturing');
-  await page.waitForFunction(()=>testReceiver.windowActions?.includes('minimize'));
+  assert.equal(await page.evaluate(()=>testReceiver.windowActions?.includes('minimize')??false),false,'sharing must keep the sender window visible');
+  assert.equal(await page.evaluate(()=>testReceiver.senderPeer.getSenders().find(s=>s.track?.kind==='video').getParameters().encodings[0].maxFramerate),30);
   const settingsFrames=await page.evaluate(()=>testReceiver.frames);
   await page.locator('#settings-open').click();
   assert.equal(await page.locator('#settings-general').isVisible(),true);
@@ -312,7 +330,7 @@ try {
   // Browser's native Stop sharing button emits ended on the display track.
   await page.evaluate(()=>testReceiver.browserVideoTrack.dispatchEvent(new Event('ended')));
   await page.waitForFunction(()=>document.querySelector('#preview').srcObject===null);
-  await page.waitForFunction(()=>testReceiver.windowActions.at(-1)==='show');
+  assert.equal(await page.evaluate(()=>testReceiver.windowActions?.some(kind=>kind==='show'||kind==='minimize')??false),false,'stopping capture must preserve manual window state');
   await page.waitForFunction(()=>testReceiver.shareStates.at(-1).sharing===false);
   assert.equal(await page.evaluate(()=>testReceiver.receiverPeer.connectionState),'connected');
   const beforeRestart = await page.evaluate(() => testReceiver.frames);
@@ -472,7 +490,9 @@ try {
   assert.equal(await page.evaluate(()=>document.querySelector('#preview').srcObject),null);
   await page.locator('#export-diagnostics').click();
   await page.waitForFunction(()=>document.querySelector('#diagnostics-export-status').textContent.includes('nearcast-diagnostics-test.json'));
-  assert.ok((await page.evaluate(()=>testReceiver.logSamples)).every(row=>Object.keys(row).every(key=>['event','status','metrics'].includes(key))));
+  assert.ok((await page.evaluate(()=>testReceiver.logSamples)).every(row=>Object.keys(row).every(key=>['event','status','metrics','scroll','video'].includes(key))));
+  assert.ok((await page.evaluate(()=>testReceiver.logSamples)).some(row=>row.video?.sourceFramesPerSecond>0&&row.video?.codec==='h264'),'actual WebRTC source and codec statistics persist');
+  assert.ok((await page.evaluate(()=>testReceiver.logSamples)).some(row=>row.scroll?.detent120.received.samples>0),'wheel totals persist before stop or export');
   assert.deepEqual(errors,[]);
   await page.reload();
   await page.waitForFunction(()=>testReceiver.discoveryServices);
@@ -484,6 +504,23 @@ try {
   assert.equal(await page.locator('#target-name').textContent(),'NearCast');
   await page.locator('#leave-button').click();
   await page.waitForFunction(()=>!document.querySelector('#code-view').hidden);
+  // A fresh fixture receiver owns the new native-signaling connection.
+  await page.reload();await page.waitForFunction(()=>testReceiver.discoveryServices);
+  const cloudBefore=await page.evaluate(()=>testReceiver.cloudSocketCount??0);
+  await page.evaluate(()=>{
+    testReceiver.discoveryListeners['nearcast://mdns-service']({payload:{serviceType:'_nearcast._tcp.local.',instance:'Local._nearcast._tcp.local.',hostname:'local-board.local.',port:78,addresses:['192.0.2.42'],
+      txt:{id:'local-board',display:'Local fixture',capability:'webcast,code-display-v1,trust-display-v1,code-display-v2,signaling-select-v1',runtime:'runtime-local','local-state':'ready','cloud-state':'ready','status-rev':'1'}}});
+  });
+  await page.locator('#settings-open').click();await page.locator('#local-signaling-enabled').check();await page.locator('#settings-close').click();
+  await page.locator('#connect-tab-devices').click();await page.getByRole('button',{name:/Local fixture/}).click();
+  await page.waitForFunction(()=>document.querySelector('#code-display-status').textContent.includes('配对码已'));
+  await page.locator('.code-digit').first().focus();await page.keyboard.type('1234');await page.locator('#connect-button').click();
+  await page.waitForFunction(()=>testReceiver.releaseAnswer);await page.evaluate(()=>testReceiver.releaseAnswer());
+  await page.waitForFunction(()=>testReceiver.channelOpen&&!document.querySelector('#share-button').disabled);
+  assert.equal(await page.evaluate(()=>testReceiver.cloudSocketCount??0),cloudBefore,'LAN mode must not open cloud signaling');
+  assert.deepEqual(await page.evaluate(()=>testReceiver.senderPeer.getConfiguration().iceServers),[]);
+  await share(false);await page.waitForFunction(()=>testReceiver.frames>2);
+  await page.locator('#leave-button').click();await page.waitForFunction(()=>!document.querySelector('#code-view').hidden);
   console.log(JSON.stringify({result:'PASS',videoBackend:'browser',originalTrack:true,independentPcmOpus:true,screenOnlyInput:true,multiDisplayCalibration:true,negativeCoordinates:true,layoutInvalidation:true,screenReselection:true,touchMouseTouch:true,wheelBackpressure:true,windowAndMultiDisplayVideo:true,senderReuse:true,frames:await page.evaluate(()=>testReceiver.frames)},null,2));
 } finally {
   await browser?.close();

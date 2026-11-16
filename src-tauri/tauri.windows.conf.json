@@ -2,6 +2,7 @@
   "app": {
     "windows": [{
       "label": "main",
+      "url": "settings-migration.html",
       "title": "NearHub Cast",
       "width": 960,
       "height": 780,

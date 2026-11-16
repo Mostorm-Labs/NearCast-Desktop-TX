@@ -1,5 +1,6 @@
 import {LauncherWebCastClient, DEFAULT_ENDPOINT} from './webcast/launcher-webcast-client.mjs';
 import {browserPlatform} from './webcast/source-info.mjs';
+import {localSocketFactory,signalingChoice} from './webcast/local-signaling.mjs';
 import {ReceiverTrust, formatFingerprint} from './webcast/receiver-trust.mjs';
 import {WebCastTouchbackSender} from './webcast/touchback-sender.mjs';
 import {showInputConsent} from './touchback/consent-ui.mjs';
@@ -7,7 +8,7 @@ import {createPlatformInputAdapter} from './touchback/platform-input.mjs';
 import {TauriDeviceDiscovery} from './tauri-device-discovery.mjs';
 import {loadPlatformInfo, platformSummary, screenCaptureError, touchbackSummary} from './platform-capabilities.mjs';
 import {canAttachTouchbackChannel} from './webcast/touchback-channel-policy.mjs';
-import {normalizeVideoQuality} from './webcast/video-quality.mjs';
+import {normalizeVideoQuality,VIDEO_FRAME_RATE} from './webcast/video-quality.mjs';
 import {MacOsPermissions} from './macos-permissions.mjs';
 import {BrowserCaptureMediaDevices} from './capture/browser-capture.mjs';
 import {mountUpdates} from './update/update-ui.mjs';
@@ -15,13 +16,9 @@ import {createDiagnostics} from './diagnostics.mjs';
 import {loadPreferences,savePreferences,mountSettings,mountFeedback} from './settings.mjs';
 import {mountPairingInput} from './pairing-input.mjs';
 import {mountWindowControls} from './window-controls.mjs';
-import {createSharingWindow} from './sharing-window.mjs';
 
 const tauri = globalThis.__TAURI__ ?? {};
 const invoke = tauri.core?.invoke ?? (async () => false);
-const sharingWindow=tauri.core?.invoke?createSharingWindow({invoke,onError:error=>{
-  const message=document.querySelector('#window-error');message.textContent='窗口显示操作失败：'+String(error?.message??error);message.hidden=false;
-}}):null;
 const listen = tauri.event?.listen ?? (async () => () => {});
 const codeView = document.querySelector('#code-view');
 const castingView = document.querySelector('#casting-view');
@@ -87,10 +84,13 @@ const gesturePinchHelp=document.querySelector('#gesture-pinch-help');
 const gestureFeedback=document.querySelector('#gesture-feedback');
 const inputProvider=createPlatformInputAdapter({}, {invoke});
 const preferences=loadPreferences();
+const localSignalingEnabled=document.querySelector('#local-signaling-enabled');
+localSignalingEnabled.checked=preferences.localSignaling;
+let codeRoute=null;
 videoResolution.value=preferences.video.resolution;videoBitrateMode.value=preferences.video.bitrateMode;videoBitrate.value=String(preferences.video.bitrateKbps);
 systemAudioEnabled.checked=preferences.systemAudio;inputEnabled.checked=preferences.inputEnabled;
 const persistPreferences=()=>{
-  try{savePreferences({video:videoQuality,systemAudio:systemAudioEnabled.checked,inputEnabled:inputEnabled.checked,policy:inputProvider.policy});
+  try{savePreferences({video:videoQuality,localSignaling:localSignalingEnabled.checked,systemAudio:systemAudioEnabled.checked,inputEnabled:inputEnabled.checked,policy:inputProvider.policy});
     document.querySelector('#settings-save-status').textContent='设置已保存在本机。画质和声音在下次分享时生效。';}
   catch{document.querySelector('#settings-save-status').textContent='无法保存设置，本次运行仍可使用。';}
 };
@@ -162,13 +162,18 @@ let capturePending = false;
 let captureProvider = null;
 let client;
 let diagnosticLogger;
+let windowDiagnostics={};
+const diagnosticWindow=()=>({...windowDiagnostics,pageVisibility:document.visibilityState});
 let videoQuality = normalizeVideoQuality({resolution: videoResolution.value, bitrateMode: videoBitrateMode.value, bitrateKbps: videoBitrate.value});
 globalThis.__nearcastTouchbackDiagnostics = () => touchback ? {...touchback.diagnostics(), control: touchback.controlDiagnostics(),capture:captureProvider?.diagnostics()??null} : null;
 const controlDiagnostics = document.querySelector('#touchback-diagnostics');
 const renderControlDiagnostics = () => {
-  if (controlDiagnostics) controlDiagnostics.textContent = JSON.stringify({...globalThis.__nearcastTouchbackDiagnostics(),media:client?.mediaDiagnostics??null}, null, 2);
+  if (controlDiagnostics) controlDiagnostics.textContent = JSON.stringify({...globalThis.__nearcastTouchbackDiagnostics(),media:client?.mediaDiagnostics??null,window:diagnosticWindow()}, null, 2);
   const flow=touchback?.diagnostics()?.inputFlow;
   document.querySelector('#input-flow').textContent=flow&&inputEnabled.checked?`最近 1 秒：接收 ${flow.receivedPerSecond} / 执行 ${flow.submittedPerSecond} 次 · 最近桥接等待 ${Math.round(flow.lastBridgeOverheadMs)} ms`:'';
+  const scroll=touchback?.diagnostics()?.scroll;
+  if(scroll){const r=scroll.detent120.received,s=scroll.detent120.submitted;
+    document.querySelector('#scroll-diagnostic-summary').textContent=`滚轮诊断版 · 累计纵轴（正／负）：接收 ${r.positiveY}／${r.negativeY}，提交 ${s.positiveY}／${s.negativeY} · 原始包 ${r.samples}，提交调用 ${s.samples}。测试后点击“导出诊断”。`;}
   const audio=captureProvider?.diagnostics()?.audio;
   if(systemAudioStatus)systemAudioStatus.textContent=audio?.error?`系统声音不可用，视频继续：${audio.error}`:audio?.state==='capturing'?'正在分享默认播放设备的系统声音':captureProvider?.current?'本次分享没有音频轨道':'开始分享后采集系统声音';
 };
@@ -183,8 +188,9 @@ let mediaStatsPending=false;
 setInterval(async()=>{
   if(mediaStatsPending)return;
   mediaStatsPending=true;
-  try{await Promise.all([client?.refreshMediaDiagnostics?.(),inputProvider.refreshExecution?.()]);}catch{/* Statistics cannot stop media. */}
-  finally{mediaStatsPending=false;renderControlDiagnostics();}
+  try{await Promise.allSettled([client?.refreshMediaDiagnostics?.(),inputProvider.refreshExecution?.(),
+    invoke('nearcast_window_action',{action:{kind:'state'}}).then(value=>{windowDiagnostics={minimized:value?.minimized,visible:value?.visible,sampledAt:Date.now()};})]);}catch{/* Statistics cannot stop media. */}
+  finally{mediaStatsPending=false;renderControlDiagnostics();diagnosticLogger?.scroll();diagnosticLogger?.media();}
 },1000);
 
 const setError = (element, error) => {
@@ -195,7 +201,7 @@ const setCodeDisplayStatus = text => { codeDisplayStatus.textContent = text || '
 const renderVideoQuality = () => {
   videoQuality = normalizeVideoQuality({resolution: videoResolution.value, bitrateMode: videoBitrateMode.value, bitrateKbps: videoBitrate.value});
   const resolution = videoQuality.resolution === 'auto' ? 'Auto' : videoQuality.resolution.replace('x', ' × ');
-  videoQualitySummary.textContent = `${videoQuality.bitrateMode === 'fixed' ? 'Fixed' : 'Dynamic'} · ${resolution}${videoQuality.bitrateMode === 'fixed' ? ` · ${videoQuality.bitrateKbps / 1000} Mbps` : ''}`;
+  videoQualitySummary.textContent = `${videoQuality.bitrateMode === 'fixed' ? 'Fixed' : 'Dynamic'} · ${resolution} · ${VIDEO_FRAME_RATE} FPS${videoQuality.bitrateMode === 'fixed' ? ` · ${videoQuality.bitrateKbps / 1000} Mbps` : ''}`;
   videoBitrate.disabled = false;
 };
 videoResolution.addEventListener('change', renderVideoQuality);
@@ -314,6 +320,7 @@ client = new LauncherWebCastClient({
   onError: error => { setError(codeError, error); client.stop({notify: false}); activeDevice = null; },
   onCodeDisplayResult: result => {
     if (result.requestId !== codeDisplayRequestId) return;
+    codeRoute=result.status==='shown'?{backend:result.backend??'cloud',deviceId:result.deviceId,runtimeInstanceId:result.runtimeInstanceId}:null;
     const messages = {shown: '配对码已在接收端显示，请输入 4 位配对码。', unavailable: '接收端暂时无法显示配对码，请现场查看接收端。', rate_limited: '请求过于频繁，请稍后再试。', not_supported: '该接收端不支持远程显示配对码，请现场查看。'};
     setCodeDisplayStatus(messages[result.status] || '');
   },
@@ -342,13 +349,13 @@ client = new LauncherWebCastClient({
     shareButton.hidden = Boolean(stream);
     stopShareButton.hidden = !stream;
     if (stream) preview.play?.().catch(() => {});
-    void sharingWindow?.sharing(stream);
   },
 });
 
 const requestCodeDisplayFor = device => {
   if (!device?.supportsCodeDisplay) { setCodeDisplayStatus('该接收端不支持远程显示配对码，请现场查看。'); return; }
-  try { codeDisplayRequestId = client.requestCodeDisplay({device: {...device, trustRequired: true, trustState: trustDevice && trustDevice.discoveryId === device.discoveryId && trustManager.state.phase === 'trusted' ? 'trusted' : 'untrusted'}, reason: 'sender-device-selected'}); }
+  try {const choice=signalingChoice(device,localSignalingEnabled.checked);codeRoute=null;
+    codeDisplayRequestId = client.requestCodeDisplay({device: {...device, trustRequired: true, trustState: trustDevice && trustDevice.discoveryId === device.discoveryId && trustManager.state.phase === 'trusted' ? 'trusted' : 'untrusted'},backend:choice.backend, reason: 'sender-device-selected'}); }
   catch (error) { setCodeDisplayStatus(error.message || String(error)); }
 };
 
@@ -370,14 +377,20 @@ const selectConnectionTab=tab=>{
   document.querySelector('#connect-description').textContent=manual?'输入接收端显示的 4 位配对码，直接连接。':'选择局域网中的设备，输入接收端显示的配对码。';
 
 };
+selectConnectionTab(connectionTabs[localSignalingEnabled.checked?1:0]);
 for(const [index,tab]of connectionTabs.entries()){
   tab.addEventListener('click',()=>selectConnectionTab(tab));
   tab.addEventListener('keydown',event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?1:1-index;selectConnectionTab(connectionTabs[next]);connectionTabs[next].focus();}});
 }
+localSignalingEnabled.addEventListener('change',()=>{
+  persistPreferences();codeRoute=null;client.cancelCodeDisplay();codeDisplayRequestId=null;
+  if(currentStatus==='idle')selectConnectionTab(connectionTabs[localSignalingEnabled.checked?1:0]);
+  if(currentStatus==='idle'&&selectedDevice)void trustManager.select(selectedDevice);
+});
 
 document.querySelector('#pair-clear-device').addEventListener('click',()=>{
   if(currentStatus!=='idle')return;
-  trustManager.cancel();trustDevice=null;selectedDevice=null;selectedEndpoint=defaultEndpoint;client.endpoint=defaultEndpoint;
+  trustManager.cancel();trustDevice=null;selectedDevice=null;codeRoute=null;selectedEndpoint=defaultEndpoint;client.endpoint=defaultEndpoint;
   client.cancelCodeDisplay();codeDisplayRequestId=null;setCodeDisplayStatus('');setError(codeError,null);
   document.querySelector('#pair-device-name').hidden=true;document.querySelector('#pair-clear-device').hidden=true;
   pairingInput.clear();digits[0].focus();
@@ -389,9 +402,17 @@ pairForm.addEventListener('submit', async event => {
   if (!/^[A-Z0-9]{4}$/.test(pairCode)) { setError(codeError, new Error('请输入 4 位字母或数字配对码')); return; }
   setError(codeError, null);
   if (selectedDevice && selectedDevice.expiresAt <= Date.now()) { setError(codeError, new Error('接收端发现已过期，请重新扫描并选择设备。')); return; }
+  let choice;
+  try{
+    choice=signalingChoice(selectedDevice,localSignalingEnabled.checked);
+    if(selectedDevice?.signaling&&(!codeRoute||codeRoute.backend!==choice.backend||codeRoute.deviceId!==selectedDevice.deviceId||codeRoute.runtimeInstanceId!==selectedDevice.signaling.runtimeInstanceId))
+      throw new Error('请先请求接收端显示当前连接方式的配对码，再连接。');
+  }catch(error){setError(codeError,error);return;}
   activeDevice = selectedDevice;
   trustManager.cancel(); trustDevice = null; client.cancelCodeDisplay(); codeDisplayRequestId = null;
   client.endpoint = selectedEndpoint;
+  client.socketFactory=choice.backend==='local'?localSocketFactory({invoke,listen,device:structuredClone(selectedDevice)}):null;
+  client.rtcConfiguration=choice.backend==='local'?{iceServers:[]}:undefined;
   try {
     await platformReady;
     await touchback.fence('new pairing');
@@ -419,9 +440,9 @@ window.addEventListener('beforeunload', () => { touchback.fence(); trustManager.
 const renderDevices = devices => {
   if (selectedDevice && currentStatus === 'idle') {
     const current = devices.find(device => device.discoveryId === selectedDevice.discoveryId && device.selectable);
-    if (!current || current.instance !== selectedDevice.instance || current.endpoint !== selectedDevice.endpoint || current.deviceId !== selectedDevice.deviceId || current.capability !== selectedDevice.capability) {
+    if (!current || current.instance !== selectedDevice.instance || current.endpoint !== selectedDevice.endpoint || current.deviceId !== selectedDevice.deviceId || current.capability !== selectedDevice.capability||current.signaling?.runtimeInstanceId!==selectedDevice.signaling?.runtimeInstanceId) {
       trustManager.cancel(); trustDevice = null;
-      selectedDevice = null; selectedEndpoint = defaultEndpoint; client.endpoint = defaultEndpoint; client.cancelCodeDisplay(); codeDisplayRequestId = null;
+      selectedDevice = null;codeRoute=null; selectedEndpoint = defaultEndpoint; client.endpoint = defaultEndpoint; client.cancelCodeDisplay(); codeDisplayRequestId = null;
       setCodeDisplayStatus('接收端已离线或服务发生变化，请重新扫描并选择。');
     } else {
       selectedDevice = current;
@@ -449,6 +470,7 @@ const renderDevices = devices => {
         client.cancelCodeDisplay(); codeDisplayRequestId = null;
         if (selectedDevice?.discoveryId !== device.discoveryId) pairingInput.clear();
         selectedDevice = device; trustDevice = device; selectedEndpoint = defaultEndpoint; client.endpoint = selectedEndpoint;
+        codeRoute=null;
         document.querySelector('#pair-device-name').textContent=device.displayName;
         document.querySelector('#pair-device-name').hidden=false;document.querySelector('#pair-clear-device').hidden=false;
         selectConnectionTab(connectionTabs[0]);digits[0].focus();setError(codeError, null);
@@ -524,12 +546,9 @@ platformReady = loadPlatformInfo(invoke).then(async info => {
   platformInfo = info;
   if(info.os==='windows')mountWindowControls({document,invoke,beforeClose:async()=>{
     if(capturePending)throw new Error('请先完成或取消分享范围选择。');
-    await sharingWindow?.shutdown();
-    try{
-      await touchback.setEnabled(false);await touchback.fence('window close');
-      if(touchback.diagnostics()?.cleanupPending)throw new Error('输入尚未释放，请重试释放后关闭。');
-      await client.stop();await captureProvider?.stop();diagnosticLogger?.stop();
-    }catch(error){sharingWindow?.resume();throw error;}
+    await touchback.setEnabled(false);await touchback.fence('window close');
+    if(touchback.diagnostics()?.cleanupPending)throw new Error('输入尚未释放，请重试释放后关闭。');
+    await client.stop();await captureProvider?.stop();diagnosticLogger?.stop();
   }});
   document.querySelector('#system-audio-settings').hidden=false;
   document.querySelector('#capture-help').textContent = '系统选屏后会短暂显示四角校验标记；识别成功的整屏支持多屏反控。窗口仅投屏。';
@@ -550,7 +569,7 @@ platformReady = loadPlatformInfo(invoke).then(async info => {
 }).catch(() => ({os: 'unknown', touchback: false, inputControl: 'none'}));
 startDiscovery();
 if(tauri.core?.invoke){
-  diagnosticLogger=createDiagnostics({invoke,snapshot:()=>({status:currentStatus,input:touchback?.diagnostics(),capture:captureProvider?.diagnostics(),media:client?.mediaDiagnostics})});
+  diagnosticLogger=createDiagnostics({invoke,snapshot:()=>({status:currentStatus,input:touchback?.diagnostics(),capture:captureProvider?.diagnostics(),media:client?.mediaDiagnostics,window:diagnosticWindow()})});
   diagnosticLogger.status(currentStatus);
   window.addEventListener('error',()=>diagnosticLogger.error());
   window.addEventListener('unhandledrejection',()=>diagnosticLogger.error());
@@ -567,13 +586,10 @@ if (tauri.core?.invoke) {
   const updates = mountUpdates({document, invoke, listen, isSharing: () => Boolean(client.stream),
     beforeInstall: async () => {
       if (capturePending) throw new Error('正在选择分享范围，请先完成或取消分享。');
-      await sharingWindow?.shutdown();
-      try{
-        await touchback.setEnabled(false);
-        await touchback.fence('software update');
-        if (touchback.diagnostics()?.cleanupPending) throw new Error('输入尚未释放，请先重试释放输入后再更新。');
-        await client.stop();await captureProvider?.stop();
-      }catch(error){sharingWindow?.resume();throw error;}
+      await touchback.setEnabled(false);
+      await touchback.fence('software update');
+      if (touchback.diagnostics()?.cleanupPending) throw new Error('输入尚未释放，请先重试释放输入后再更新。');
+      await client.stop();await captureProvider?.stop();
     },
   });
   window.addEventListener('beforeunload', () => updates.stop());

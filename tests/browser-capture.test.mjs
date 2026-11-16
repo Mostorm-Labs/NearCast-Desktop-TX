@@ -12,6 +12,7 @@ test('browser video track goes directly to WebRTC with one user-gesture picker a
   const video=track(),audio=track('audio'),source=stream([video]);
   const media=new BrowserCaptureMediaDevices({platform:'windows',mediaDevices:{getDisplayMedia(options){
     calls++;assert.equal(options.audio,false);assert.equal(options.video.width,undefined,'initial capture must retain original source dimensions');
+    assert.deepEqual(options.video.frameRate,{ideal:30,max:30},'cap capture at 30 FPS before calibration');
     return Promise.resolve(source);
   }},createSystemAudio:async()=>({track:audio,stop:async()=>{audioStops++;audio.stop();},diagnostics:()=>({source:'wasapi-loopback',state:'capturing'})})});
   const pending=media.getDisplayMedia({video:{width:{ideal:1280}},audio:true});
