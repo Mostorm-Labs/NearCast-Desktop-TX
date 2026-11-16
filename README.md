@@ -24,7 +24,7 @@ npm test
 cargo check --manifest-path src-tauri/Cargo.toml
 
 # 构建并启动 Release 发送端（已内置页面）
-node node_modules/@tauri-apps/cli/tauri.js build --no-bundle -- --locked
+node scripts/build.mjs --no-bundle -- --locked
 & ".\src-tauri\target\release\NearHub Cast.exe"
 ```
 
@@ -83,7 +83,7 @@ Tauri 原生仅浏览 `_nearcast._tcp.local.`，设备列表只展示 NearCast �
 
 这两个固定 HTTPS 操作直接连接已发现地址，不使用代理、重定向、Cookie 或环境认证，限制请求为 1 KiB、响应为 4 KiB，并设置网络时限。mDNS 不能自动建立信任。指纹缺失、核对过期、信任文件损坏或保存失败时仍可现场输入配对码。已保存的设备信任只用于这两个原生 HTTPS 操作；本地 WSS 仍由 WebView2 验证证书，不能用此信任绕过它。
 
-`src` 协议模块与 `dist` 运行模块需同步；`dist/tauri-device-discovery.mjs` 的导入必须指向 `./discovery-devices.mjs`。运行 `cargo build --manifest-path src-tauri/Cargo.toml` 会把当前 `dist` 打入 Debug EXE。
+`src` 协议模块与 `dist` 运行模块需同步；`dist/tauri-device-discovery.mjs` 的导入必须指向 `./discovery-devices.mjs`。应用构建使用 `node scripts/build.mjs --debug --no-bundle -- --locked` 或 `npm run build:macos`。每次读取 `build-version.json` 后将 Build 加一写回，失败也保留次数；检查和测试只读取当前编号。裸 Cargo 只用于检查／测试，不作为分配新版本的应用构建入口。Windows PowerShell 建议直接调用 Node 脚本，避免 npm.ps1 丢弃带 `--` 的选项。
 
 当前验证包含真实 TLS 自签名测试、66 秒以上真实 mDNS 广播/撤回测试和模拟原生边界的 Edge UI 测试；尚未完成现场用户指纹核对、真实屏幕选择器、发送端到接收端的 WebRTC / Touchback 整链路验收。
 

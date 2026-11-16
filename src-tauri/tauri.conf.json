@@ -5,6 +5,7 @@
   "version": "0.1.0",
   "identifier": "com.mostorm.nearhub.cast",
   "build": {
+    "beforeBuildCommand": "node scripts/verify-build-context.mjs",
     "frontendDist": "../dist"
   },
   "app": {

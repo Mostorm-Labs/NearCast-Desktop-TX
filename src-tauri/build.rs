@@ -5,28 +5,23 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=AppKit");
         println!("cargo:rustc-link-lib=framework=QuartzCore");
     }
-    println!("cargo:rerun-if-env-changed=NEARCAST_BUILD_NUMBER");
-    println!("cargo:rerun-if-env-changed=NEARCAST_LOGICAL_VERSION");
+    println!("cargo:rerun-if-env-changed=NEARCAST_BUILD_VERSION");
+    println!("cargo:rerun-if-changed=../build-version.json");
     println!("cargo:rerun-if-env-changed=NEARCAST_UPDATE_CHANNEL");
     let channel=std::env::var("NEARCAST_UPDATE_CHANNEL").unwrap_or_else(|_|"release".into());
     assert!(["release","beta","alpha"].contains(&channel.as_str()),"Invalid NEARCAST_UPDATE_CHANNEL");
     println!("cargo:rustc-env=NEARCAST_UPDATE_CHANNEL={channel}");
-    let build = std::env::var("NEARCAST_BUILD_NUMBER").unwrap_or_else(|_| "0".into());
-    assert!(
-        !build.is_empty() && build.bytes().all(|c| c.is_ascii_digit()),
-        "Invalid NEARCAST_BUILD_NUMBER"
-    );
-    build
-        .parse::<u64>()
-        .expect("NEARCAST_BUILD_NUMBER overflow");
+    let counter:serde_json::Value=serde_json::from_str(&std::fs::read_to_string("../build-version.json").expect("Missing build-version.json")).expect("Invalid build counter");
+    let build=counter["build"].as_u64().filter(|n|*n<=65535).expect("Build counter out of range");
+    let logical=counter["logicalVersion"].as_str().expect("Missing logical version");
+    let display=format!("{logical}.{build}");
+    if let Ok(assigned)=std::env::var("NEARCAST_BUILD_VERSION"){assert_eq!(assigned,display,"Assigned build differs from counter file");}
     println!("cargo:rustc-env=NEARCAST_BUILD_NUMBER={build}");
-    let logical = std::env::var("NEARCAST_LOGICAL_VERSION")
-        .unwrap_or_else(|_| std::env::var("CARGO_PKG_VERSION").unwrap());
     assert!(
         logical.split('.').count() == 3
             && logical
                 .split('.')
-                .all(|part| !part.is_empty() && part.bytes().all(|c| c.is_ascii_digit())),
+                .all(|part| !part.is_empty() && part.bytes().all(|c| c.is_ascii_digit())&&part.parse::<u16>().is_ok()&&(part=="0"||!part.starts_with('0'))),
         "Invalid NEARCAST_LOGICAL_VERSION"
     );
     println!("cargo:rustc-env=NEARCAST_LOGICAL_VERSION={logical}");

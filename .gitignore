@@ -3,4 +3,6 @@ src-tauri/gen/
 src-tauri/tauri.release.conf.json
 /release/
 node_modules/
+build-version.json.lock
+build-version.json.*.tmp
 

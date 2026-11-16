@@ -1,6 +1,7 @@
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {dirname, resolve} from 'node:path';
+import {buildDesktop} from './build.mjs';
 
 export function selectSigningIdentity(output, requested = '') {
   if (requested === '-') throw new Error('ad-hoc signing cannot preserve macOS permissions across builds');
@@ -21,7 +22,7 @@ export function appIsRunning(processes, executable) {
   return processes.split('\n').some(line => line.match(/^\s*\d+\s+(.+)$/)?.[1] === executable);
 }
 
-function build() {
+async function build() {
   if (process.platform !== 'darwin') throw new Error('This build command requires macOS');
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const app = resolve(root, 'src-tauri/target/debug/bundle/macos/NearHub Cast.app');
@@ -31,13 +32,12 @@ function build() {
   const identities = execFileSync('/usr/bin/security', ['find-identity', '-v', '-p', 'codesigning'], {encoding: 'utf8'});
   const identity = selectSigningIdentity(identities, process.env.APPLE_SIGNING_IDENTITY);
   console.log(`Building with stable signing identity: ${identity}`);
-  execFileSync('npx', ['--yes', '@tauri-apps/cli@2', 'build', '--debug', '--bundles', 'app'], {
-    cwd: root, stdio: 'inherit', env: {...process.env, APPLE_SIGNING_IDENTITY: identity},
-  });
+  const status=await buildDesktop(['--debug','--bundles','app'],{root,env:{...process.env,APPLE_SIGNING_IDENTITY:identity}});
+  if(status!==0)throw Error('macOS application build failed');
   execFileSync('/usr/bin/codesign', ['--verify', '--strict', '--verbose=2', app], {stdio: 'inherit'});
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { build(); }
+  try { await build(); }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 }
