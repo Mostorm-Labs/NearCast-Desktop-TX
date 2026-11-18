@@ -9,7 +9,9 @@
     <string>_nearcast._tcp</string>
   </array>
   <key>NSScreenCaptureUsageDescription</key>
-  <string>NearHub Cast 需要屏幕录制权限，才能把你选择的屏幕发送到接收端。</string>
+  <string>NearHub Cast 需要此权限分享系统播放的声音；部分系统也需要此权限分享屏幕画面。</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>NearHub Cast 需要采集系统播放的声音，以便分享给接收端；不采集麦克风。</string>
   <!-- WebKit gates navigator.mediaDevices on an audio/video usage declaration,
        including getDisplayMedia. This does not request microphone capture;
        the sender only requests display/system audio. -->

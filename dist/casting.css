@@ -41,6 +41,9 @@ html[data-view="home"][data-connection="code"] .settings-shortcut { display: gri
 .casting-panel .secondary { color: var(--text-primary); background: var(--panel-border); }
 .casting-panel .button:hover:not(:disabled), #connect-button:hover:not(:disabled) { transform: none; filter: brightness(1.08); }
 .casting-panel .error { width: 100%; max-width: none; margin-top: 16px; text-align: left; overflow-wrap: anywhere; }
+.cast-feedback { display: flex; align-items: center; gap: 12px; }
+.cast-feedback p { flex: 1; min-width: 0; margin: 0; line-height: 1.6; }
+.casting-panel .cast-feedback .button { flex: 0 0 auto; min-height: 32px; padding: 6px 10px; border: 1px solid var(--accent); color: var(--accent-text); background: transparent; }
 .session-details { width: 100%; padding: 0 8px; color: var(--text-tertiary); font-size: 12px; line-height: 20px; text-align: left; }
 .session-details > summary { width: fit-content; margin: auto; border-radius: 4px; cursor: pointer; }
 .session-details > summary:hover { color: var(--text-secondary); }
@@ -51,6 +54,9 @@ html[data-view="home"][data-connection="code"] .settings-shortcut { display: gri
 .preview-empty { margin: 16px 0 0; text-align: center; }
 .session-details summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media (max-width:650px) {
+  .cast-feedback { flex-wrap: wrap; }
+  .cast-feedback p { flex-basis: 100%; }
+  .cast-feedback .button { margin-left: auto; }
   .home-screen[data-connection="code"] .discovery-card { padding: 0 16px 24px; }
   .pair-back { padding: 0; }
   .pair-selected-device { max-width: 160px; }

@@ -27,3 +27,15 @@ test('language follows the system by default and a chosen locale survives prefer
   assert.equal(loadPreferences({getItem:()=>' {"language":"fr","systemAudio":false}'}).language,'system');
   assert.equal(loadPreferences({getItem:()=>' {"language":"fr","systemAudio":false}'}).systemAudio,false);
 });
+
+test('theme follows the system for old settings and preserves explicit choices across unrelated saves',()=>{
+  const store=storage();assert.equal(loadPreferences(store).theme,'system');
+  for(const theme of ['dark','light','system']){
+    savePreferences({...loadPreferences(store),theme,systemAudio:false},store);
+    savePreferences({...loadPreferences(store),language:'ja'},store);
+    assert.equal(loadPreferences(store).theme,theme);
+    assert.equal(loadPreferences(store).systemAudio,false);
+  }
+  assert.equal(loadPreferences({getItem:()=>'{"theme":"unexpected","systemAudio":false}'}).theme,'system');
+  assert.equal(loadPreferences({getItem:()=>'{"theme":"unexpected","systemAudio":false}'}).systemAudio,false);
+});

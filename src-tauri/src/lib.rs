@@ -18,7 +18,7 @@ mod local_origin;
 #[cfg(windows)]
 use local_origin::{nearcast_migrate_legacy_settings,nearcast_take_legacy_settings};
 mod display_binding;
-#[cfg(any(windows,test))]
+#[cfg(any(windows,target_os="macos",test))]
 mod native_audio;
 mod input_native;
 #[cfg(windows)]
@@ -35,6 +35,8 @@ mod input_dispatch_tests;
 #[cfg(all(test,windows,feature="webview-input-test"))]
 mod input_webview_tests;
 mod macos_permissions;
+#[cfg(target_os = "macos")]
+mod macos_app_icon;
 #[cfg(target_os = "macos")]
 mod macos_input;
 #[cfg(any(target_os = "macos", test))]
@@ -200,8 +202,9 @@ async fn nearcast_code_display(app: AppHandle, instance: String, request: serde_
 mod pointer;
 
 #[tauri::command]
-fn nearcast_macos_permissions() -> Result<serde_json::Value, String> {
-    macos_permissions::status()
+async fn nearcast_macos_permissions() -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(macos_permissions::status)
+        .await.map_err(|_| "Permission check task failed".to_string())?
 }
 
 #[tauri::command]
@@ -235,7 +238,7 @@ fn nearcast_platform_info() -> serde_json::Value {
     #[cfg(target_os = "windows")]
     { return serde_json::json!({"os":"windows","webview":"WebView2","screenCapture":true,"nativeCapture":false,"captureBackend":"browser","systemAudio":true,"screenCapturePermission":"not_required","touchback":true,"inputControl":"windows-pointer","multiTouch":true,"accessibilityPermission":"not_required"}); }
     #[cfg(target_os = "macos")]
-    { return serde_json::json!({"os":"macos","webview":"WKWebView","screenCapture":true,"screenCapturePermission":"required","touchback":true,"inputControl":"macos-mouse","multiTouch":false,"accessibilityPermission":"required"}); }
+    { return serde_json::json!({"os":"macos","webview":"WKWebView","screenCapture":true,"systemAudio":true,"screenCapturePermission":macos_permissions::screen_capture_requirement(),"touchback":true,"inputControl":"macos-mouse","multiTouch":false,"accessibilityPermission":"required"}); }
     #[cfg(target_os = "linux")]
     { return serde_json::json!({"os":"linux","webview":"WebKitGTK","screenCapture":true,"screenCapturePermission":"required","touchback":false,"inputControl":"none","multiTouch":false,"accessibilityPermission":"not_required"}); }
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
@@ -294,7 +297,7 @@ fn nearcast_input_execution_status()->serde_json::Value{
     #[cfg(windows)]{return input_execution::snapshot();}
     #[cfg(not(windows))]{serde_json::Value::Null}
 }
-#[cfg(windows)]
+#[cfg(any(windows,target_os="macos"))]
 fn close_after_input_cleanup(window:tauri::Window){
     tauri::async_runtime::spawn_blocking(move||{
         input_native::shutdown();display_binding::shutdown();native_audio::shutdown();let _=window.destroy();
@@ -303,21 +306,21 @@ fn close_after_input_cleanup(window:tauri::Window){
 
 #[tauri::command]
 async fn nearcast_system_audio_start(capture_id:String)->Result<serde_json::Value,String>{
-    #[cfg(windows)] {
+    #[cfg(any(windows,target_os="macos"))] {
         if capture_id.len()!=36 || !capture_id.bytes().all(|b| b.is_ascii_hexdigit()||b==b'-') {return Err("invalid_audio_owner".into());}
         return tauri::async_runtime::spawn_blocking(move||native_audio::start(&capture_id)).await.map_err(|e|e.to_string())?;
     }
-    #[cfg(not(windows))] {let _=capture_id;Err("native_audio_not_supported".into())}
+    #[cfg(not(any(windows,target_os="macos")))] {let _=capture_id;Err("native_audio_not_supported".into())}
 }
 #[tauri::command]
 async fn nearcast_audio_read(capture_id:String)->Result<tauri::ipc::Response,String>{
-    #[cfg(windows)] {return tauri::async_runtime::spawn_blocking(move||native_audio::read(&capture_id).map(tauri::ipc::Response::new)).await.map_err(|e|e.to_string())?;}
-    #[cfg(not(windows))] {let _=capture_id;Err("native_audio_not_supported".into())}
+    #[cfg(any(windows,target_os="macos"))] {return tauri::async_runtime::spawn_blocking(move||native_audio::read(&capture_id).map(tauri::ipc::Response::new)).await.map_err(|e|e.to_string())?;}
+    #[cfg(not(any(windows,target_os="macos")))] {let _=capture_id;Err("native_audio_not_supported".into())}
 }
 #[tauri::command]
 async fn nearcast_audio_stop(capture_id:String)->Result<(),String>{
-    #[cfg(windows)] {return tauri::async_runtime::spawn_blocking(move||native_audio::stop(&capture_id)).await.map_err(|e|e.to_string())?;}
-    #[cfg(not(windows))] {let _=capture_id;Ok(())}
+    #[cfg(any(windows,target_os="macos"))] {return tauri::async_runtime::spawn_blocking(move||native_audio::stop(&capture_id)).await.map_err(|e|e.to_string())?;}
+    #[cfg(not(any(windows,target_os="macos")))] {let _=capture_id;Ok(())}
 }
 #[tauri::command]
 async fn nearcast_diagnostics_record(sample:diagnostics::Sample)->Result<(),String>{
@@ -356,26 +359,44 @@ pub fn run() {
         .manage(MdnsState(Mutex::new(None)))
         .manage(TrustState::default())
         .manage(local_signaling::State::default())
-        .setup(|app| { let _=diagnostics::initialize(app.handle());Ok(()) })
+        .setup(|app| {
+            #[cfg(target_os="macos")]
+            macos_app_icon::install();
+            let _=diagnostics::initialize(app.handle());Ok(())
+        })
         .on_window_event(|window, event| {
-            #[cfg(windows)]
+            #[cfg(any(windows,target_os="macos"))]
             if let tauri::WindowEvent::CloseRequested{api,..}=event{
                 // Keep the window message loop alive while a worker releases
-                // injected input. SendInput may be targeting this very window.
+                // native input and audio, whose cleanup can need that loop.
                 api.prevent_close();
                 static CLOSING:AtomicBool=AtomicBool::new(false);
                 if !CLOSING.swap(true,Ordering::AcqRel){close_after_input_cleanup(window.clone());}
             }
-            #[cfg(not(windows))]
+            #[cfg(not(any(windows,target_os="macos")))]
             if matches!(event,tauri::WindowEvent::CloseRequested{..}|tauri::WindowEvent::Destroyed){input_native::shutdown();display_binding::shutdown();}
             #[cfg(target_os = "macos")]
-            if matches!(event, tauri::WindowEvent::Destroyed) { let _ = macos_input::reset(); }
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                let _ = macos_input::reset();
+                tauri::async_runtime::spawn_blocking(native_audio::shutdown);
+            }
             let _=(window,event);
         })
         .invoke_handler(tauri::generate_handler![#[cfg(windows)] nearcast_migrate_legacy_settings, #[cfg(windows)] nearcast_take_legacy_settings, nearcast_local_signal_open,nearcast_local_signal_send,nearcast_local_signal_close,window_controls::nearcast_window_action,nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_pair, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_input_feedback, nearcast_input_execution_status, nearcast_system_audio_start, nearcast_audio_read, nearcast_audio_stop, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info, nearcast_display_binding_begin, nearcast_display_binding_confirm, nearcast_display_binding_cancel, nearcast_display_binding_release, nearcast_diagnostics_record, nearcast_diagnostics_export, nearcast_feedback_submit, nearcast_update_initialize, nearcast_update_check, nearcast_update_download, nearcast_update_install])
         .build(tauri::generate_context!())
         .expect("error while building NearHub Cast")
         .run(|app, event| {
+            #[cfg(target_os="macos")]
+            if let tauri::RunEvent::ExitRequested{api,code,..}=&event {
+                // ScreenCaptureKit may complete on the main queue. Keep that
+                // queue alive until the blocking worker has released audio.
+                static EXIT_CLEANUP:AtomicBool=AtomicBool::new(false);
+                if *code!=Some(tauri::RESTART_EXIT_CODE)&&!EXIT_CLEANUP.swap(true,Ordering::AcqRel) {
+                    api.prevent_exit();let app=app.clone();
+                    let exit_code=code.unwrap_or(0);
+                    tauri::async_runtime::spawn_blocking(move||{native_audio::shutdown();app.exit(exit_code);});
+                }
+            }
             if matches!(event, tauri::RunEvent::Exit) {
                 app.state::<local_signaling::State>().stop_all();
                 diagnostics::shutdown();

@@ -1,6 +1,12 @@
-// Session-scoped WASAPI loopback. All COM interfaces stay on one MTA worker.
-// The IPC carries bounded float PCM, never pointers or audio device handles.
+// Session-scoped system audio: WASAPI on Windows, ScreenCaptureKit on macOS.
+// IPC carries bounded float PCM, never pointers or audio device handles.
 use std::collections::VecDeque;
+
+#[cfg(target_os = "macos")]
+#[path = "native_audio_macos.rs"]
+mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::*;
 
 const RATE: u32 = 48_000;
 const CHANNELS: usize = 2;

@@ -30,8 +30,9 @@ test('native audio bridge polls PCM into a MediaStream destination and closes ev
   class Worklet{port={postMessage:value=>messages.push(value)};connect(){}disconnect(){}}
   let resolveRead;
   const audio=await createNativeAudioTrack({captureId:'cap-1',AudioContextImpl:Context,AudioWorkletNodeImpl:Worklet,
-    invoke:async(method,args)=>{assert.deepEqual(args,{captureId:'cap-1'},'Tauri requires named object arguments');calls.push([method,args]);if(method==='nearcast_system_audio_start')return{sampleRate:48000,channels:2};if(method==='nearcast_audio_read'){if(!messages.length)return packet();return new Promise(resolve=>{resolveRead=resolve;});}}});
+    invoke:async(method,args)=>{assert.deepEqual(args,{captureId:'cap-1'},'Tauri requires named object arguments');calls.push([method,args]);if(method==='nearcast_system_audio_start')return{source:'screencapturekit',scope:'system-excluding-self',sampleRate:48000,channels:2};if(method==='nearcast_audio_read'){if(!messages.length)return packet();return new Promise(resolve=>{resolveRead=resolve;});}}});
   while(!messages.length)await new Promise(resolve=>setTimeout(resolve,1));assert.equal(audio.track,track);assert.equal(audio.diagnostics().receivedFrames,2);
+  assert.equal(audio.diagnostics().source,'screencapturekit');assert.equal(audio.diagnostics().scope,'system-excluding-self');
   await audio.stop();await audio.stop();resolveRead?.(packet({sequence:2}));await new Promise(resolve=>setImmediate(resolve));
   assert.equal(messages.length,1);assert.equal(stops,1);assert.equal(closes,1);assert.equal(calls.filter(([name])=>name==='nearcast_audio_stop').length,1);
 });

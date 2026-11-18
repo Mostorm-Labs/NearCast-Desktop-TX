@@ -4,10 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NearHub Cast</title>
+  <script src="./theme-preload.mjs"></script>
   <link rel="stylesheet" href="./styles.css" />
   <link rel="stylesheet" href="./home.css" />
   <link rel="stylesheet" href="./settings.css" />
   <link rel="stylesheet" href="./casting.css" />
+  <link rel="stylesheet" href="./onboarding.css" />
+  <link rel="stylesheet" href="./themes.css" />
 </head>
 <body>
   <span class="header-glow" aria-hidden="true"><img src="./assets/figma/header-glow.svg" width="32" height="32" alt="" /></span>
@@ -17,9 +20,37 @@
   </header>
   <p id="window-error" class="window-error" role="status" hidden></p>
   <main class="webcast-sender">
-    <header class="topbar"><div class="logo"><img class="logo-mark" src="./assets/figma/brand-mark.svg" width="36" height="36" alt="" /><span>NearHub Cast</span></div><div class="update-heading"><button data-i18n-aria-label="common.openSettings" data-i18n-title="common.settings" id="settings-shortcut" data-settings-open class="settings-shortcut" type="button" aria-label="打开设置" title="Casting Settings"><img src="./assets/figma/settings.svg" width="16" height="16" alt="" /></button><span id="app-version"></span></div></header>
+    <header class="topbar"><div class="logo"><img class="logo-mark" src="./assets/figma/brand-mark.svg" width="36" height="36" alt="" /><span>NearHub</span></div><div class="update-heading"><button data-i18n-aria-label="common.openSettings" data-i18n-title="common.settings" id="settings-shortcut" data-settings-open class="settings-shortcut" type="button" aria-label="打开设置" title="Casting Settings"><img src="./assets/figma/settings.svg" width="16" height="16" alt="" /></button><span id="app-version"></span></div></header>
 
 
+
+    <section id="permission-onboarding" class="permission-onboarding" aria-labelledby="onboarding-title" hidden>
+      <header class="onboarding-heading">
+        <h1 id="onboarding-title" tabindex="-1" data-i18n="onboarding.title">Grant Permissions to Get Started</h1>
+        <p data-i18n="onboarding.description">NearHub Cast needs the following permissions to work properly.</p>
+      </header>
+      <div class="onboarding-permissions">
+        <div class="onboarding-permission" data-onboarding-row="localNetwork">
+          <div class="onboarding-permission-copy"><img class="onboarding-permission-icon" src="./assets/figma/permission-network.png" width="40" height="40" alt="" /><div class="onboarding-permission-text"><div class="onboarding-permission-title"><h2 data-i18n="permission.localNetwork">Local Network</h2><span class="onboarding-requirement" data-onboarding-requirement data-i18n="onboarding.required">Required</span></div><p data-i18n="onboarding.localHelp">Discover and connect to NearHub Cast receivers on your local network.</p></div></div>
+          <button class="onboarding-access" type="button" data-onboarding-grant="localNetwork"><span class="onboarding-status-icon" hidden><img src="./assets/figma/onboarding-check.svg" width="8.5" height="5.64286" alt="" /></span><span data-i18n="onboarding.grant">Grant Access</span></button>
+        </div>
+        <div class="onboarding-divider" aria-hidden="true"><img src="./assets/figma/onboarding-divider.svg" width="558" height="1" alt="" /></div>
+        <div class="onboarding-permission" data-onboarding-row="screenRecording">
+          <div class="onboarding-permission-copy"><img class="onboarding-permission-icon" src="./assets/figma/permission-screen.png" width="40" height="40" alt="" /><div class="onboarding-permission-text"><div class="onboarding-permission-title"><h2 data-i18n="permission.screenRecording">Screen &amp; System Audio Recording</h2><span class="onboarding-requirement" data-onboarding-requirement data-i18n="onboarding.required">Required</span></div><p data-i18n="permission.screenHelp">Capture and share the selected screen.</p></div></div>
+          <button class="onboarding-access" type="button" data-onboarding-grant="screenRecording"><span class="onboarding-status-icon" hidden><img src="./assets/figma/onboarding-check.svg" width="8.5" height="5.64286" alt="" /></span><span data-i18n="onboarding.grant">Grant Access</span></button>
+        </div>
+        <div class="onboarding-divider" aria-hidden="true"><img src="./assets/figma/onboarding-divider.svg" width="558" height="1" alt="" /></div>
+        <div class="onboarding-permission" data-onboarding-row="accessibility">
+          <div class="onboarding-permission-copy"><img class="onboarding-permission-icon" src="./assets/figma/permission-accessibility.png" width="40" height="40" alt="" /><div class="onboarding-permission-text"><div class="onboarding-permission-title"><h2 data-i18n="permission.accessibility">Accessibility</h2><span class="onboarding-requirement optional" data-onboarding-requirement data-i18n="onboarding.optional">Optional</span></div><p data-i18n="permission.accessibilityHelp">Allow the receiver to control your mouse.</p></div></div>
+          <button class="onboarding-access" type="button" data-onboarding-grant="accessibility"><span class="onboarding-status-icon" hidden><img src="./assets/figma/onboarding-check.svg" width="8.5" height="5.64286" alt="" /></span><span data-i18n="onboarding.grant">Grant Access</span></button>
+        </div>
+      </div>
+      <div class="onboarding-footer">
+        <div class="onboarding-footer-info"><p id="onboarding-help" role="status" data-i18n="onboarding.help">Enable required permissions to continue. Accessibility is optional.</p><button id="onboarding-refresh" class="refresh" type="button" data-i18n="common.refresh">Refresh</button></div>
+        <div class="onboarding-actions"><button id="onboarding-not-now" class="onboarding-access onboarding-defer" type="button" data-i18n="onboarding.notNow">Not Now</button><button id="onboarding-continue" class="onboarding-access" type="button" data-i18n="onboarding.continue" disabled>Continue</button></div>
+      </div>
+      <p id="onboarding-error" class="error" role="alert" hidden></p>
+    </section>
 
     <section id="code-view" class="home-screen" aria-labelledby="connect-heading" data-connection="devices">
       <header class="home-intro"><h1 id="connect-heading" data-i18n="home.welcome">Welcome to cast screen</h1><p id="connect-description" class="panel-desc" data-i18n="home.description">Mirror your screen to a nearby display.</p></header>
@@ -43,7 +74,7 @@
 </section>
       <section id="connect-panel-devices" class="devices" aria-labelledby="devices-title">
         <div class="devices-heading"><div><h2 id="devices-title" data-i18n="discovery.title">Select a display</h2><p data-i18n="discovery.scanning" id="device-status" class="device-status" role="status">Scanning for nearby displays…</p></div><button data-i18n="discovery.scan" id="refresh-devices" class="refresh" type="button">↻ Scan</button></div>
-        <div id="device-groups"></div>
+        <div id="device-groups"><div id="discovery-permission-notice" class="discovery-permission-notice" hidden><p id="discovery-permission-message" role="status"></p><button id="discovery-permission-settings" class="button secondary" type="button" data-i18n="permission.openSettings">Open System Settings</button></div></div>
       </section>
       <p id="code-error" class="error" role="alert" hidden></p>
       <img class="home-divider" src="./assets/figma/divider.svg" width="592" height="1" alt="" />
@@ -59,16 +90,19 @@
       <div class="casting-panel">
         <header class="casting-heading"><h1 id="casting-heading">Sharing to <span id="target-name">NearCast</span></h1><p id="cast-status" role="status">Receiver is ready for casting.</p></header>
         <div class="casting-preferences">
-          <div class="casting-setting"><div class="setting-copy"><h2 id="casting-input-title" data-i18n="cast.remote">Allow Remote Control</h2><p id="casting-input-help">Waiting for the receiver’s remote-control status.</p></div><label class="settings-switch casting-switch"><input id="casting-input-enabled" type="checkbox" role="switch" disabled aria-labelledby="casting-input-title" aria-describedby="casting-input-help" /><span class="switch-images" aria-hidden="true"><img class="switch-off" src="./assets/figma/casting-switch-off.svg" alt="" /><img class="switch-on" src="./assets/figma/casting-switch-on.svg" alt="" /><img class="switch-hover" src="./assets/figma/switch-sharing-on.svg" alt="" /></span></label></div>
+          <div class="casting-setting"><div class="setting-copy"><h2 id="casting-input-title" data-i18n="cast.remote">Allow Remote Control</h2><p id="casting-input-help">Waiting for the receiver’s remote-control status.</p><div class="feature-permission" data-feature-permission="input" hidden><p role="status"></p><button class="button secondary" type="button" data-i18n="permission.openSettings">Open System Settings</button></div></div><label class="settings-switch casting-switch"><input id="casting-input-enabled" type="checkbox" role="switch" disabled aria-labelledby="casting-input-title" aria-describedby="casting-input-help" /><span class="switch-images" aria-hidden="true"><img class="switch-off" src="./assets/figma/casting-switch-off.svg" alt="" /><img class="switch-on" src="./assets/figma/casting-switch-on.svg" alt="" /><img class="switch-hover" src="./assets/figma/switch-sharing-on.svg" alt="" /></span></label></div>
           <img class="casting-divider" src="./assets/figma/casting-divider.svg" width="560" height="1" alt="" />
-          <div class="casting-setting"><div class="setting-copy"><h2 id="casting-audio-title" data-i18n="cast.audio">Share System Audio</h2><p id="casting-audio-help">Takes effect when sharing starts. Microphone audio is excluded.</p></div><label class="settings-switch casting-switch"><input id="casting-system-audio-enabled" type="checkbox" role="switch" checked aria-labelledby="casting-audio-title" aria-describedby="casting-audio-help" /><span class="switch-images" aria-hidden="true"><img class="switch-off" src="./assets/figma/casting-switch-off.svg" alt="" /><img class="switch-on" src="./assets/figma/casting-switch-on.svg" alt="" /><img class="switch-hover" src="./assets/figma/switch-sharing-on.svg" alt="" /></span></label></div>
+          <div class="casting-setting"><div class="setting-copy"><h2 id="casting-audio-title" data-i18n="cast.audio">Share System Audio</h2><p id="casting-audio-help">Takes effect when sharing starts. Microphone audio is excluded.</p><div class="feature-permission" data-feature-permission="audio" hidden><p role="status"></p><button class="button secondary" type="button" data-i18n="permission.openSettings">Open System Settings</button></div></div><label class="settings-switch casting-switch"><input id="casting-system-audio-enabled" type="checkbox" role="switch" checked aria-labelledby="casting-audio-title" aria-describedby="casting-audio-help" /><span class="switch-images" aria-hidden="true"><img class="switch-off" src="./assets/figma/casting-switch-off.svg" alt="" /><img class="switch-on" src="./assets/figma/casting-switch-on.svg" alt="" /><img class="switch-hover" src="./assets/figma/switch-sharing-on.svg" alt="" /></span></label></div>
         </div>
         <div class="casting-actions">
           <button data-i18n="cast.start" id="share-button" class="button primary" type="button">Start Sharing</button>
           <button data-i18n="cast.stop" id="stop-share-button" class="button danger" type="button" hidden>Stop Sharing</button>
           <button data-i18n="cast.leave" id="leave-button" class="button secondary" type="button">Leave receiver</button>
         </div>
-        <p id="cast-error" class="error" role="alert" hidden></p>
+        <div id="cast-error-container" class="error cast-feedback" hidden>
+          <p id="cast-error" role="alert" hidden></p>
+          <button id="cast-permission-settings" class="button secondary" type="button" data-i18n="permission.openSettings" hidden>Open System Settings</button>
+        </div>
       </div>
       <details id="session-details" class="session-details">
         <summary data-i18n="preview.title">Session Preview</summary>
@@ -110,6 +144,10 @@
           </section>
         </section>
         <section id="settings-general" class="settings-content" role="tabpanel" aria-labelledby="settings-tab-general" tabindex="0" hidden>
+          <section class="settings-card language-card" aria-labelledby="theme-title">
+            <label for="theme-select"><span id="theme-title" data-i18n="settings.theme">Appearance</span><select id="theme-select" aria-describedby="theme-help"><option value="dark" data-i18n="settings.themeDark">Dark</option><option value="light" data-i18n="settings.themeLight">Light</option><option value="system" data-i18n="settings.system">Follow system</option></select></label>
+            <p id="theme-help" class="quality-help" data-i18n="settings.themeHelp">Choose a theme, or match your system appearance.</p>
+          </section>
           <section class="settings-card language-card" aria-labelledby="language-title">
             <label for="language-select"><span id="language-title" data-i18n="settings.language">Language</span><select id="language-select"><option value="system" data-i18n="settings.system">Follow system</option><option value="zh">中文</option><option value="en">English</option><option value="ja">日本語</option><option value="de">Deutsch</option></select></label>
             <p class="quality-help" data-i18n="settings.languageHelp">Choose your display language. Changes apply immediately.</p>
@@ -123,11 +161,11 @@
         </div>
       </section>
           <section class="settings-card setting-row" aria-labelledby="remote-control-title">
-            <div class="setting-copy"><h2 id="remote-control-title" data-i18n="cast.remote">Allow Remote Control</h2><p data-i18n="settings.remoteHelp">Allow the display to control this computer when remote control is enabled.</p></div>
+            <div class="setting-copy"><h2 id="remote-control-title" data-i18n="cast.remote">Allow Remote Control</h2><p data-i18n="settings.remoteHelp">Allow the display to control this computer when remote control is enabled.</p><div class="feature-permission" data-feature-permission="input" hidden><p role="status"></p><button class="button secondary" type="button" data-i18n="permission.openSettings">Open System Settings</button></div></div>
             <label class="settings-switch"><input id="input-enabled" type="checkbox" role="switch" aria-labelledby="remote-control-title" /><span class="switch-images" aria-hidden="true"><img class="switch-off" src="./assets/figma/switch-off.svg" alt="" /><img class="switch-on" src="./assets/figma/switch-general-on.svg" alt="" /></span></label>
           </section>
           <section id="system-audio-settings" class="settings-card setting-row" aria-labelledby="system-audio-title" hidden>
-            <div class="setting-copy"><h2 id="system-audio-title" data-i18n="cast.audio">Share System Audio</h2><p data-i18n="settings.audioHelp">分享系统声音，下次开始分享时生效；不采集麦克风。</p><p id="system-audio-status" class="quality-help" aria-live="polite"></p></div>
+            <div class="setting-copy"><h2 id="system-audio-title" data-i18n="cast.audio">Share System Audio</h2><p data-i18n="settings.audioHelp">分享系统声音，下次开始分享时生效；不采集麦克风。</p><p id="system-audio-status" class="quality-help" aria-live="polite"></p><div class="feature-permission" data-feature-permission="audio" hidden><p role="status"></p><button class="button secondary" type="button" data-i18n="permission.openSettings">Open System Settings</button></div></div>
             <label class="settings-switch"><input id="system-audio-enabled" type="checkbox" role="switch" checked aria-labelledby="system-audio-title" /><span class="switch-images" aria-hidden="true"><img class="switch-off" src="./assets/figma/switch-off.svg" alt="" /><img class="switch-on" src="./assets/figma/switch-general-on.svg" alt="" /></span></label>
           </section>
           <section class="settings-card setting-row" aria-labelledby="local-signaling-title">

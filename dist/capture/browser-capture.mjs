@@ -1,4 +1,4 @@
-import {createSystemAudioTrack} from './native-audio.mjs';
+import {createSystemAudioTrack,prepareSystemAudioContext} from './native-audio.mjs';
 import {calibrateDisplayBinding} from './display-binding.mjs';
 import {VIDEO_FRAME_RATE} from '../webcast/video-quality.mjs';
 
@@ -6,17 +6,22 @@ import {VIDEO_FRAME_RATE} from '../webcast/video-quality.mjs';
 // It owns lifecycle and audio composition, never reads or transports pixels.
 export class BrowserCaptureMediaDevices {
   constructor({mediaDevices=globalThis.navigator?.mediaDevices,platform='unknown',invoke,
-    createSystemAudio=createSystemAudioTrack,calibrateDisplay=calibrateDisplayBinding,onStatus=()=>{}}={}) {
-    Object.assign(this,{mediaDevices,platform,invoke,createSystemAudio,calibrateDisplay,onStatus});
+    createSystemAudio=createSystemAudioTrack,prepareSystemAudio=prepareSystemAudioContext,calibrateDisplay=calibrateDisplayBinding,onStatus=()=>{}}={}) {
+    Object.assign(this,{mediaDevices,platform,invoke,createSystemAudio,prepareSystemAudio,calibrateDisplay,onStatus});
     this.current=null;this.generation=0;this.stopBarrier=Promise.resolve();
   }
   getDisplayMedia({video=true,audio=false}={}) {
     if(!this.mediaDevices?.getDisplayMedia) return Promise.reject(new Error('Screen capture is unavailable'));
     const generation=++this.generation;
+    let audioContext;
+    if(this.platform==='macos'&&audio&&typeof this.invoke==='function'){
+      try{audioContext=this.prepareSystemAudio();}catch{/* Audio failure cannot cancel video selection. */}
+    }
+    const releaseUnusedAudio=async()=>{if(audioContext){const context=audioContext;audioContext=null;await context.close().catch(()=>{});}};
     // This call must precede every await: WebKit/WebView requires activation.
     let selected;
     try { selected=this.mediaDevices.getDisplayMedia({video:video===false?false:{frameRate:{ideal:VIDEO_FRAME_RATE,max:VIDEO_FRAME_RATE}},audio:this.platform==='windows'?false:audio,systemAudio:'include',surfaceSwitching:'exclude'}); }
-    catch(error){return Promise.reject(error);}
+    catch(error){void releaseUnusedAudio();return Promise.reject(error);}
     const previous=this.current;
     const retired=this.stopBarrier;
     return (async()=>{
@@ -48,11 +53,16 @@ export class BrowserCaptureMediaDevices {
         await capture.bindingStarting;
       }
       if(capture.closed||generation!==this.generation){await this.release(capture);throw new Error('Capture calibration retired');}
-      if(this.platform==='windows'&&audio) {
-        // Audio has a separate lease and worker. It needs no WGC capture.
-        capture.audioStarting=Promise.resolve().then(()=>this.createSystemAudio({invoke:this.invoke})).then(async session=>{
+      if(audio&&(this.platform==='windows'||this.platform==='macos'&&!stream.getAudioTracks().some(t=>t.readyState==='live'))) {
+        // Audio owns an independent native lease. macOS reuses display audio
+        // when available, otherwise ScreenCaptureKit provides system audio.
+        capture.audioStarting=Promise.resolve().then(()=>{
+          const context=audioContext;audioContext=null;
+          return this.createSystemAudio({invoke:this.invoke,audioContext:context});
+        }).then(async session=>{
           if(capture.closed||generation!==this.generation){await session?.stop();return;}
-          if(!session?.track){await session?.stop?.();throw new Error('System audio track unavailable');}
+          if(!session?.track||session.track.readyState==='ended'){await session?.stop?.();throw new Error(session?.diagnostics?.()?.error??'System audio track unavailable');}
+          for(const old of stream.getAudioTracks())if(old.readyState!=='live')stream.removeTrack?.(old);
           capture.audio=session;stream.addTrack(session.track);
         }).catch(error=>{
           if(!capture.closed){capture.audio={diagnostics:()=>({state:'error',error:String(error?.message??error)})};this.onStatus({audio:capture.audio.diagnostics()});}
@@ -62,7 +72,7 @@ export class BrowserCaptureMediaDevices {
       if(capture.closed||generation!==this.generation){await this.release(capture);throw new Error('Capture start retired');}
       this.onStatus(this.diagnostics());
       return stream;
-    })();
+    })().finally(releaseUnusedAudio);
   }
   release(capture) {
     if(capture.releasing)return capture.releasing;

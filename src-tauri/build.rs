@@ -3,7 +3,17 @@ fn main() {
         println!("cargo:rerun-if-changed=src/gesture_halo.m");
         cc::Build::new().file("src/gesture_halo.m").flag("-fobjc-arc").flag("-fblocks").compile("nearcast_gesture_halo");
         println!("cargo:rustc-link-lib=framework=AppKit");
+        println!("cargo:rerun-if-changed=src/macos_local_network.m");
+        cc::Build::new().file("src/macos_local_network.m").flag("-fobjc-arc").flag("-fblocks").flag("-mmacosx-version-min=13.0").compile("nearcast_local_network");
+        println!("cargo:rustc-link-lib=framework=Network");
         println!("cargo:rustc-link-lib=framework=QuartzCore");
+        println!("cargo:rerun-if-changed=src/macos_app_icon.m");
+        cc::Build::new().file("src/macos_app_icon.m").flag("-fobjc-arc").compile("nearcast_app_icon");
+        println!("cargo:rerun-if-changed=src/macos_system_audio.m");
+        cc::Build::new().file("src/macos_system_audio.m").flag("-fobjc-arc").flag("-fblocks").flag("-mmacosx-version-min=13.0").compile("nearcast_system_audio");
+        println!("cargo:rustc-link-lib=framework=ScreenCaptureKit");
+        println!("cargo:rustc-link-lib=framework=CoreMedia");
+        println!("cargo:rustc-link-lib=framework=CoreGraphics");
     }
     println!("cargo:rerun-if-env-changed=NEARCAST_BUILD_VERSION");
     println!("cargo:rerun-if-changed=../build-version.json");

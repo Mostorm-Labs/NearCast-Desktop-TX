@@ -6,6 +6,8 @@
 
 浏览器选屏请求与后续轨道约束均使用 `frameRate: {ideal: 30, max: 30}`，WebRTC sender 的 `maxFramerate` 同时设为 30。Auto 分辨率也保留此上限。初次选屏仍保留来源原始尺寸以完成物理屏幕校准，随后应用所选输出分辨率。帧率调整不修改已保存的分辨率、码率或编码降级策略；实际帧率仍受来源变化、系统、编码器和传输自适应影响。
 
+退出系统选择器不等于缺少录屏权限。明确的取消错误只提示重新选屏；`NotAllowedError` 等含义不明确的拒绝在 macOS 上重新查询原生录屏权限，只有平台明确要求长期录屏授权、且确认 `not_granted` 时才显示录屏授权说明和“打开系统设置”按钮。系统选屏器采用本次会话授权时，缺少长期录屏授权不证明选屏失败由权限引起。权限已开启、状态未知或查询失败时均不推断系统未授权。设置按钮复用录屏权限的原生设置入口，不自动打开设置；返回应用后刷新权限，确认授权即清除旧提示。权限查询在选屏失败后执行，不能打断 `getDisplayMedia` 所需的用户手势。
+
 停止分享保留配对和 WebRTC peer；通过 ordered control DataChannel 发送 `nearcast-share-state`，data 为 `{version:1,roomId,senderUserId,receiverUserId,revision:"2",sharing:false}`。首次开通道 false/0，成功开始 true/1，停止 false/2，重新开始 true/3；重建通道重发当前状态。revision 按 peer 单调递增。RX 需配套实现清帧、释放 presentation、回到等待分享及同 peer 恢复，单独升级 TX 不能让旧 RX 清除最后一帧。同一生命周期也通过 SDP 的会话级 `a=x-nearcast-share-state:<revision> <0|1>` 属性随 offer 发送，可在反控通道关闭时沿 WSS 完成停止通知。RX 修复分支 `codex/share-stop-return-to-waiting` 从 main `304c9d7` 创建，随后按用户要求合入 `codex/touchback-rx-joint-debug` 的 `049d17a`，工作树为 `rx-share-lifecycle/NearCast`。
 
 ## 模块职责
@@ -30,7 +32,9 @@ getDisplayMedia -> 原始 VideoTrack ──────────┐
 WASAPI -> PCM IPC -> AudioWorklet -> AudioTrack ┘
 ```
 
-浏览器视频不经过 `nearcast_capture_start/frame`、GPU 回读、BGRA 像素 IPC、Canvas 或本地缩略图任务。音频 PCM IPC 与视频轨道独立；不使用 getUserMedia、不采集麦克风。macOS 沿用系统选择器返回的 display audio；缺少音频时视频继续。
+浏览器视频不经过 `nearcast_capture_start/frame`、GPU 回读、BGRA 像素 IPC、Canvas 或本地缩略图任务。音频 PCM IPC 与视频轨道独立；不使用 getUserMedia、不采集麦克风。macOS 优先复用系统选择器返回的 display audio；缺少音轨时用 ScreenCaptureKit 的 audio output 采集系统声音，排除本应用声音，不注册 screen 或 microphone output。原生桥接位于 `macos_system_audio.m` 和 `native_audio_macos.rs`，只向同一有界 PCM 队列提交 48 kHz 双声道 Float32，支持平面和交错布局；使用与 WASAPI 相同的 AudioWorklet、MediaStreamDestination 和 WebRTC Opus 通道。启用系统声音的开关先检查其原生采集所需的录屏与系统录音权限，缺少或未知时保持关闭并显示上下文设置入口；视频分享仍由系统选屏器按会话授权，旧系统仍可要求长期录屏权限。Web Audio 在开始分享的用户手势中先初始化，取消选屏或已有 display audio 时释放未使用的上下文。音频启动或运行失败均保留视频，并在投屏卡片及设置中显示原因。
+
+macOS 音频 owner 与视频来源独立，以随机 ID 隔离迟到的读取和停止请求。停止时先关闭原生回调闸门并排空队列，再释放 Rust 上下文；停止超时保留 owner，阻止新会话覆盖。关闭窗口、退出和更新均释放音频，退出时保留主线程事件循环供 ScreenCaptureKit 完成清理。最低系统版本仍为 macOS 13；使用系统框架，不依赖额外虚拟声卡。
 
 采集 provider 的公共边界为 `getDisplayMedia(options)`、`stop()` 和 `diagnostics()`。WebRTC 层接收轨道，不依赖视频采集实现。将来如需重新接入 WGC，应通过该边界明确选择并独立验收，不在浏览器失败时静默回退到另一套采集来源。
 
@@ -69,6 +73,10 @@ Windows Mouse 复用整屏绑定，将物理坐标在 PMv2 DPI 上下文中映�
 ## 验证
 
 单元测试覆盖原轨道身份、同步选择器调用、音频失败保视频、取消/迟到/停止、清理失败、平台音频策略及降分辨率坐标映射。
+
+`tests/capture-error-browser.integration.mjs` 覆盖取消与权限拒绝的区分、原生权限确认、查询失败、设置跳转与重试、授权状态同步、迟到查询隔离、多语言及窄窗口布局。原生权限及系统设置入口在该测试中使用 fixture；实机需另验系统选屏取消和设置跳转。
+
+`tests/macos-system-audio-browser.integration.mjs` 用系统选屏和原生 PCM fixture 验证 macOS 音频回退路径，实际运行 AudioWorklet、Opus 和 WebRTC RTP，并检查接收端音频能量、独立 owner 清理及拒绝授权时继续视频；该测试不替代 macOS 原生权限、实际扬声器输出和接收端听感验收。
 
 `tests/webcast-browser.integration.mjs` 用 Edge 的真实 SDP/ICE/DTLS/SCTP/RTP，通过合成视频代替系统选择器、合成 PCM 代替 WASAPI。真实浏览器 video/canvas 上运行生产标记识别，原生 IPC 使用 fixture；覆盖原视频轨道直送、Opus 有能量、同分辨率副屏识别、负坐标 Touch、主副屏停止重选、布局变化禁用输入而媒体继续，以及无绑定多屏/窗口拒绝反控。Rust 显式忽略测试可在本机短暂显示实际标记并采样标记中心，检查物理定位、绑定及撤销。上述测试不代表真实 Windows 选择器到 WebView2 的校准、硬件性能、听感和物理触控已验收。
 

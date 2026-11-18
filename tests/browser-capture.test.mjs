@@ -58,6 +58,37 @@ test('browser returned audio is reused on macOS and disabling audio never opens 
   await media.getDisplayMedia({audio:true});assert.equal(request.audio,true);assert.equal(source.getAudioTracks()[0],audio);
   await media.stop();
 });
+test('macOS fills missing display audio with native system audio without replacing browser video',async()=>{
+  const video=track(),audio=track('audio'),source=stream([video]);let starts=0,stops=0,primed=false;
+  const context={resume:()=>Promise.resolve(),close:async()=>{}};
+  const media=new BrowserCaptureMediaDevices({platform:'macos',invoke:async()=>{},
+    prepareSystemAudio:()=>{primed=true;return context;},
+    mediaDevices:{getDisplayMedia(options){assert.equal(primed,true,'Web Audio is primed in the share gesture');assert.equal(options.audio,true);return Promise.resolve(source);}},
+    createSystemAudio:async options=>{starts++;assert.equal(options.audioContext,context);return{track:audio,stop:async()=>{stops++;audio.stop();},diagnostics:()=>({source:'screencapturekit',state:'capturing'})};}});
+  assert.equal(await media.getDisplayMedia({audio:true}),source);
+  assert.equal(source.getVideoTracks()[0],video);assert.deepEqual(source.getAudioTracks(),[audio]);
+  assert.equal(media.diagnostics().audio.source,'screencapturekit');
+  await media.stop();await media.stop();assert.equal(starts,1);assert.equal(stops,1);
+});
+test('macOS releases a primed audio context when the picker is cancelled or already provides audio',async()=>{
+  for(const cancelled of [true,false]){
+    let closes=0,starts=0;
+    const context={close:async()=>{closes++;}};
+    const media=new BrowserCaptureMediaDevices({platform:'macos',invoke:async()=>{},prepareSystemAudio:()=>context,
+      mediaDevices:{getDisplayMedia:async()=>{if(cancelled)throw Error('picker cancelled');return stream([track(),track('audio')]);}},
+      createSystemAudio:async()=>{starts++;}});
+    if(cancelled)await assert.rejects(media.getDisplayMedia({audio:true}),/cancelled/);
+    else{await media.getDisplayMedia({audio:true});await media.stop();}
+    assert.equal(closes,1);assert.equal(starts,0);
+  }
+});
+test('macOS native audio failure reports an error while browser video continues',async()=>{
+  const source=stream();
+  const media=new BrowserCaptureMediaDevices({platform:'macos',invoke:async()=>{},prepareSystemAudio:()=>null,
+    mediaDevices:{getDisplayMedia:async()=>source},createSystemAudio:async()=>{throw Error('macos_audio_permission_required');}});
+  await media.getDisplayMedia({audio:true});assert.equal(source.getVideoTracks()[0].readyState,'live');
+  assert.match(media.diagnostics().audio.error,/permission_required/);await media.stop();
+});
 test('cleanup failure blocks reuse and closes the newly selected video',async()=>{
   let selected;
   const media=new BrowserCaptureMediaDevices({platform:'windows',mediaDevices:{getDisplayMedia:async()=>selected=stream()},

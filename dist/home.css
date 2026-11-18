@@ -33,6 +33,9 @@ html:not([data-view="casting"]) .settings-shortcut { display: none; }
 #refresh-devices { flex: 0 0 auto; padding: 2px 4px; color: var(--accent); font-size: 14px; font-weight: 500; line-height: 20px; text-decoration: underline; text-underline-offset: 3px; }
 #refresh-devices:disabled { opacity: .5; cursor: wait; }
 #device-groups { height: 204px; flex: 0 0 204px; margin-top: 16px; overflow-y: auto; overscroll-behavior: contain; padding: 1px; margin-inline: -1px; }
+.discovery-permission-notice { padding: 14px; margin-bottom: 8px; border: 1px solid var(--accent); border-radius: 12px; color: var(--text-primary); background: var(--accent-soft, #439bfc1a); }
+.discovery-permission-notice p { margin: 0; font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
+.discovery-permission-notice .button { display: block; width: fit-content; max-width: 100%; min-height: 32px; margin: 10px 0 0 auto; padding: 6px 10px; border: 1px solid var(--accent); color: var(--accent-text, var(--accent)); background: transparent; font-size: 13px; line-height: 20px; }
 .device-group { margin: 0; }
 .device-row { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 46px; padding: 8px 12px; border: 1px solid var(--panel-border); border-radius: 12px; color: var(--text-primary); background: var(--panel-background); font: inherit; text-align: left; transition: border-color .15s, background-color .15s, box-shadow .15s; }
 .device-row + .device-row { margin-top: 6px; }

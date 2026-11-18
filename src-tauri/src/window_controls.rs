@@ -2,6 +2,14 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 #[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemePreference {
+    Dark,
+    Light,
+    System,
+}
+
+#[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Action {
     State,
@@ -10,6 +18,7 @@ pub enum Action {
     Show,
     ToggleMaximize,
     Close,
+    SetTheme { theme: ThemePreference },
     Move { x: i32, y: i32 },
 }
 
@@ -25,6 +34,14 @@ pub async fn nearcast_window_action(
     tauri::async_runtime::spawn_blocking(move || {
         match action {
             Action::State => {},
+            Action::SetTheme { theme } => {
+                let theme = match theme {
+                    ThemePreference::Dark => Some(tauri::Theme::Dark),
+                    ThemePreference::Light => Some(tauri::Theme::Light),
+                    ThemePreference::System => None,
+                };
+                window.set_theme(theme).map_err(|e| e.to_string())?;
+            },
             Action::Minimize => window.minimize().map_err(|e| e.to_string())?,
             Action::Hide => window.hide().map_err(|e| e.to_string())?,
             Action::Show => {
@@ -53,4 +70,18 @@ pub async fn nearcast_window_action(
             "visible":window.is_visible().map_err(|e| e.to_string())?,
             "x":position.x,"y":position.y,"scaleFactor":window.scale_factor().map_err(|e| e.to_string())?}))
     }).await.map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn window_theme_accepts_supported_preferences_only() {
+        for theme in ["dark", "light", "system"] {
+            assert!(serde_json::from_value::<Action>(json!({"kind":"setTheme","theme":theme})).is_ok(), "unsupported theme action: {theme}");
+        }
+        for theme in [json!("blue"), json!(null), json!(true)] {
+            assert!(serde_json::from_value::<Action>(json!({"kind":"setTheme","theme":theme})).is_err());
+        }
+    }
 }

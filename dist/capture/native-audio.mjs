@@ -1,6 +1,14 @@
 import {check,integer} from '../touchback/frame-codec.mjs';
 
 const RATE=48000,CHANNELS=2,MAX_FRAMES=1920;
+// Resume in the original share-button gesture, before the system picker can
+// consume activation. No microphone or speaker destination is connected.
+export function prepareSystemAudioContext(){
+  if(typeof globalThis.AudioContext!=='function')return null;
+  const context=new AudioContext({sampleRate:RATE,latencyHint:'interactive'});
+  void context.resume().catch(()=>{});
+  return context;
+}
 export function decodeAudioPacket(input,captureId){
   const bytes=input instanceof ArrayBuffer?new Uint8Array(input):input;
   check(bytes instanceof Uint8Array&&bytes.length>=4,'Audio packet length');
@@ -17,11 +25,10 @@ export function decodeAudioPacket(input,captureId){
 }
 
 // No microphone and no connection to context.destination (local speakers).
-// WASAPI supplies fixed 48 kHz stereo; Chromium encodes the destination as Opus.
-export async function createNativeAudioTrack({captureId,invoke,AudioContextImpl=globalThis.AudioContext,
+// Native capture supplies fixed 48 kHz stereo; WebRTC encodes it as Opus.
+export async function createNativeAudioTrack({captureId,invoke,audioContext,AudioContextImpl=globalThis.AudioContext,
   AudioWorkletNodeImpl=globalThis.AudioWorkletNode,workletUrl=new URL('./pcm-worklet.mjs',import.meta.url).href,startCommand='nearcast_system_audio_start'}={}){
-  check(typeof AudioContextImpl==='function'&&typeof AudioWorkletNodeImpl==='function','Web Audio unavailable');
-  let context,node,track,nativeStarted=false,stopped=false,stopPromise;
+  let context=audioContext,node,track,nativeStarted=false,stopped=false,stopPromise;
   const stats={source:'wasapi-loopback',scope:'default-render-device',sampleRate:RATE,channels:CHANNELS,state:'starting',
     receivedFrames:0,packets:0,discontinuities:0,error:null};
   const stop=()=>{
@@ -34,7 +41,8 @@ export async function createNativeAudioTrack({captureId,invoke,AudioContextImpl=
     })();return stopPromise;
   };
   try{
-    context=new AudioContextImpl({sampleRate:RATE,latencyHint:'interactive'});
+    check((context||typeof AudioContextImpl==='function')&&typeof AudioWorkletNodeImpl==='function','Web Audio unavailable');
+    context??=new AudioContextImpl({sampleRate:RATE,latencyHint:'interactive'});
     check(context.sampleRate===RATE,'Web Audio requires 48000 Hz');
     await context.audioWorklet.addModule(workletUrl);
     const destination=context.createMediaStreamDestination();
@@ -48,6 +56,7 @@ export async function createNativeAudioTrack({captureId,invoke,AudioContextImpl=
     // cleanup for this random owner even when start did not return successfully.
     nativeStarted=true;const started=await invoke(startCommand,{captureId});
     check(started?.sampleRate===RATE&&started?.channels===CHANNELS,'Native audio format mismatch');
+    stats.source=started.source??stats.source;stats.scope=started.scope??stats.scope;
     stats.state='capturing';
     let sequence=0,discontinuities=0;
     const read=async()=>{

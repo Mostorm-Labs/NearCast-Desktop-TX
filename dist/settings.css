@@ -129,3 +129,7 @@
   .permission-platform-state { max-width: 58px; font-size: 10px; }
 }
 @media (max-height: 560px) { .settings-page { height: calc(100vh - 88px); min-height: 260px; margin: 12px auto 0; } }
+/* Permission guidance belongs to the feature that the user is enabling. */
+.feature-permission { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 10px; color: var(--text-primary); background: var(--accent-soft, #439bfc1a); }
+.feature-permission p { margin: 0; font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
+.settings-content .feature-permission .button, .casting-panel .feature-permission .button { display: block; width: fit-content; max-width: 100%; min-height: 30px; margin: 8px 0 0 auto; padding: 5px 8px; border: 1px solid var(--accent); color: var(--accent-text, var(--accent)); background: transparent; font-size: 12px; line-height: 18px; }

@@ -10,7 +10,7 @@ export function normalizePlatformInfo(value = {}) {
     nativeCapture:value.nativeCapture===true,
     captureBackend:value.captureBackend??'browser',
     systemAudio:value.systemAudio===true,
-    screenCapturePermission: value.screenCapturePermission === 'required' ? 'required' : 'not_required',
+    screenCapturePermission: ['required','on_selection'].includes(value.screenCapturePermission) ? value.screenCapturePermission : 'not_required',
     touchback: value.touchback === true,
     inputControl: value.touchback === true ? (['windows-pointer', 'macos-mouse', 'none'].includes(value.inputControl) ? value.inputControl : os === 'macos' ? 'macos-mouse' : os === 'windows' ? 'windows-pointer' : 'none') : 'none',
     multiTouch: value.multiTouch === true,
@@ -38,14 +38,21 @@ export function touchbackError(status, info) {
   return new Error(`Touchback 控制失败：${status}`);
 }
 
-export function screenCaptureError(error, info) {
+export function screenCaptureError(error, info, {screenRecording} = {}) {
   const value = normalizePlatformInfo(info);
   const original = error instanceof Error ? error : new Error(String(error || 'Screen capture failed'));
+  const failure=(code,permission)=>Object.assign(new Error(code),{code,...(permission?{permission}:{})});
+  // A cancelled picker can reject with NotAllowedError too. Explicit user
+  // cancellation takes precedence over permission words and cached OS state.
+  if (/cancel|用户.*(?:取消|退出|关闭)|取消.*(?:选屏|屏幕选择)/i.test(original.message)) {
+    return failure('screen_capture_cancelled');
+  }
   if (!value.screenCapture || /unavailable|not supported/i.test(original.message)) {
     return new Error(`${platformSummary(value)}：当前 WebView 不提供屏幕分享，请更新应用或使用受支持的系统。`);
   }
-  if (value.os === 'macos' && (original.name === 'NotAllowedError' || /denied|permission|cancel/i.test(original.message))) {
-    return new Error('macOS 屏幕分享需要在“系统设置 → 隐私与安全性 → 屏幕录制”中允许 NearHub Cast，然后重新点击开始分享。');
+  if (['NotAllowedError','SecurityError'].includes(original.name) || /denied|permission|not_authorized/i.test(original.message)) {
+    if(value.os==='macos'&&value.screenCapturePermission==='required'&&screenRecording==='not_granted')return failure('screen_capture_permission_required','screenRecording');
+    return failure('screen_capture_not_allowed');
   }
   return original;
 }

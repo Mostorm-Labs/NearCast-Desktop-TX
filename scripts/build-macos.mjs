@@ -35,6 +35,9 @@ async function build() {
   const status=await buildDesktop(['--debug','--bundles','app'],{root,env:{...process.env,APPLE_SIGNING_IDENTITY:identity}});
   if(status!==0)throw Error('macOS application build failed');
   execFileSync('/usr/bin/codesign', ['--verify', '--strict', '--verbose=2', app], {stdio: 'inherit'});
+  // Repeated development builds keep the same bundle path and identity.
+  // Make the current bundle's icon metadata available to native system UI.
+  execFileSync('/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister', ['-f', app], {stdio: 'inherit'});
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -39,10 +39,12 @@ try {
     const assets=await page.locator('#casting-view img:visible').evaluateAll(images=>images.map(image=>({
       src:image.getAttribute('src'),loaded:image.complete&&image.naturalWidth>0,width:image.getBoundingClientRect().width,height:image.getBoundingClientRect().height,
     })));
-    assert.equal(assets.length,3,'two switches and their divider are the casting-card image slots');
     assert.ok(assets.every(asset=>asset.loaded),JSON.stringify(assets));
-    assert.ok(assets.filter(asset=>asset.src.includes('switch')).every(asset=>asset.width===74&&asset.height===48),'switch SVGs retain their natural dimensions around the 54 × 28 control');
     assert.ok(assets.find(asset=>asset.src.includes('divider')).width===560);
+    const switches=await page.locator('#casting-view .settings-switch input').evaluateAll(inputs=>inputs.map(input=>{
+      const rect=input.getBoundingClientRect();return{width:rect.width,height:rect.height};
+    }));
+    assert.deepEqual(switches,[{width:54,height:28},{width:54,height:28}],'both themed switches retain their full pointer target');
   };
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -238,6 +240,7 @@ try {
         return null;
       }
       if(command==='nearcast_system_audio_start'){
+        if(state.audioStartError)throw Error(state.audioStartError);
         audioCaptureId=args.captureId;audioSequence=0;audioPosition=0;state.audioStarts=(state.audioStarts??0)+1;
         return{source:'wasapi-loopback',sampleRate:48000,channels:2};
       }
@@ -349,7 +352,8 @@ try {
   assert.equal(await page.locator('#casting-view').isVisible(), true);
   assert.equal(await page.locator('#casting-system-audio-enabled').isEnabled(),true,'cancelled selection restores the audio preference');
   await page.locator('#cast-error').waitFor({state:'visible'});
-  assert.equal(await page.locator('#cast-error').isVisible(), true);
+  assert.match(await page.locator('#cast-error').innerText(),/已取消选屏/,'cancelling the picker is reported as cancellation');
+  assert.equal(await page.locator('#cast-permission-settings').isVisible(),false,'cancellation never offers OS permission changes');
   assert.equal(await page.evaluate(()=>testReceiver.windowActions?.includes('minimize')??false),false);
   await page.evaluate(() => { testReceiver.mode = 'capture'; });
   await share(false);
@@ -381,6 +385,8 @@ try {
   await page.locator('#settings-shortcut').click();
   await page.locator('[data-settings-tab=general]').click();
   assert.equal(await page.locator('#settings-general').isVisible(),true);
+  await page.locator('#theme-select').selectOption('light');
+  assert.equal(await page.locator('html').getAttribute('data-theme'),'light','appearance changes immediately during a live cast');
   if(process.env.SETTINGS_SCREENSHOT)await page.screenshot({path:process.env.SETTINGS_SCREENSHOT,fullPage:true});
   assert.equal(await page.locator('#casting-view').isVisible(),false);
   await page.locator('#video-resolution').selectOption('1280x720');
@@ -393,8 +399,10 @@ try {
   assert.equal(await page.locator('#casting-view').isVisible(),true);
   assert.equal(await page.locator('#casting-system-audio-enabled').isChecked(),true,'live audio status stays separate from the next-session preference');
   assert.equal(await page.locator('#casting-system-audio-enabled').isDisabled(),true);
+  if(process.env.THEME_CASTING_SCREENSHOT)await page.screenshot({path:process.env.THEME_CASTING_SCREENSHOT});
   assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('nearhub-cast-settings-v1')).video.resolution),'1280x720');
   await page.locator('#settings-shortcut').click();
+  await page.locator('#theme-select').selectOption('system');
   await page.locator('#video-resolution').selectOption('1920x1080');
   await page.locator('#video-bitrate-mode').selectOption('fixed');
   await page.locator('#video-bitrate').selectOption('12000');
@@ -640,6 +648,13 @@ try {
   await share(false);await page.waitForFunction(()=>testReceiver.frames>2);
   assert.equal(await page.evaluate(()=>document.querySelector('#preview').srcObject.getAudioTracks().length),0,'the casting-card audio switch controls the actual capture');
   assert.equal(await page.locator('#casting-system-audio-enabled').isChecked(),false);
+  await page.locator('#stop-share-button').click();await page.waitForFunction(()=>document.querySelector('#preview').srcObject===null);
+  await page.evaluate(()=>{testReceiver.audioStartError='macos_audio_permission_required';});
+  await page.locator('#casting-system-audio-enabled').check();await share(false);
+  await page.waitForFunction(()=>document.querySelector('#casting-audio-help').textContent.includes('录屏与系统录音'));
+  assert.equal(await page.evaluate(()=>testReceiver.browserVideoTrack.readyState),'live','native audio denial cannot stop video');
+  assert.equal(await page.locator('#casting-system-audio-enabled').isChecked(),false,'the casting card reflects the missing audio track');
+  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('nearhub-cast-settings-v1')).systemAudio),true,'an audio failure preserves the saved sharing preference');
   await page.locator('#leave-button').click();await page.waitForFunction(()=>!document.querySelector('#code-view').hidden);
   assert.equal(await page.locator('#connect-panel-devices').isVisible(),true,'LAN leave also returns to devices');
   assert.deepEqual(await page.locator('.code-digit').evaluateAll(inputs=>inputs.map(input=>input.value)),['','','','']);

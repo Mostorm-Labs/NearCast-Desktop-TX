@@ -9,7 +9,12 @@ pub enum Permission {
 #[cfg(target_os = "macos")]
 mod native {
     use super::Permission;
-    use std::{ffi::c_void, net::UdpSocket, process::Command};
+    use std::{ffi::c_void, process::Command};
+
+    extern "C" {
+        fn nearcast_macos_local_network_status() -> u8;
+        fn nearcast_macos_has_content_sharing_picker() -> u8;
+    }
 
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
@@ -39,19 +44,22 @@ mod native {
     }
 
     pub fn status() -> serde_json::Value {
-        // macOS has no general Local Network authorization query. Test the
-        // operation discovery needs; a failure may also mean no usable network.
-        // An empty DNS query elicits no answers and contains no user data.
-        let network_available = UdpSocket::bind("0.0.0.0:0")
-            .and_then(|socket| socket.send_to(&[0u8; 12], "224.0.0.251:5353"))
-            .is_ok();
+        let network = match unsafe { nearcast_macos_local_network_status() } {
+            1 => "available",
+            2 => "not_granted",
+            _ => "unknown",
+        };
         let (screen, accessibility) =
             unsafe { (CGPreflightScreenCaptureAccess(), AXIsProcessTrusted() != 0) };
         serde_json::json!({
-            "localNetwork": if network_available { "available" } else { "unknown" },
+            "localNetwork": network,
             "screenRecording": if screen { "granted" } else { "not_granted" },
             "accessibility": if accessibility { "granted" } else { "not_granted" },
         })
+    }
+
+    pub fn screen_capture_requirement() -> &'static str {
+        if unsafe { nearcast_macos_has_content_sharing_picker() } != 0 { "on_selection" } else { "required" }
     }
 
     pub fn open_settings(permission: Permission) -> Result<(), String> {
@@ -109,6 +117,9 @@ pub fn status() -> Result<serde_json::Value, String> {
         Err("not_supported".into())
     }
 }
+
+#[cfg(target_os = "macos")]
+pub fn screen_capture_requirement() -> &'static str { native::screen_capture_requirement() }
 
 pub fn open_settings(permission: Permission) -> Result<(), String> {
     #[cfg(target_os = "macos")]

@@ -48,8 +48,35 @@ test('normalizes macOS 13+ capabilities and calls out Screen Recording permissio
   assert.match(touchbackSummary(info), /Mouse/);
   assert.match(touchbackSummary(info), /可配置 Touch 转鼠标或滚动/);
   assert.match(touchbackError('not_authorized', info).message, /隐私与安全性 → 辅助功能/);
-  assert.match(screenCaptureError(new DOMException('denied', 'NotAllowedError'), info).message, /屏幕录制/);
+  assert.equal(screenCaptureError(new DOMException('denied', 'NotAllowedError'), info, {screenRecording:'not_granted'}).permission,'screenRecording');
 });
+
+for(const location of ['../src/platform-capabilities.mjs','../dist/platform-capabilities.mjs']){
+  test(`${location}: explicit picker cancellation never becomes a permission error even without an OS grant`,async()=>{
+    const {screenCaptureError}=await import(location);
+    for(const message of ['Cancelled by user','User canceled screen selection','用户取消了屏幕选择']){
+      const failure=screenCaptureError(new DOMException(message,'NotAllowedError'),{os:'macos'},{screenRecording:'not_granted'});
+      assert.equal(failure.code,'screen_capture_cancelled');assert.equal(failure.permission,undefined);
+    }
+  });
+  test(`${location}: ambiguous picker denial only offers settings after a confirmed missing native permission`,async()=>{
+    const {screenCaptureError}=await import(location);
+    for(const screenRecording of ['granted','unknown',undefined]){
+      const failure=screenCaptureError(new DOMException('Permission denied','NotAllowedError'),{os:'macos',screenCapturePermission:'required'},{screenRecording});
+      assert.equal(failure.code,'screen_capture_not_allowed');assert.equal(failure.permission,undefined);
+    }
+    const failure=screenCaptureError(new DOMException('Permission denied','NotAllowedError'),{os:'macos',screenCapturePermission:'required'},{screenRecording:'not_granted'});
+    assert.equal(failure.code,'screen_capture_permission_required');assert.equal(failure.permission,'screenRecording');
+    const picker=screenCaptureError(new DOMException('Permission denied','NotAllowedError'),{os:'macos',screenCapturePermission:'on_selection'},{screenRecording:'not_granted'});
+    assert.equal(picker.code,'screen_capture_not_allowed');assert.equal(picker.permission,undefined,'a missing broad grant cannot explain a session-scoped picker failure');
+  });
+  test(`${location}: Windows cancellation never exposes a macOS settings action and unrelated failures stay intact`,async()=>{
+    const {screenCaptureError}=await import(location);
+    const failure=screenCaptureError(new DOMException('Cancelled by user','NotAllowedError'),{os:'windows'});
+    assert.equal(failure.code,'screen_capture_cancelled');assert.equal(failure.permission,undefined);
+    const original=new Error('Encoder failed');assert.equal(screenCaptureError(original,{os:'macos'},{screenRecording:'not_granted'}),original);
+  });
+}
 
 test('reports a useful WebView error when getDisplayMedia is unavailable', () => {
   const info = normalizePlatformInfo({os: 'windows', screenCapture: false, touchback: true});

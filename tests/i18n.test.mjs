@@ -32,6 +32,9 @@ test('known connection and capture failures are localized without masking unrela
       ['无法完成设备连接，请返回列表重试。','error.pairing'],
       ['Screen capture is unavailable','error.captureUnavailable'],
       ['Display video track unavailable','error.captureUnavailable'],
+      ['macos_audio_permission_required','audio.permission'],
+      ['macos_audio_start_timeout','audio.startTimeout'],
+      ['macos_audio_capture_failed:-3818','audio.captureFailed'],
     ])assert.equal(language.error(new Error(message)),language.t(key));
     assert.equal(language.error(new Error('Updater unavailable: HTTP 503')),'Updater unavailable: HTTP 503');
     assert.equal(language.error(new Error('System audio track unavailable')),'System audio track unavailable');

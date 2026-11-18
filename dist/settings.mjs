@@ -1,26 +1,28 @@
 import {DEFAULT_VIDEO_QUALITY,normalizeVideoQuality,VIDEO_RESOLUTIONS,VIDEO_BITRATES_KBPS} from './webcast/video-quality.mjs';
 import {normalizeOutputPolicy,DEFAULT_OUTPUT_POLICY} from './touchback/output-policy.mjs';
 import {i18n,normalizeLanguage} from './i18n.mjs';
+import {normalizeTheme} from './theme.mjs';
 export function loadPreferences(storage=globalThis.localStorage){
-  const defaults={video:{...DEFAULT_VIDEO_QUALITY},language:'system',localSignaling:true,systemAudio:true,inputEnabled:false,policy:{...DEFAULT_OUTPUT_POLICY}};
+  const defaults={video:{...DEFAULT_VIDEO_QUALITY},language:'system',theme:'system',localSignaling:true,systemAudio:true,inputEnabled:false,policy:{...DEFAULT_OUTPUT_POLICY}};
   try{
     const value=JSON.parse(storage.getItem('nearhub-cast-settings-v1'))??{};
     const video=normalizeVideoQuality({...defaults.video,...value.video});
     if(!VIDEO_RESOLUTIONS.includes(video.resolution)||!VIDEO_BITRATES_KBPS.includes(video.bitrateKbps))throw new Error('Invalid saved quality');
-    return{video,language:normalizeLanguage(value.language),localSignaling:value.localSignaling!==false,systemAudio:value.systemAudio!==false,inputEnabled:value.inputEnabled===true,policy:normalizeOutputPolicy(value.policy??defaults.policy)};
+    return{video,language:normalizeLanguage(value.language),theme:normalizeTheme(value.theme),localSignaling:value.localSignaling!==false,systemAudio:value.systemAudio!==false,inputEnabled:value.inputEnabled===true,policy:normalizeOutputPolicy(value.policy??defaults.policy)};
   }catch{return defaults;}
 }
 export function savePreferences(value,storage=globalThis.localStorage){
-  storage.setItem('nearhub-cast-settings-v1',JSON.stringify({video:normalizeVideoQuality(value.video),language:normalizeLanguage(value.language),localSignaling:value.localSignaling!==false,systemAudio:value.systemAudio===true,inputEnabled:value.inputEnabled===true,policy:normalizeOutputPolicy(value.policy)}));
+  storage.setItem('nearhub-cast-settings-v1',JSON.stringify({video:normalizeVideoQuality(value.video),language:normalizeLanguage(value.language),theme:normalizeTheme(value.theme),localSignaling:value.localSignaling!==false,systemAudio:value.systemAudio===true,inputEnabled:value.inputEnabled===true,policy:normalizeOutputPolicy(value.policy)}));
 }
 // A page in the same WebView keeps MediaStream and DataChannel owners alive.
-export function mountSettings({document,isConnected,onSelectTab=()=>{}}){
+export function mountSettings({document,isConnected,isOnboarding=()=>false,onSelectTab=()=>{}}){
   const view=document.querySelector('#settings-view'),open=document.querySelector('#settings-open');
   const entries=[...new Set([open,...document.querySelectorAll('[data-settings-open]')])];
   let active=false,opener=open;
   const render=()=>{
-    view.hidden=!active;document.querySelector('#code-view').hidden=active||isConnected();document.querySelector('#casting-view').hidden=active||!isConnected();
-    document.documentElement.dataset.view=active?'settings':isConnected()?'casting':'home';
+    const onboarding=isOnboarding();
+    view.hidden=!active||onboarding;document.querySelector('#code-view').hidden=onboarding||active||isConnected();document.querySelector('#casting-view').hidden=onboarding||active||!isConnected();
+    document.documentElement.dataset.view=onboarding?'onboarding':active?'settings':isConnected()?'casting':'home';
     for(const entry of entries)entry.setAttribute('aria-expanded',String(active));
   };
   for(const entry of entries)entry.addEventListener('click',()=>{opener=entry;active=true;render();document.querySelector('#settings-title').focus();onSelectTab(view.dataset.tab);});

@@ -15,9 +15,9 @@ export class MacOsPermissions {
     return PERMISSIONS.map(permission => {
       const value = this.snapshot?.[permission.id];
       const enabled = permission.id === 'localNetwork'
-        ? (value === 'available' ? true : null)
+        ? (value === 'available' ? true : value === 'not_granted' ? false : null)
         : value === 'granted' ? true : value === 'not_granted' ? false : null;
-      const status = enabled === null ? '待确认' : permission.id === 'localNetwork' ? '网络可用' : enabled ? '已开启' : '未开启';
+      const status = enabled === null ? '待确认' : enabled ? permission.id === 'localNetwork' ? '网络可用' : '已开启' : '未开启';
       return {...permission, enabled, status};
     });
   }

@@ -1,0 +1,43 @@
+/* NearRooms · first-use permissions, Figma node 1942:12897. */
+html[data-view="onboarding"] .webcast-sender { padding-bottom: 20px; }
+.permission-onboarding { width: min(644px,100%); margin: auto 0; padding: 24px; display: flex; flex-direction: column; gap: 16px; border: 2px solid var(--panel-border); border-radius: 18px; background: radial-gradient(ellipse 80% 22% at 50% 0,#439bfc0d,transparent),#1e212e33; box-shadow: 0 0 40px #0003; }
+.onboarding-heading { text-align: center; }
+.onboarding-heading h1 { margin: 0; color: var(--text-primary); font-size: 24px; font-weight: 700; line-height: 32px; letter-spacing: 0; outline: none; }
+.onboarding-heading p { margin: 0; color: var(--text-secondary); font-size: 14px; line-height: 20px; }
+.onboarding-permissions { display: flex; flex-direction: column; gap: 16px; padding: 16px; border: 1px solid var(--panel-border); border-radius: 16px; overflow: hidden; }
+.onboarding-permission { display: flex; align-items: center; gap: 24px; min-width: 0; }
+.onboarding-permission-copy { display: flex; align-items: flex-start; gap: 8px; flex: 1; min-width: 0; }
+.onboarding-permission-icon { flex: 0 0 40px; width: 40px; height: 40px; border-radius: 8px; object-fit: cover; }
+.onboarding-permission-text { flex: 1; min-width: 0; }
+.onboarding-permission-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.onboarding-permission-title h2 { margin: 0; color: var(--text-primary); font-size: 16px; font-weight: 600; line-height: 24px; }
+.onboarding-requirement { padding: 3px 6px; border-radius: 8px; color: var(--text-primary); background: var(--accent); font-size: 12px; line-height: 16px; }
+.onboarding-requirement.optional { background: var(--panel-border); }
+.onboarding-permission-text p { margin: 2px 0 0; color: #94a3b8; font-size: 14px; line-height: 20px; overflow-wrap: anywhere; }
+.onboarding-divider { position: relative; width: 100%; height: 0; }
+.onboarding-divider img { position: absolute; top: -.5px; display: block; max-width: none; }
+.onboarding-access { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 4px; min-height: 36px; padding: 8px 14px; border: 0; border-radius: 8px; background: var(--accent); color: var(--text-primary); font: inherit; font-size: 14px; font-weight: 500; line-height: 20px; white-space: nowrap; cursor: pointer; }
+.onboarding-access:hover:not(:disabled) { filter: brightness(1.1); }
+.onboarding-access:disabled { cursor: default; }
+.onboarding-access:disabled:not(.is-granted) { opacity: .5; }
+.onboarding-access.is-granted { background: #37d65a66; }
+.onboarding-status-icon { display: grid; place-items: center; width: 12px; height: 12px; border-radius: 8px; background: #fff3; }
+.onboarding-status-icon img { display: block; max-width: none; }
+.onboarding-footer { display: flex; flex-direction: column; gap: 8px; min-height: 80px; padding: 10px; border-radius: 8px; background: var(--panel-border); }
+.onboarding-footer-info { display: flex; align-items: center; gap: 12px; }
+.onboarding-footer-info p { flex: 1; margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 16px; }
+.onboarding-footer-info .refresh { flex: 0 0 auto; padding: 0; font-size: 12px; line-height: 16px; }
+.onboarding-actions { display: flex; gap: 12px; }
+.onboarding-actions button { flex: 1; min-width: 0; white-space: normal; }
+.onboarding-actions .onboarding-defer { background: #ffffff14; }
+.onboarding-actions .onboarding-access:disabled { opacity: .45; }
+.permission-onboarding .error { width: 100%; max-width: none; margin: 0; overflow-wrap: anywhere; }
+.permission-onboarding button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width:650px) {
+  .permission-onboarding { padding: 20px 16px; }
+  .onboarding-permissions { padding: 12px; }
+  .onboarding-permission { flex-wrap: wrap; gap: 10px; }
+  .onboarding-permission-copy { flex: 1 0 100%; }
+  .onboarding-permission > button { margin-left: auto; }
+  .onboarding-footer-info { align-items: flex-start; }
+}

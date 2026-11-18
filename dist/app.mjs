@@ -6,10 +6,14 @@ import {WebCastTouchbackSender} from './webcast/touchback-sender.mjs';
 import {showInputConsent} from './touchback/consent-ui.mjs';
 import {createPlatformInputAdapter} from './touchback/platform-input.mjs';
 import {TauriDeviceDiscovery} from './tauri-device-discovery.mjs';
-import {loadPlatformInfo, screenCaptureError, touchbackSummary} from './platform-capabilities.mjs';
+import {loadPlatformInfo, touchbackSummary} from './platform-capabilities.mjs';
+import {mountCaptureError} from './capture/capture-error-ui.mjs';
 import {canAttachTouchbackChannel} from './webcast/touchback-channel-policy.mjs';
 import {normalizeVideoQuality,VIDEO_FRAME_RATE} from './webcast/video-quality.mjs';
 import {MacOsPermissions} from './macos-permissions.mjs';
+import {mountDiscoveryPermissions} from './discovery-permissions-ui.mjs';
+import {mountFeaturePermissions} from './feature-permissions.mjs';
+import {mountMacOsPermissionOnboarding} from './macos-permission-onboarding.mjs';
 import {BrowserCaptureMediaDevices} from './capture/browser-capture.mjs';
 import {mountUpdates} from './update/update-ui.mjs';
 import {createDiagnostics} from './diagnostics.mjs';
@@ -17,6 +21,7 @@ import {loadPreferences,savePreferences,mountSettings,mountFeedback} from './set
 import {mountPairingInput} from './pairing-input.mjs';
 import {mountWindowControls} from './window-controls.mjs';
 import {i18n} from './i18n.mjs';
+import {mountTheme} from './theme.mjs';
 import {DEFAULT_OUTPUT_POLICY} from './touchback/output-policy.mjs';
 
 const tauri = globalThis.__TAURI__ ?? {};
@@ -77,6 +82,9 @@ const gesturePinchHelp=document.querySelector('#gesture-pinch-help');
 const gestureFeedback=document.querySelector('#gesture-feedback');
 const inputProvider=createPlatformInputAdapter({}, {invoke});
 const preferences=loadPreferences();
+const themeSelect=document.querySelector('#theme-select');
+const theme=mountTheme({document,preference:preferences.theme,invoke:tauri.core?.invoke});
+themeSelect.value=preferences.theme;
 const languageSelect=document.querySelector('#language-select');
 languageSelect.value=preferences.language;i18n.setLanguage(preferences.language);
 const localSignalingEnabled=document.querySelector('#local-signaling-enabled');
@@ -85,13 +93,14 @@ let codeRoute=null;
 videoResolution.value=preferences.video.resolution;videoBitrateMode.value=preferences.video.bitrateMode;videoBitrate.value=String(preferences.video.bitrateKbps);
 systemAudioEnabled.checked=preferences.systemAudio;inputEnabled.checked=preferences.inputEnabled;
 const persistPreferences=()=>{
-  try{savePreferences({video:videoQuality,language:languageSelect.value,localSignaling:localSignalingEnabled.checked,systemAudio:systemAudioEnabled.checked,inputEnabled:inputEnabled.checked,policy:inputProvider.policy});
+  try{savePreferences({video:videoQuality,language:languageSelect.value,theme:themeSelect.value,localSignaling:localSignalingEnabled.checked,systemAudio:systemAudioEnabled.checked,inputEnabled:inputEnabled.checked,policy:inputProvider.policy});
     i18n.text(document.querySelector('#settings-save-status'),'settings.saved');}
   catch{i18n.text(document.querySelector('#settings-save-status'),'settings.saveFailed');}
   renderCastingPreferences();
 };
 languageSelect.addEventListener('change',()=>{i18n.setLanguage(languageSelect.value);persistPreferences();});
-for(const input of [videoResolution,videoBitrateMode,videoBitrate,systemAudioEnabled])input.addEventListener('change',()=>{videoQuality=normalizeVideoQuality({resolution:videoResolution.value,bitrateMode:videoBitrateMode.value,bitrateKbps:videoBitrate.value});persistPreferences();});
+themeSelect.addEventListener('change',()=>{theme.setPreference(themeSelect.value);persistPreferences();});
+for(const input of [videoResolution,videoBitrateMode,videoBitrate])input.addEventListener('change',()=>{videoQuality=normalizeVideoQuality({resolution:videoResolution.value,bitrateMode:videoBitrateMode.value,bitrateKbps:videoBitrate.value});persistPreferences();});
 let policyPending=false;
 const outputLabels={touch:'Touch',mouse:'Mouse'};
 const outputHelp={
@@ -147,7 +156,9 @@ let selectedDevice = null;
 let activeDevice = null;
 let currentStatus = 'idle';
 let sessionAccepted = false;
+let permissionOnboarding;
 const settingsPage=mountSettings({document,isConnected:()=>['joined','connected','sharing'].includes(currentStatus),
+  isOnboarding:()=>permissionOnboarding?.active===true,
   onSelectTab:tab=>{if(tab==='permissions')void refreshPermissions();}});
 mountFeedback({document,invoke});
 let codeDisplayRequestId = null;
@@ -158,22 +169,27 @@ let platformReady = Promise.resolve();
 let controlGeneration = 0;
 let capturePending = false;
 let captureProvider = null;
+let featurePermissions;
 let client;
 let diagnosticLogger;
 const renderCastingPreferences=(state=touchback?.diagnostics())=>{
+  inputEnabled.disabled=featurePermissions?.state('input').checking===true;
+  systemAudioEnabled.disabled=featurePermissions?.state('audio').checking===true;
   const receiverUnavailable=state?.receiverSupported===false||state?.receiverEnabled===false;
   castingInputEnabled.checked=inputEnabled.checked&&!receiverUnavailable;
-  castingInputEnabled.disabled=!state?.appReady||!state?.receiverStateReady||state?.receiverSupported!==true||state?.receiverEnabled!==true;
-  i18n.text(document.querySelector('#casting-input-help'),state?.receiverSupported===false?'cast.remoteUnsupported'
+  castingInputEnabled.disabled=inputEnabled.disabled||!state?.appReady||!state?.receiverStateReady||state?.receiverSupported!==true||state?.receiverEnabled!==true;
+  i18n.text(document.querySelector('#casting-input-help'),inputEnabled.disabled?'onboarding.checking':state?.receiverSupported===false?'cast.remoteUnsupported'
     :state?.receiverEnabled===false?'cast.remoteOff'
     :castingInputEnabled.disabled?'cast.remoteWaiting':'cast.remoteHelp');
   const request=document.querySelector('#input-request-control');
   if(request)request.disabled=castingInputEnabled.disabled||!state?.sourceReady;
   const sharing=Boolean(client?.stream);
+  const audio=captureProvider?.diagnostics()?.audio;
   const hasAudio=sharing&&client.stream.getAudioTracks().some(track=>track.readyState==='live');
   castingAudioEnabled.checked=sharing?hasAudio:systemAudioEnabled.checked;
-  castingAudioEnabled.disabled=capturePending||sharing;
-  i18n.text(document.querySelector('#casting-audio-help'),sharing?hasAudio?'cast.audioLive':'cast.audioNone':'cast.audioNext');
+  castingAudioEnabled.disabled=systemAudioEnabled.disabled||capturePending||sharing;
+  shareButton.disabled=capturePending||systemAudioEnabled.disabled||!['connected','sharing'].includes(currentStatus);
+  i18n.text(document.querySelector('#casting-audio-help'),systemAudioEnabled.disabled?'onboarding.checking':sharing?audio?.error?'audio.error':hasAudio?'cast.audioLive':'cast.audioNone':'cast.audioNext',{error:i18n.error(audio?.error)});
 };
 for(const [shortcut,setting]of [[castingInputEnabled,inputEnabled],[castingAudioEnabled,systemAudioEnabled]]){
   shortcut.addEventListener('change',()=>{if(shortcut.disabled){renderCastingPreferences();return;}setting.checked=shortcut.checked;setting.dispatchEvent(new Event('change'));});
@@ -192,6 +208,7 @@ const renderControlDiagnostics = () => {
     document.querySelector('#scroll-diagnostic-summary').textContent=`滚轮诊断版 · 累计纵轴（正／负）：接收 ${r.positiveY}／${r.negativeY}，提交 ${s.positiveY}／${s.negativeY} · 原始包 ${r.samples}，提交调用 ${s.samples}。测试后点击“导出诊断”。`;}
   const audio=captureProvider?.diagnostics()?.audio;
   if(systemAudioStatus)i18n.text(systemAudioStatus,audio?.error?'audio.error':audio?.state==='capturing'?'audio.capturing':captureProvider?.current?'audio.disabled':'audio.idle',{error:i18n.error(audio?.error)});
+  renderCastingPreferences();
 };
 // Full JSON diagnostics are observability, not a per-input rendering task.
 // Limit DOM/stringification work while the high-rate input queue drains.
@@ -209,7 +226,10 @@ setInterval(async()=>{
   finally{mediaStatsPending=false;renderControlDiagnostics();diagnosticLogger?.scroll();diagnosticLogger?.media();}
 },1000);
 
+const captureErrors=mountCaptureError({document,permissions,platform:()=>platformInfo,
+  onSettingsOpened:()=>{permissionSettingsOpened='screenRecording';},onPermissionsChanged:()=>renderPermissions()});
 const setError = (element, error) => {
+  if(element===castError){captureErrors.show(error);return;}
   element.textContent = error ? i18n.error(error) : '';
   if(error)element.dataset.errorMessage=error.message||String(error);else delete element.dataset.errorMessage;
   element.hidden = !error;
@@ -235,6 +255,7 @@ const setView = status => {
   diagnosticLogger?.status(status);
   currentStatus = status;
   const connected = ['joined', 'connected', 'sharing'].includes(status);
+  if(!connected)captureErrors.show(null);
   if(connected)sessionAccepted=true;
   codeView.hidden = connected;
   castingView.hidden = !connected;
@@ -255,9 +276,18 @@ const pairingInput=mountPairingInput({inputs:digits,help:document.querySelector(
 
 const buildTouchback = () => new WebCastTouchbackSender({
   provider: inputProvider,
-  onConsentRequest:options=>showInputConsent(options,{showWindow:()=>invoke('nearcast_window_action',{action:{kind:'show'}})}),
+  onConsentRequest:async options=>{
+    if(platformInfo?.os==='macos'&&!await featurePermissions.check('input')){
+      await invoke('nearcast_window_action',{action:{kind:'show'}}).catch(()=>{});return false;
+    }
+    return showInputConsent(options,{showWindow:()=>invoke('nearcast_window_action',{action:{kind:'show'}})});
+  },
   onEnabledChanged:enabled=>{inputEnabled.checked=enabled;persistPreferences();},
   onStatus: (_status, state) => {
+    if(platformInfo?.os==='macos'&&state.disabledReason==='NATIVE_PERMISSION_UNAVAILABLE'&&inputEnabled.checked){
+      inputEnabled.checked=false;featurePermissions?.require('input');persistPreferences();
+      void Promise.resolve().then(()=>touchback.setEnabled(false)).catch(()=>{});
+    }
     const reasons = {LOCAL_INPUT_DISABLED:'反控未启用', APP_NOT_READY:'等待接收端建立反控会话', TARGET_UNBOUND:'等待接收端绑定投屏来源', CAPTURE_UNAVAILABLE:'请先分享整个屏幕', CAPTURE_CHANGED:'分享已停止，重新分享后等待接收端恢复反控', CAPTURE_GEOMETRY_CHANGED:'正在更新分享范围，反控暂时暂停', CAPTURE_MUTED:'采集已暂停', NATIVE_CLEANUP_PENDING:'等待释放上一次输入', NATIVE_PERMISSION_UNAVAILABLE:'本机输入不可用，请检查系统权限', NATIVE_DOMAIN_BUSY:'本机输入正由其他会话使用', NATIVE_GEOMETRY_UNAVAILABLE:'无法确认当前分享范围的坐标映射，请查看反控诊断', TARGET_CONTRACT_MISMATCH:'接收端反控协议版本不匹配', INPUT_SESSION_FAULT:'反控连接异常，可重建连接'};
     inputState.textContent = !state.localEnabled ? '反控未启用' : state.state === 'active' && state.sourceReady ? `反控已开启 · ${state.acceptedInputTypes.join(' / ')} · stream ${state.streamId}` : state.sourceReady ? '本机已就绪，等待接收端开启反控' : state.detail?.includes('BROWSER_WINDOW_INPUT_UNSUPPORTED') ? '窗口投屏可用；反控请改为分享整个屏幕' : state.detail?.includes('BROWSER_MULTIPLE_DISPLAYS_UNPROVEN') ? '未完成屏幕识别，反控暂不可用；请停止后重新分享整个屏幕' : state.detail?.includes('BROWSER_DISPLAY_LAYOUT_CHANGED') ? '显示布局已变化，请停止后重新分享以校验屏幕' : state.detail?.includes('BROWSER_DISPLAY_BINDING_RETIRED') ? '屏幕绑定已失效，请停止后重新分享' : state.detail?.includes('BROWSER_SOURCE_SIZE_UNPROVEN') ? '无法确认原始屏幕尺寸，反控暂不可用' : state.detail?.includes('capture_window_not_foreground') ? '窗口反控已暂停，请切回正在分享的窗口' : state.detail?.includes('minimized') ? '窗口已最小化，反控已暂停' : state.disabledReason === 'NATIVE_PROBE_FAILED' ? '无法读取本机输入能力，请重试或检查系统权限' : captureProvider && state.disabledReason === 'NATIVE_GEOMETRY_UNAVAILABLE' ? '正在确认分享范围，反控暂不可用' : state.disabledReason === 'INPUT_SESSION_FAULT' && state.detail?.includes('Input queue age') ? '输入处理积压，已释放触点；可重建反控连接' : reasons[state.disabledReason] || '正在准备反控';
     inputCleanup.hidden = !state.cleanupPending;
@@ -287,16 +317,28 @@ inputPolicyApply.addEventListener('click',async()=>{
   }finally{policyPending=false;inputTouchOutput.disabled=false;inputMouseOutput.disabled=false;inputPolicyApply.disabled=touchback.diagnostics().cleanupPending;
     for(const control of [gestureHold,gestureRightClick,gestureRightHold,gesturePinch,gestureFeedback])control.disabled=false;}
 });
+const setFeatureEnabled=async(feature,wanted)=>{
+  const control=feature==='input'?inputEnabled:systemAudioEnabled;
+  if(!wanted)featurePermissions.cancel(feature);
+  else if(!platformInfo||platformInfo.os==='macos'){
+    control.checked=false;renderCastingPreferences();await platformReady;
+    if(!await featurePermissions.check(feature)){persistPreferences();return false;}
+  }
+  control.checked=wanted;persistPreferences();
+  if(feature==='input')await touchback.setEnabled(wanted);
+  return wanted;
+};
+systemAudioEnabled.addEventListener('change',()=>{void setFeatureEnabled('audio',systemAudioEnabled.checked);});
 inputEnabled.addEventListener('change', async () => {
-  persistPreferences();await touchback.setEnabled(inputEnabled.checked);
-  if(inputEnabled.checked&&touchback.diagnostics().sourceReady){
+  const enabled=await setFeatureEnabled('input',inputEnabled.checked);
+  if(enabled&&touchback.diagnostics().sourceReady){
     try{await touchback.requestReceiverControl(true);}catch(error){inputState.textContent=`反控未开启：${error.message||error}`;}
   }
 });
 const requestControl=document.createElement('button');requestControl.id='input-request-control';requestControl.type='button';requestControl.className='button secondary';requestControl.textContent='在接收端开启反控';
 inputState.after(requestControl);requestControl.addEventListener('click',async()=>{
   requestControl.disabled=true;
-  try{if(!inputEnabled.checked){inputEnabled.checked=true;persistPreferences();await touchback.setEnabled(true);}await touchback.requestReceiverControl(true);}
+  try{if(!inputEnabled.checked&&!await setFeatureEnabled('input',true))return;await touchback.requestReceiverControl(true);}
   catch(error){inputState.textContent=`反控未开启：${error.message||error}`;}
   finally{renderCastingPreferences();}
 });
@@ -443,18 +485,39 @@ pairForm.addEventListener('submit', async event => {
   }
 });
 shareButton.addEventListener('click', async () => {
-  if (capturePending) return;
+  if (capturePending||featurePermissions?.state('audio').checking) return;
   capturePending = true; shareButton.disabled = true;
   renderCastingPreferences();
   setError(castError, null);
+  if(platformInfo?.os==='macos'&&systemAudioEnabled.checked&&permissions.snapshot.screenRecording!=='granted'){
+    systemAudioEnabled.checked=false;featurePermissions.require('audio',permissions.snapshot.screenRecording==='not_granted'?'required':'unknown');persistPreferences();
+  }
   try { client.videoQuality = videoQuality; await client.startScreenShare({video: true, audio: systemAudioEnabled.checked}); }
-  catch (error) { setError(castError, screenCaptureError(error, platformInfo)); }
+  catch (error) { if(['connected','sharing'].includes(currentStatus))await captureErrors.report(error); }
   finally { capturePending = false; shareButton.disabled = !['connected', 'sharing'].includes(currentStatus); renderCastingPreferences(); }
 });
 stopShareButton.addEventListener('click', async () => { setError(castError, null); await client.stopStream(); });
 leaveButton.addEventListener('click', async () => { setError(castError, null); touchback.fence(); await client.stop(); });
 window.addEventListener('beforeunload', () => { touchback.fence(); trustManager.cancel(); client.stop({notify: false}); });
 
+const discoveryPermissions=mountDiscoveryPermissions({document,permissions,platform:()=>platformInfo,
+  onSettingsOpened:()=>{permissionSettingsOpened='localNetwork';},onPermissionsChanged:()=>{renderPermissions();captureErrors.permissionsChanged();}});
+const reconcileFeaturePermissions=({initial=false}={})=>{
+  if(platformInfo?.os!=='macos')return;
+  let changed=false;
+  for(const [feature,control,permission]of [['audio',systemAudioEnabled,'screenRecording'],['input',inputEnabled,'accessibility']]){
+    const value=permissions.snapshot[permission];
+    if(control.checked&&(initial?value!=='granted':value==='not_granted')){
+      control.checked=false;changed=true;
+      if(initial)featurePermissions.cancel(feature);else featurePermissions.require(feature);
+      if(feature==='input')void touchback.setEnabled(false).catch(()=>{});
+    }
+  }
+  featurePermissions.permissionsChanged();if(changed)persistPreferences();
+};
+featurePermissions=mountFeaturePermissions({document,permissions,platform:()=>platformInfo,
+  onSettingsOpened:permission=>{permissionSettingsOpened=permission;},onChange:()=>renderCastingPreferences(),
+  onPermissionsChanged:()=>{renderPermissions();captureErrors.permissionsChanged();discoveryPermissions.permissionsChanged();reconcileFeaturePermissions();}});
 const renderDevices = devices => {
   if (selectedDevice && currentStatus === 'idle') {
     const current = devices.find(device => device.discoveryId === selectedDevice.discoveryId && device.selectable);
@@ -468,7 +531,8 @@ const renderDevices = devices => {
       if (trustDevice) { trustDevice = current; trustManager.device = current; }
     }
   }
-  deviceGroups.replaceChildren();
+  deviceGroups.replaceChildren(discoveryPermissions.element);
+  discoveryPermissions.devicesChanged(devices);
   const groups = [{protocol: 'webcast'}];
   const available = devices.filter(device => device.protocol === 'webcast');
   i18n.text(deviceStatus,available.length?'discovery.found':'discovery.empty',{count:available.length});
@@ -504,14 +568,22 @@ const renderDevices = devices => {
 };
 
 const discovery = new TauriDeviceDiscovery({invoke, listen});
-const startDiscovery = async () => {
+let startupDiscoveryStarted=false;
+const startDiscovery = async ({checkPermissions=true}={}) => {
+  if(refreshDevices.disabled)return;
   trustManager.cancel(); trustDevice = null; client.cancelCodeDisplay(); codeDisplayRequestId = null;
   refreshDevices.disabled = true;i18n.text(deviceStatus,'discovery.scanning');
+  discoveryPermissions.scanStarted();
   try { await discovery.stop().catch(() => {}); await discovery.start(renderDevices); }
   catch (error) { i18n.text(deviceStatus,'discovery.failed',{error:i18n.error(error)}); }
-  finally { refreshDevices.disabled = false; }
+  finally { if(checkPermissions&&platformInfo?.os==='macos')await refreshPermissions();discoveryPermissions.scanFinished();refreshDevices.disabled = false; }
 };
 refreshDevices.addEventListener('click', startDiscovery);
+const startStartupDiscovery=()=>{
+  if(startupDiscoveryStarted)return;
+  startupDiscoveryStarted=true;
+  return startDiscovery({checkPermissions:false});
+};
 
 const renderPermissions = () => {
   const mac=platformInfo?.os==='macos',os=platformInfo?.os??'unknown';
@@ -548,7 +620,7 @@ const renderPermissions = () => {
       permissionRows.append(item);
     }
     i18n.text(item.querySelector('.permission-title'),'permission.'+row.id);
-    i18n.text(item.querySelector('.permission-detail'),'permission.'+({localNetwork:'localHelp',screenRecording:'screenHelp',accessibility:'accessibilityHelp'}[row.id]));
+    i18n.text(item.querySelector('.permission-detail'),'permission.'+(row.id==='screenRecording'&&mac&&platformInfo.screenCapturePermission!=='required'?'screenAudioHelp':{localNetwork:'localHelp',screenRecording:'screenHelp',accessibility:'accessibilityHelp'}[row.id]));
     const state=item.querySelector(`#permission-status-${row.id}`);
     if(mac){
       const toggle=item.querySelector('button');toggle.disabled=permissionActionPending;
@@ -561,7 +633,7 @@ const renderPermissions = () => {
       }
       if(row.enabled===null){toggle.removeAttribute('role');toggle.removeAttribute('aria-checked');}
       else{toggle.setAttribute('role','switch');toggle.setAttribute('aria-checked',String(row.enabled));}
-      i18n.text(state,row.enabled===null?'permission.checkSystem':row.id==='localNetwork'?'permission.available':row.enabled?'permission.on':'permission.off');
+      i18n.text(state,row.enabled===null?'permission.checkSystem':row.enabled?(row.id==='localNetwork'?'permission.available':'permission.on'):'permission.off');
     }else i18n.text(state,os==='windows'?(row.id==='localNetwork'?'permission.managed':row.id==='screenRecording'?(platformInfo.screenCapture?'permission.onSelect':'common.unavailable'):'permission.notRequired'):'permission.unknown');
   }
   refreshPermissionsButton.hidden=!mac;
@@ -571,15 +643,15 @@ const refreshPermissions = async () => {
   if (platformInfo?.os !== 'macos') return;
   refreshPermissionsButton.disabled = true;
   setError(permissionsError, null);
-  try { await permissions.refresh(); }
+  try { if(permissionOnboarding?.active)await permissionOnboarding.refresh();else await permissions.refresh(); }
   catch (error) { setError(permissionsError, error); }
-  finally { renderPermissions(); refreshPermissionsButton.disabled = false; }
+  finally { renderPermissions();captureErrors.permissionsChanged();discoveryPermissions.permissionsChanged();reconcileFeaturePermissions();refreshPermissionsButton.disabled = false; }
 };
 refreshPermissionsButton.addEventListener('click', refreshPermissions);
 window.addEventListener('focus', async () => {
   const opened = permissionSettingsOpened; permissionSettingsOpened = null;
   await refreshPermissions();
-  if (opened === 'localNetwork' && currentStatus === 'idle') await startDiscovery();
+  if (opened === 'localNetwork' && currentStatus === 'idle') await startDiscovery({checkPermissions:false});
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshPermissions(); });
 const refreshLanguage=()=>{
@@ -589,6 +661,13 @@ const refreshLanguage=()=>{
   const heading=document.querySelector('#casting-heading');heading.firstChild.textContent=i18n.t('cast.targetPrefix');
   for(const node of document.querySelectorAll('[data-error-message]'))node.textContent=i18n.error(node.dataset.errorMessage);
 };
+permissionOnboarding=mountMacOsPermissionOnboarding({document,permissions,
+  onChange:()=>{renderPermissions();settingsPage.render();discoveryPermissions.permissionsChanged();},
+  onComplete:()=>{
+    const heading=document.querySelector('#connect-heading');heading.tabIndex=-1;heading.focus();
+    void startStartupDiscovery();
+  },
+});
 i18n.subscribe(refreshLanguage);i18n.apply();refreshLanguage();
 setView('idle');
 platformReady = loadPlatformInfo(invoke).then(async info => {
@@ -602,11 +681,14 @@ platformReady = loadPlatformInfo(invoke).then(async info => {
   document.querySelector('#system-audio-settings').hidden=false;
   document.querySelector('#capture-help').textContent = '系统选屏后会短暂显示四角校验标记；识别成功的整屏支持多屏反控。窗口仅投屏。';
   captureProvider = new BrowserCaptureMediaDevices({platform:info.os,invoke,mediaDevices:navigator.mediaDevices,
-    onStatus: state => { if(state.binding==='calibrating')document.querySelector('#capture-help').textContent='正在识别分享的屏幕，请稍候；四角校验标记将自动消失。';else document.querySelector('#capture-help').textContent=state.displayBinding?.state==='bound'?'已确认分享的屏幕，可开启反控。':'系统选屏后自动识别屏幕；窗口仅投屏，识别失败可停止后重试。';if (state.error) setError(castError, new Error(state.error)); },
+    onStatus: state => { if(state.binding==='calibrating')document.querySelector('#capture-help').textContent='正在识别分享的屏幕，请稍候；四角校验标记将自动消失。';else document.querySelector('#capture-help').textContent=state.displayBinding?.state==='bound'?'已确认分享的屏幕，可开启反控。':'系统选屏后自动识别屏幕；窗口仅投屏，识别失败可停止后重试。';if (state.error) setError(castError, new Error(state.error));
+      if(info.os==='macos'&&state.audio?.error?.includes('macos_audio_permission_required')){systemAudioEnabled.checked=false;featurePermissions.require('audio');persistPreferences();}
+    },
   });
   client.mediaDevices = captureProvider;
   permissionsPanel.hidden = false;renderPermissions();
-  if (info.os === 'macos') refreshPermissions();
+  await permissionOnboarding.start({os:info.os,desktop:typeof tauri.core?.invoke==='function',screenCapturePermission:info.screenCapturePermission});
+  reconcileFeaturePermissions({initial:true});
   touchbackStatus.textContent = touchbackSummary(info);
   touchback.status();
   try{await inputProvider.setOutputPolicy(DEFAULT_OUTPUT_POLICY);}
@@ -615,7 +697,7 @@ platformReady = loadPlatformInfo(invoke).then(async info => {
   await renderPolicyConfiguration().catch(error=>{inputPolicyStatus.textContent=`无法读取输入能力：${error.message||error}`;});
   return info;
 }).catch(() => ({os: 'unknown', touchback: false, inputControl: 'none'}));
-startDiscovery();
+platformReady.then(()=>{if(!permissionOnboarding.active)return startStartupDiscovery();});
 if(tauri.core?.invoke){
   diagnosticLogger=createDiagnostics({invoke,snapshot:()=>({status:currentStatus,input:touchback?.diagnostics(),capture:captureProvider?.diagnostics(),media:client?.mediaDiagnostics,window:diagnosticWindow()})});
   diagnosticLogger.status(currentStatus);

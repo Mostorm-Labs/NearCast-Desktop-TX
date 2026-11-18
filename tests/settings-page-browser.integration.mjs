@@ -23,6 +23,8 @@ try{
     const page=await context.newPage(),errors=[];
     page.on('pageerror',error=>errors.push(error.message));
     await page.addInitScript(os=>{
+      // Completed setup still reopens when required permissions are missing.
+      if(os==='macos')localStorage.setItem('nearhub-cast-macos-permissions-onboarding-v1','completed');
       globalThis.fixture={calls:[],listeners:{},permissions:{localNetwork:'unknown',screenRecording:'not_granted',accessibility:'granted'}};
       globalThis.__TAURI__={core:{invoke:async(command,args)=>{
         fixture.calls.push({command,args});
@@ -36,6 +38,7 @@ try{
     },os);
     await page.goto('http://127.0.0.1:'+server.address().port+'/index.html');
     await page.waitForFunction(()=>document.querySelector('#permission-rows').children.length>0);
+    if(os==='macos')await page.locator('#onboarding-not-now').click();
     await page.locator('#settings-open').click();
     assert.equal(await page.locator('#settings-permissions').isVisible(),true);
     for(const height of [780,627]){
@@ -78,6 +81,7 @@ try{
     await page.locator('#settings-close').click();
     assert.equal(await page.locator('#connect-panel-code').isVisible(),true);
     await page.reload();await page.waitForFunction(()=>document.querySelector('#permission-rows').children.length>0);
+    if(os==='macos')await page.locator('#onboarding-not-now').click();
     assert.equal(await page.locator('#connect-panel-devices').isVisible(),true);
     await page.locator('#settings-open').click();await page.locator('[data-settings-tab=general]').click();
     assert.equal(await page.locator('#video-resolution').inputValue(),'2560x1440');

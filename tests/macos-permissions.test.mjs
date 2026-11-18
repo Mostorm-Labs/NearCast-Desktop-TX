@@ -18,6 +18,20 @@ for (const location of ['../src/macos-permissions.mjs', '../dist/macos-permissio
     assert.equal(rows[1].status, '未开启');
   });
 
+  test(`${location}: only an explicit local-network policy denial is shown as permission off`, async () => {
+    let localNetwork='not_granted';
+    const permissions=new MacOsPermissions({invoke:async()=>({localNetwork})});
+    await permissions.refresh();
+    assert.equal(permissions.rows()[0].enabled,false);
+    assert.equal(permissions.rows()[0].status,'未开启');
+    for(localNetwork of ['unknown','timeout','offline']){
+      await permissions.refresh();
+      assert.equal(permissions.rows()[0].enabled,null);
+    }
+    localNetwork='available';await permissions.refresh();
+    assert.equal(permissions.rows()[0].enabled,true);
+  });
+
   test(`${location}: an opened settings page never grants permission by itself`, async () => {
     let granted = false;
     const calls = [];
