@@ -229,12 +229,37 @@ GitHub Secrets：
 | `TAURI_SIGNING_PRIVATE_KEY` | 与仓库 `src-tauri/update.pub` 对应的更新签名私钥文件内容 |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 私钥密码（未设置密码时为空） |
 | `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD` | Developer ID 的 base64 P12 及密码 |
-| `APPLE_SIGNING_IDENTITY` | 稳定 Developer ID Application 身份 |
-| `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` | Apple notarization 身份与应用专用密码 |
+| `APPLE_SIGNING_IDENTITY` | Developer ID Application 完整名称；优先读取仓库 Variable，兼容同名 Secret |
+| `APPLE_TEAM_ID` | 与证书一致的 Team ID；优先读取仓库 Variable，兼容同名 Secret |
+| `APPLE_ID` / `APPLE_PASSWORD` | 公证用 Apple ID 与应用专用密码，不能使用普通登录密码 |
+| `APPLE_API_KEY` / `APPLE_API_ISSUER` / `APPLE_API_KEY_P8` | 可替代 Apple ID 的团队级 App Store Connect Key ID、Issuer ID 和 .p8 私钥文本 |
 
 更新公钥已入仓库，私钥保存在当前机器仓库外 `C:\Users\Chado\.codex\update-key-tx\tx.key`，并已配置为 GitHub Actions Secret `TAURI_SIGNING_PRIVATE_KEY`，签名验证与内置公钥一致。不要输出或提交私钥，需额外安全备份。更换密钥必须在首次发布前同步公钥；上线后轮换须保留旧版本升级通路。
 
 打 `vX.Y.Z` tag 触发全平台正式 release；手动可选择逻辑版本、渠道及 `platforms=windows|all`，默认 Windows/alpha，仍共享同一流水线全局递增 Build。Windows 单独发布无需 Apple 凭据，生成 NSIS、MSI、签名、清单，共 9 个 Mosapi 资产；全平台还包含 macOS 两架构及其 9 个资产。聚合 ZIP 仅包含本次选中的平台。创建同一个 GitHub draft Release，上传所有 assets，再创建所选产品的 Mosapi 更新记录，成功后公开 GitHub Release。平台记录独立创建，Mosapi 没有跨产品原子事务；部分失败需检查已创建的 update-id 并以新 Build 重试。
+
+### macOS 签名与公证配置
+
+公开的 macOS 安装包需要 Developer ID Application 代码签名和 Apple notarization，Tauri 更新签名不能替代这两项。Release TX 的 alpha、beta、release 都会分发公开资产，因此均要求完整的 Apple 配置；Windows-only 发布无需 Apple 构建凭据。
+
+在仓库 Settings → Secrets and variables → Actions 中配置：
+
+- Variables：`APPLE_SIGNING_IDENTITY` 和 `APPLE_TEAM_ID`。同名旧 Secrets 仍兼容。`APPLE_NOTARIZATION_METHOD` 可明确选择 `apple-id` 或 `api-key`；未指定时有 API 配置则使用 API，否则使用 Apple ID。
+- Secrets：`APPLE_CERTIFICATE` 为含私钥的 Developer ID Application P12 的 base64，`APPLE_CERTIFICATE_PASSWORD` 为导出 P12 时设置的密码。只有 .cer 文件无法签名。
+- Apple ID 方案：`APPLE_ID` 为属于该 Team 的 Apple 账号，`APPLE_PASSWORD` 为该账号生成的应用专用密码。
+- API 方案：改用 `APPLE_API_KEY`（Key ID）、`APPLE_API_ISSUER`（Issuer UUID）和 `APPLE_API_KEY_P8`（下载的团队级 .p8 私钥完整文本）。Issuer ID 不能用 Team ID 替代。不混用两套凭据；显式选择 apple-id 时会清除子进程中的 API 字段，API 模式会清除 Apple ID/密码。
+
+证书可在“钥匙串访问 → 我的证书”中选中含关联私钥的 Developer ID Application 证书项，导出为带密码的 P12。使用 `openssl base64 -A -in /path/to/DeveloperID.p12 -out /outside/repository/certificate-base64.txt` 转换，再将文件内容填入 APPLE_CERTIFICATE Secret。密码、P12、.p8 和 base64 内容不提交到仓库、不发送到聊天或日志中。
+
+2026-11-18 本机检查到的正式证书名称为 `Developer ID Application: SUZHOU AUDITORYWORKS CO.,LTD (8C2WJTL66R)`，Team ID 为 `8C2WJTL66R`，有效至北京时间 2027-02-02。GitHub 仓库级已有更新签名、Mosapi 和发布 token，Apple 凭据需另行配置；组织共享 Secrets 的可用性需由组织管理员确认。
+
+`scripts/macos-signing.mjs check` 会在分配发布 Build 前校验配置，拒绝 ad-hoc、Apple Development、不匹配的 Team 和缺失的公证凭据。构建调用 `scripts/build.mjs`，以 `NEARCAST_REQUIRE_MACOS_SIGNING=1` 再次校验并强制 Hardened Runtime；Tauri CLI 负责导入 P12、Developer ID 签名、提交公证和 stapling。API 私钥仅在 RUNNER_TEMP 的私有临时文件中提供给 CLI，不把原始 .p8 内容转发到子进程，正常完成或失败后均清理。
+
+构建完成后 `scripts/macos-signing.mjs verify <app>` 必须确认代码签名完整、签名身份/Team 正确、Hardened Runtime 启用、stapled 公证票据有效且 Gatekeeper 评估通过，才允许准备上传资产。`build.yml` 的普通构建及本机开发构建仍可用于调试，不视为可公开分发的签名产物。
+
+首次验证应在凭据配置后选择 Release TX 的目标分支、逻辑版本、`platforms=all` 和 `channel=alpha`，确认 ARM64/Intel 的签名、公证、GitHub/Mosapi 上传及干净机器下载验收。此操作会生成新的 CI Build 并公开 alpha 资产；本地配置检查和现有开发签名包不构成已完成公证的证据。
+
+参考：[Tauri macOS 签名与公证](https://v2.tauri.app/distribute/sign/macos/)、[Apple macOS 分发](https://developer.apple.com/macos/distribution)。
 
 ### Windows 两个 Build 的在线验收
 
@@ -246,9 +271,9 @@ GitHub Secrets：
 6. 点击安装，确认投屏/声音停止、输入释放，安装并重启后版本升至新 Build，设置仍保留。
 7. 在干净 Windows 测试机上重复 MSI→MSI；分别验证取消 UAC、离线、下载中断可重试。自动化本地测试覆盖清单/安装包签名不符和缓存篡改拒绝；不得以关闭验证的方式完成安装测试。
 
-当前实现已通过本地浏览器与 Rust 校验、签名及安装包生成。两次 Windows alpha CI 的构建与签名成功，但 GitHub 创建 Release 返回 HTTP 403（日志已确认 `Contents: write`），尚未进入 Mosapi 上传；需要专用发布凭据或管理员解除组织限制。**Mosapi 上传、跨 Build 安装和自动重启仍未验收。** 不将本地结果或 CI 构建成功视为在线发布成功。仅发布阶段失败且尚未创建 Mosapi 记录时可重试失败 job，沿用原有已签名产物；若任何资产已公开或 Mosapi 记录已创建，需检查状态并分配新的 Build，不覆盖已发布版本。
+当前实现已通过本地浏览器与 Rust 校验、签名及安装包生成。早期两次 Windows alpha CI 在 GitHub 创建 Release 时返回 HTTP 403；配置专用发布凭据后，2026-11-16 的 [Release TX #43864899826](https://github.com/Mostorm-Labs/NearCast-Desktop-TX/actions/runs/43864899826) 已完成 Windows/macOS 构建、GitHub 与 Mosapi 发布。该次 macOS 构建的 Apple 凭据为空，不能视为 Developer ID 和公证验收。**跨 Build 安装和自动重启仍未验收。** 不将本地结果或 CI 构建成功视为安装验收成功。仅发布阶段失败且尚未创建 Mosapi 记录时可重试失败 job，沿用原有已签名产物；若任何资产已公开或 Mosapi 记录已创建，需检查状态并分配新的 Build，不覆盖已发布版本。
 
-macOS 正式分发仍需稳定 Apple Developer ID 签名与 notarization。当前基础配置为 ad-hoc，不能据本机 Windows 验证宣称已完成 macOS 正式签名和权限保留验收。
+macOS 发布流程已加入 Developer ID、公证凭据校验和产物验收；凭据尚待配置并进行首次真实 CI 公证。本机普通开发构建的基础配置仍允许 ad-hoc，不能把开发构建、更新签名或 Windows 验证视为已完成 macOS 正式签名和权限保留验收。
 
 ## 8. 上线前确认
 
