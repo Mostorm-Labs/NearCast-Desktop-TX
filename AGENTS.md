@@ -15,11 +15,11 @@ Tauri 打包后的主程序使用 `mainBinaryName=NearHub Cast`，Windows 安装
 对外版本号固定为 `X.Y.Z.Build`：
 
 - `X.Y.Z` 是遵循 SemVer 的逻辑版本。`X` 表示不兼容变更，`Y` 表示向下兼容的新功能，`Z` 表示向下兼容的修复、性能优化或安全修复。
-- `Build` 是 CI 生成的十进制流水线构建号，从 1 开始递增。同一条发布流水线在 Windows 和 macOS 的产物使用同一个 Build。
+- `Build` 来自仓库 `build-version.json` 的构建次数；每次应用构建读取、加一、原子写回。同一批 Windows/macOS 产物共用一次编号，检查和测试不递增。
 - 版本比较必须按四个数字分量比较，不能按字符串排序；允许 API 返回带 `v` 前缀的版本。
-- `Build` 不由开发者手工填写。重新生成并发布一组产物必须使用新的 CI 构建号；同一次 CI 重试不得覆盖已经发布的版本记录。
+- 通过 `node scripts/build.mjs <Tauri 参数>`（或 `npm run build`）及 `npm run build:macos` 构建。失败的构建保留编号，不能回退或覆盖已发布版本。CI 用相同计数文件，在独立 `build-counter` 元数据分支持久预留一次编号，再供平台矩阵复用；不使用 GitHub run_number。
 
-仓库中的 Cargo/Tauri 基础版本保持 `X.Y.Z`；CI overlay 使用合法 SemVer `X.Y.Z+Build` 生成 bundle，业务层仍按四段数字比较。完整的 `X.Y.Z.Build` 写入发布元数据、安装包文件名、Mosapi update `version` 和应用界面。MSI ProductVersion 映射为 `1.0.Build`，避免 Windows Installer 忽略第四段导致同逻辑版本无法更新；Build 全局递增且不得重置。Windows 原生字段上限由发布脚本检查，溢出时阻止发布，不回绕。
+Cargo/Tauri 基础版本保持 `X.Y.Z`，计数文件为当前逻辑版本和最后分配次数的权威；构建 overlay 使用合法 SemVer `X.Y.Z+Build` 生成 bundle，业务层仍按四段数字比较。完整的 `X.Y.Z.Build` 写入发布元数据、安装包文件名、Mosapi update `version` 和应用界面。MSI ProductVersion 映射为 `1.0.Build`，避免 Windows Installer 忽略第四段导致同逻辑版本无法更新；Build 不随逻辑版本重置。Windows 原生字段上限为 65535，溢出时阻止构建，不回绕。
 
 ## Mosapi 产品标识
 
@@ -61,7 +61,7 @@ Mosapi update 的 `changelog` 保存面向用户的更新说明；`state` 保存
 
 发布流水线的顺序固定为：
 
-1. 计算 `X.Y.Z` 和新的 CI `Build`，生成完整版本 `X.Y.Z.Build`。
+1. 从计数文件预留新的 `Build`，生成完整版本 `X.Y.Z.Build`，同批各平台复用该文件。
 2. 运行 JavaScript、Rust 和平台构建测试。
 3. 构建各平台安装包，生成 SHA-256、updater 签名文件和平台版本清单；汇总为同一 GitHub Release 的独立资产及一个聚合 ZIP。
 4. 用 `Mostorm-Labs/mosapi-action` 将产物上传到对应平台 slug 的 Mosapi 产品；上传成功后才允许把该版本视为可更新。

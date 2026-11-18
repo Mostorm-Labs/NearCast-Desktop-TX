@@ -22,6 +22,7 @@ try{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('http://127.0.0.1:'+server.address().port+'/index.html');
   await page.evaluate(async()=>{
+    const {i18n}=await import('/i18n.mjs');i18n.setLanguage('zh');
     const {mountWindowControls}=await import('/window-controls.mjs');
     window.controlTest={calls:[],failClose:true,cleanup:0};
     let position={x:-1920,y:100,scaleFactor:1.5,maximized:false};

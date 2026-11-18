@@ -66,6 +66,14 @@ impl TrustManager {
     pub fn begin(&mut self) -> u64 { self.generation = self.generation.wrapping_add(1); self.candidate = None; self.generation }
     pub fn cancel(&mut self) { self.begin(); }
     pub fn current(&self, generation: u64) -> bool { self.generation == generation }
+    pub fn pair_observed(&mut self, generation: u64, device_id: &str, pin: String, path: PathBuf) -> Result<String, String> {
+        if !self.current(generation) || !valid_id(device_id) || !pinned_tls::valid_pin(&pin) { return Err("Device pairing cancelled or invalid".into()); }
+        let mut store=TrustStore::load(path)?;
+        if let Some(saved)=store.pin(device_id) {
+            if saved!=pin { return Err("NEARCAST_KEY_MISMATCH: 接收端身份已变化，请检查接收端后重试。".into()); }
+        } else { store.save(device_id,&pin)?; }
+        Ok(pin)
+    }
     pub fn finish(&mut self, generation: u64, device_id: &str, instance: &str, pin: String, path: PathBuf, now: Instant) -> Result<CandidateView, String> {
         if !self.current(generation) || !valid_id(device_id) || !pinned_tls::valid_pin(&pin) { return Err("Trust confirmation cancelled".into()); }
         let previous = TrustStore::load(path)?.pin(device_id).map(str::to_owned);
@@ -125,6 +133,30 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = TrustStore::load(dir.path().join("trust.json")).unwrap();
         assert!(store.require_pin("Board-ID").unwrap_err().contains("NEARCAST_TRUST_REQUIRED"));
+    }
+
+    #[test]
+    fn automatic_pairing_saves_first_observed_key_reuses_it_and_rejects_rotation() {
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("trust.json");let mut manager=TrustManager::default();
+        let ticket=manager.begin();
+        assert_eq!(manager.pair_observed(ticket,"Board-ID",pin(),path.clone()).unwrap(),pin());
+        assert_eq!(TrustStore::load(path.clone()).unwrap().require_pin("Board-ID").unwrap(),pin());
+        let ticket=manager.begin();assert_eq!(manager.pair_observed(ticket,"Board-ID",pin(),path.clone()).unwrap(),pin());
+        let ticket=manager.begin();assert!(manager.pair_observed(ticket,"Board-ID","B2".repeat(32),path.clone()).unwrap_err().contains("NEARCAST_KEY_MISMATCH"));
+        assert_eq!(TrustStore::load(path).unwrap().require_pin("Board-ID").unwrap(),pin());
+    }
+
+    #[test]
+    fn canceled_pairing_and_failed_persistence_cannot_report_trusted() {
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("trust.json");let mut manager=TrustManager::default();
+        let ticket=manager.begin();manager.cancel();
+        assert!(manager.pair_observed(ticket,"Board-ID",pin(),path.clone()).is_err());
+        assert!(TrustStore::load(path.clone()).unwrap().pin("Board-ID").is_none());
+        std::fs::write(&path,"invalid").unwrap();
+        let ticket=manager.begin();assert!(manager.pair_observed(ticket,"Board-ID",pin(),path.clone()).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(),"invalid");
+        std::fs::remove_file(&path).unwrap();std::fs::create_dir(&path).unwrap();
+        let ticket=manager.begin();assert!(manager.pair_observed(ticket,"Board-ID",pin(),path).is_err());
     }
 
     #[test]

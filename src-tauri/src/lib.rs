@@ -59,6 +59,26 @@ fn native_target(state: &MdnsState, instance: &str, device_id: &str, trust_displ
 }
 
 #[tauri::command]
+async fn nearcast_trust_pair(app: AppHandle, instance: String, device_id: String, state: State<'_, MdnsState>, trust: State<'_, TrustState>) -> Result<serde_json::Value, String> {
+    let selected={let runtime=state.0.lock().map_err(|_|"Discovery state poisoned")?;
+        let active=runtime.as_ref().ok_or("Discovery stopped")?.active.lock().map_err(|_|"Discovery cache poisoned")?;
+        active.pairing_target(&instance,&device_id)?};
+    let generation=trust.0.lock().map_err(|_|"Trust state poisoned")?.begin();
+    // Bootstrap silently using the selected SRV/A/AAAA destination. Observation
+    // sends no HTTP or pairing code; subsequent requests verify the saved key.
+    let (observed,pin)=tauri::async_runtime::spawn_blocking(move||{
+        let url=selected.reachable_url(std::time::Duration::from_millis(1800))?;
+        let pin=pinned_tls::observe(&url)?;Ok::<_,String>((selected,pin))
+    }).await.map_err(|_|"Device pairing task failed")??;
+    let mut manager=trust.0.lock().map_err(|_|"Trust state poisoned")?;
+    {let runtime=state.0.lock().map_err(|_|"Discovery state poisoned")?;
+        let active=runtime.as_ref().ok_or("Discovery stopped")?.active.lock().map_err(|_|"Discovery cache poisoned")?;
+        if active.pairing_target(&instance,&device_id)?!=observed {return Err("接收端服务已变化，请重新选择。".into());}}
+    let pin=manager.pair_observed(generation,&device_id,pin,trust_path(&app)?)?;
+    Ok(serde_json::json!({"deviceId":device_id,"fingerprint":pin,"trusted":true}))
+}
+
+#[tauri::command]
 fn nearcast_trust_status(app: AppHandle, device_id: String, trust: State<'_, TrustState>) -> Result<serde_json::Value, String> {
     let _guard = trust.0.lock().map_err(|_| "Trust state poisoned")?;
     let store = trust::TrustStore::load(trust_path(&app)?)?;
@@ -352,7 +372,7 @@ pub fn run() {
             if matches!(event, tauri::WindowEvent::Destroyed) { let _ = macos_input::reset(); }
             let _=(window,event);
         })
-        .invoke_handler(tauri::generate_handler![#[cfg(windows)] nearcast_migrate_legacy_settings, #[cfg(windows)] nearcast_take_legacy_settings, nearcast_local_signal_open,nearcast_local_signal_send,nearcast_local_signal_close,window_controls::nearcast_window_action,nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_input_feedback, nearcast_input_execution_status, nearcast_system_audio_start, nearcast_audio_read, nearcast_audio_stop, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info, nearcast_display_binding_begin, nearcast_display_binding_confirm, nearcast_display_binding_cancel, nearcast_display_binding_release, nearcast_diagnostics_record, nearcast_diagnostics_export, nearcast_feedback_submit, nearcast_update_initialize, nearcast_update_check, nearcast_update_download, nearcast_update_install])
+        .invoke_handler(tauri::generate_handler![#[cfg(windows)] nearcast_migrate_legacy_settings, #[cfg(windows)] nearcast_take_legacy_settings, nearcast_local_signal_open,nearcast_local_signal_send,nearcast_local_signal_close,window_controls::nearcast_window_action,nearcast_mdns_start, nearcast_mdns_stop, nearcast_code_display, nearcast_trust_pair, nearcast_trust_status, nearcast_trust_prepare, nearcast_trust_confirm, nearcast_trust_cancel, nearcast_trust_revoke, nearcast_input_probe, nearcast_input_prepare, nearcast_input_apply, nearcast_input_release, nearcast_input_feedback, nearcast_input_execution_status, nearcast_system_audio_start, nearcast_audio_read, nearcast_audio_stop, nearcast_macos_permissions, nearcast_macos_permission_settings, nearcast_platform_info, nearcast_display_binding_begin, nearcast_display_binding_confirm, nearcast_display_binding_cancel, nearcast_display_binding_release, nearcast_diagnostics_record, nearcast_diagnostics_export, nearcast_feedback_submit, nearcast_update_initialize, nearcast_update_check, nearcast_update_download, nearcast_update_install])
         .build(tauri::generate_context!())
         .expect("error while building NearHub Cast")
         .run(|app, event| {

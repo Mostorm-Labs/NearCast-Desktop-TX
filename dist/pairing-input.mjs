@@ -1,15 +1,16 @@
 // Read-only DOM cells prevent WebView2 from hosting an IME composition buffer.
 // Keyboard and paste handlers own the value; maxlength alone does not limit
 // uncommitted composition text. Never change the system-wide keyboard layout.
+import {i18n} from './i18n.mjs';
 export function mountPairingInput({inputs,help,onChange=()=>{}}){
-  const normal='请输入 4 位英文字母或数字，每格一位。';
+  const normal=()=>i18n.text(help,'pair.help');
   const valid=text=>/^[A-Z0-9]$/.test(text);
   const values=inputs.map(input=>valid(input.value)?input.value:'');
   const composing=new Set();
   const render=index=>{inputs[index].value=values[index];};
   const write=(index,value)=>{values[index]=value;render(index);};
   const focus=index=>{inputs[index].focus();inputs[index].select();};
-  const changed=()=>{help.textContent=normal;onChange();};
+  const changed=()=>{normal();onChange();};
   inputs.forEach((input,index)=>{
     input.readOnly=true;input.maxLength=1;input.pattern='[A-Z0-9]';
     input.setAttribute('inputmode','url');input.setAttribute('lang','en');
@@ -45,12 +46,12 @@ export function mountPairingInput({inputs,help,onChange=()=>{}}){
       event.preventDefault();if(input.disabled||composing.has(input))return;
       const text=(event.clipboardData?.getData('text')??'').trim().toUpperCase();
       if(!/^[A-Z0-9]+$/.test(text)||text.length>inputs.length-index){
-        help.textContent='请粘贴不超过 4 位的英文字母或数字配对码。';render(index);return;
+        i18n.text(help,'pair.paste');render(index);return;
       }
       [...text].forEach((char,offset)=>write(index+offset,char));
       changed();focus(Math.min(index+text.length,inputs.length-1));
     });
   });
-  help.textContent=normal;
-  return{clear(){values.fill('');inputs.forEach((_,index)=>render(index));composing.clear();help.textContent=normal;}};
+  normal();
+  return{clear(){values.fill('');inputs.forEach((_,index)=>render(index));composing.clear();normal();}};
 }

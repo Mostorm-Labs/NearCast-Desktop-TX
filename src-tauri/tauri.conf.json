@@ -2,17 +2,18 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "NearHub Cast",
   "mainBinaryName": "NearHub Cast",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.mostorm.nearhub.cast",
   "build": {
+    "beforeBuildCommand": "node scripts/verify-build-context.mjs",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
         "title": "NearHub Cast",
-        "width": 960,
-        "height": 780
+        "width": 946,
+        "height": 692
       }
     ],
     "security": {
@@ -43,6 +44,7 @@
     "active": true,
     "icon": [
       "icons/icon.ico",
+      "icons/icon.icns",
       "icons/icon.png"
     ],
     "targets": [

@@ -7,7 +7,32 @@ on:
   workflow_dispatch:
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      display: ${{ steps.counter.outputs.display }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - id: counter
+        env:
+          RESERVE: ${{ github.event_name != 'pull_request' }}
+        run: |
+          node --input-type=module <<'JS'
+          import {allocateVersion,reserveRemoteVersion} from './scripts/build-version.mjs';
+          import {appendFileSync} from 'node:fs';
+          const v=await (process.env.RESERVE==='true'?reserveRemoteVersion():allocateVersion());
+          appendFileSync(process.env.GITHUB_OUTPUT,'display='+v.display+'\n');
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tx-build-counter
+          path: build-version.json
   test:
+    needs: version
     strategy:
       fail-fast: false
       matrix:
@@ -24,6 +49,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       MACOSX_DEPLOYMENT_TARGET: '13.0'
+      NEARCAST_BUILD_VERSION: ${{ needs.version.outputs.display }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,12 +65,16 @@ jobs:
       - run: npm ci
       - name: Run JavaScript tests
         run: npm test
+      - uses: actions/download-artifact@v4
+        with:
+          name: tx-build-counter
+          path: .
       - name: Check Rust backend
         run: cargo check --locked --manifest-path src-tauri/Cargo.toml --target ${{ matrix.rust-target }}
       - name: Test Rust backend
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --target ${{ matrix.rust-target }}
       - name: Build Tauri bundle
-        run: node node_modules/@tauri-apps/cli/tauri.js build --target ${{ matrix.rust-target }} --bundles ${{ matrix.bundles }} -- --locked
+        run: node scripts/build.mjs --target ${{ matrix.rust-target }} --bundles ${{ matrix.bundles }} -- --locked
         env:
           CI: true
       - name: Name desktop installers

@@ -23,13 +23,13 @@ export function releasePackageName(version,platform,cpu,format){
   return INSTALLER_NAME+'-'+version+'-'+platform+'-'+cpu+ext;
 }
 
-export function releaseVersion(logical, run) {
+export function releaseVersion(logical, counter) {
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(logical)) throw new Error('Expected X.Y.Z');
-  if (!/^[1-9]\d*$/.test(String(run))) throw new Error('Expected positive CI build number');
-  const build=Number(run);
+  if (!/^[1-9]\d*$/.test(String(counter))) throw new Error('Expected positive file build counter');
+  const build=Number(counter);
   if(!Number.isSafeInteger(build))throw new Error('Build overflow');
   const [major,minor,patch]=logical.split('.').map(Number);
-  // MSI only orders three components. Use the globally increasing CI build
+  // MSI only orders three components. Use the increasing file build counter
   // as native ProductVersion while retaining the public four-part version.
   if([major,minor,patch,build].some(n=>n>65535))throw new Error('Windows native version field exhausted; revise the installer mapping before publishing');
   return {logical,build,display:logical+'.'+build,semver:logical+'+'+build,msi:'1.0.'+build};

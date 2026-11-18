@@ -25,6 +25,8 @@ permissions:
 jobs:
   version:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       logical: ${{ steps.version.outputs.logical }}
       build: ${{ steps.version.outputs.build }}
@@ -41,7 +43,6 @@ jobs:
         env:
           INPUT_VERSION: ${{ inputs.logical_version }}
           REF_NAME: ${{ github.ref_name }}
-          BUILD_NUMBER: ${{ github.run_number }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
           CHANNEL: ${{ inputs.channel || 'release' }}
           PLATFORMS: ${{ inputs.platforms || 'all' }}
@@ -53,11 +54,18 @@ jobs:
           test "$RUN_ATTEMPT" = 1 || { echo "Create a new workflow run to allocate a new Build"; exit 1; }
           node --input-type=module <<'JS'
           import {releaseVersion,releaseMatrix} from './scripts/release.mjs';
+          import {reserveRemoteVersion} from './scripts/build-version.mjs';
           import {appendFileSync} from 'node:fs';
-          const v=releaseVersion(process.env.INPUT_VERSION || process.env.REF_NAME.replace(/^v/,''),process.env.BUILD_NUMBER);
+          const reserved=await reserveRemoteVersion({logicalVersion:process.env.INPUT_VERSION || process.env.REF_NAME.replace(/^v/,'')});
+          const v=releaseVersion(reserved.logicalVersion,reserved.build);
           appendFileSync(process.env.GITHUB_OUTPUT,'logical='+v.logical+'\nbuild='+v.build+'\ndisplay='+v.display+'\nchannel='+process.env.CHANNEL+'\n');
           appendFileSync(process.env.GITHUB_OUTPUT,'platforms='+process.env.PLATFORMS+'\nmatrix='+JSON.stringify(releaseMatrix(process.env.PLATFORMS))+'\n');
           JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tx-build-counter
+          path: build-version.json
+          if-no-files-found: error
   build:
     needs: version
     strategy:
@@ -66,8 +74,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       MACOSX_DEPLOYMENT_TARGET: '13.0'
-      NEARCAST_BUILD_NUMBER: ${{ needs.version.outputs.build }}
-      NEARCAST_LOGICAL_VERSION: ${{ needs.version.outputs.logical }}
+      NEARCAST_BUILD_VERSION: ${{ needs.version.outputs.display }}
       NEARCAST_UPDATE_CHANNEL: ${{ needs.version.outputs.channel }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -90,7 +97,11 @@ jobs:
           workspaces: src-tauri
           key: release-${{ matrix.target }}
           cache-on-failure: true
-      - run: node --test tests/*.test.mjs
+      - run: npm test
+      - uses: actions/download-artifact@v4
+        with:
+          name: tx-build-counter
+          path: .
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml --target ${{ matrix.target }}
         env:
           NEARCAST_UPDATE_CHANNEL: release
@@ -108,7 +119,7 @@ jobs:
           test -n "$APPLE_PASSWORD"
           test -n "$APPLE_TEAM_ID"
       - name: Build update bundles
-        run: node node_modules/@tauri-apps/cli/tauri.js build --config src-tauri/tauri.release.conf.json --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
+        run: node scripts/build.mjs --config src-tauri/tauri.release.conf.json --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
       - name: Name desktop installers
         if: runner.os == 'Windows'
         run: node scripts/name-installers.mjs "src-tauri/target/${{ matrix.target }}/release/bundle"

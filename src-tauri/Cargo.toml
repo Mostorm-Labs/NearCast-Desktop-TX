@@ -1,6 +1,6 @@
 [package]
 name = "nearcast_desktop_tx"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [features]
@@ -13,6 +13,7 @@ name = "nearcast_desktop_tx_lib"
 crate-type = ["cdylib", "rlib"]
 
 [build-dependencies]
+serde_json = "1"
 tauri-build = { version = "2", features = [] }
 cc = "=1.10.0"
 

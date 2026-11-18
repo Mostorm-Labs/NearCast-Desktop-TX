@@ -8,7 +8,7 @@ const server=createServer(async(req,res)=>{try{const path=resolve(root,'.'+new U
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const browser=await chromium.launch({channel:'msedge',headless:true});
 try{
   const page=await browser.newPage();await page.goto('http://127.0.0.1:'+server.address().port+'/touchback/consent-ui.mjs');
-  await page.evaluate(async()=>{document.body.textContent='';const {showInputConsent}=await import('/touchback/consent-ui.mjs');globalThis.promptInput=showInputConsent;globalThis.open=()=>{globalThis.abort=new AbortController();globalThis.result=null;showInputConsent({signal:abort.signal}).then(value=>globalThis.result=value);};open();});
+  await page.evaluate(async()=>{document.body.textContent='';const {i18n}=await import('/i18n.mjs');i18n.setLanguage('zh');const {showInputConsent}=await import('/touchback/consent-ui.mjs');globalThis.promptInput=showInputConsent;globalThis.open=()=>{globalThis.abort=new AbortController();globalThis.result=null;showInputConsent({signal:abort.signal}).then(value=>globalThis.result=value);};open();});
   await page.getByRole('button',{name:'允许反控',exact:true}).click();await page.waitForFunction(()=>result===true);assert.equal(await page.locator('dialog').count(),0);
   await page.evaluate(()=>open());await page.getByRole('button',{name:'拒绝',exact:true}).click();await page.waitForFunction(()=>result===false);
   await page.evaluate(()=>open());await page.evaluate(()=>abort.abort());await page.waitForFunction(()=>result===false);assert.equal(await page.locator('dialog').count(),0);

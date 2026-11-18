@@ -2,7 +2,7 @@
 
 版本和 Mosapi 更新发布契约见 [`AGENTS.md`](AGENTS.md) 与 [`docs/release/version-and-mosapi.md`](docs/release/version-and-mosapi.md)。完整版本使用 `X.Y.Z.Build`，TX 仅发布 Windows 和 macOS：`nearcast-tx-windows`（product-id `646`）与 `nearcast-tx-macos`（product-id `647`）。同一 GitHub Release 提供两平台更新包、签名和版本清单，并提供聚合 ZIP 单链接下载。
 
-应用启动后后台检查正式更新并自动下载，顶部显示“发现新版本/更新已就绪”；每次启动发现更新时弹框，可选择“暂不更新”或在下载校验完成后“立即更新并重启”。安装前会结束投屏和反控。运行期间每 4 小时检查，网络失败不影响投屏；安装包及版本清单均需通过内置公钥验证。发布 workflow、签名 Secret 配置和平台验收限制见上述发布契约。
+应用启动后后台检查正式更新并自动下载，在“Casting Settings → 检查更新”中显示“发现新版本/更新已就绪”；每次启动发现更新时弹框，可选择“暂不更新”或在下载校验完成后“立即更新并重启”。安装前会结束投屏和反控。运行期间每 4 小时检查，网络失败不影响投屏；安装包及版本清单均需通过内置公钥验证。发布 workflow、签名 Secret 配置和平台验收限制见上述发布契约。
 
 当前反控使用 AXTP typed-input R2 开发快照；实现、依赖指纹、恢复步骤和验证限制见 [TI-3 handoff](docs/superpowers/handoffs/2026-11-06-tx-typed-input-ti3.md)。早期 TouchBatch/BIND 联调记录仅供历史追溯。
 
@@ -24,7 +24,7 @@ npm test
 cargo check --manifest-path src-tauri/Cargo.toml
 
 # 构建并启动 Release 发送端（已内置页面）
-node node_modules/@tauri-apps/cli/tauri.js build --no-bundle -- --locked
+node scripts/build.mjs --no-bundle -- --locked
 & ".\src-tauri\target\release\NearHub Cast.exe"
 ```
 
@@ -45,7 +45,7 @@ macOS 界面顶部提供“本地网络”“录屏与系统录音”“辅助�
 
 部分 macOS 版本的本地网络链接会打开“隐私与安全”总页，此时再选择“本地网络”；新版系统可能将“辅助功能”权限显示为“设备控制和数据访问”。
 
-启动后输入接收端显示的 4 位配对码，点击“连接”，待接收端确认后点击“开始分享屏幕”。默认使用 WebView 系统选择器，展示屏幕/窗口预览。视频原始轨道直接交给 WebRTC，不经过 WGC 回读、像素 IPC 或 Canvas。点击“停止分享”会停止媒体轨道但保留连接，点击“断开连接”会关闭 WebRTC/WebSocket 并清理 Touchback 状态。
+启动后输入接收端显示的 4 位配对码，点击“连接”，待接收端确认后点击“开始分享屏幕”。默认使用 WebView 系统选择器，展示屏幕/窗口预览。视频原始轨道直接交给 WebRTC，不经过 WGC 回读、像素 IPC 或 Canvas。点击“停止分享”会停止媒体轨道但保留连接，点击“断开连接”会关闭 WebRTC/WebSocket、清理 Touchback 状态并返回设备选择列表；接收端结束已接受会话时同样返回列表。投屏页底部的 Session Preview 仅展示采集预览。
 
 连接后可以在“Video quality”面板选择采集分辨率、动态码率或固定目标码率。默认使用 1920×1080、30 FPS 上限、固定 12 Mbps，适合先观察桌面文字清晰度。可选分辨率为 Auto、1280×720、1920×1080、2560×1440 和 3840×2160；可选目标码率为 2、4、8、12 和 20 Mbps。配置在下一次开始分享时生效，两种模式都会把选择的数值作为 `maxBitrate` 上限；动态模式允许 WebRTC 根据网络和编码器自适应降码率，固定模式尽量维持选择的目标。采集轨道与 WebRTC 发送均限制到 30 FPS，开始投屏保持主窗口当前状态。屏幕轨道会标记为 `contentHint=detail`，提示编码器优先保留文字和细节。目标码率受网络、接收端和浏览器 H.264 编码器能力影响，不代表每秒流量恒定。
 
@@ -53,17 +53,17 @@ macOS 界面顶部提供“本地网络”“录屏与系统录音”“辅助�
 
 反控采用 `AXTP-TYPED-INPUT-V1` / `input-sample-v1`，固定开发合同为 `0.18.0-dev.feac6fa2a4b9`（尚未发布）。控制通道完成标准 CONTROL 与 Hello/Identify/Identified 握手后，接收端通过 `input.openStream` 请求输入类型集合，发送端按实际软件能力取交集。每包使用完整 Standard Frame、STREAM header、类型字节及 CRC16；不再接受旧 BIND、TouchBatch、wire epoch 或私有文本 RPC。普通输入无应用 ACK，查询和状态变更使用现有 `stream.getState` / `stream.stateChanged`。
 
-发送端投屏页提供“允许接收端反控本机”，默认关闭；接收端也需启用。“输入转换配置”分别选择收到 Touch/Mouse 后的本机输出，默认保持原生类型，不支持的组合会禁用。Windows 原生支持 Touch（最多 10 点）和 Mouse；macOS 原生支持 Mouse，不提供原生 Touch。两端均可将 Touch 配置为 Mouse 点击拖拽、轻点点击／滑动滚动或组合手势；Windows 另可将 Mouse 左键生命周期转换为单点 Touch，此转换不接收右键或滚轮。原生 Mouse 支持移动、拖拽、Shift/Ctrl/Alt/Meta、横纵滚轮和连续滚动；Windows 使用 SendInput，支持左/右/中/后退/前进五键及组合，macOS 使用 CGEventPost，保持单独左/右/中键。两端均拒绝共享同一输出域的重叠手势。Windows 保留已校准副屏的精确物理落点、严格消息字段校验及注入失败前缀状态；释放时同时尝试清理 Touch 和 Mouse，任一清理失败均阻止复用。设置只在本次运行期间保留，应用时先撤销输入来源、释放当前原生 owner，再以新绑定重新协商；清理失败不应用设置，投屏继续。独立键盘和触笔记录不在当前 typed Touch/Mouse 合同内，未新增提权/UIAccess。
+发送端投屏页提供“允许接收端反控本机”，默认关闭；接收端也需启用。当前 UI 隐藏“输入转换配置”，启动时固定使用原生 Touch／Mouse 默认策略，旧保存的自定义转换不自动生效；以下转换能力保留于内部模块供兼容和开发验证使用。Windows 原生支持 Touch（最多 10 点）和 Mouse；macOS 原生支持 Mouse，不提供原生 Touch。两端均可将 Touch 配置为 Mouse 点击拖拽、轻点点击／滑动滚动或组合手势；Windows 另可将 Mouse 左键生命周期转换为单点 Touch，此转换不接收右键或滚轮。原生 Mouse 支持移动、拖拽、Shift/Ctrl/Alt/Meta、横纵滚轮和连续滚动；Windows 使用 SendInput，支持左/右/中/后退/前进五键及组合，macOS 使用 CGEventPost，保持单独左/右/中键。两端均拒绝共享同一输出域的重叠手势。Windows 保留已校准副屏的精确物理落点、严格消息字段校验及注入失败前缀状态；释放时同时尝试清理 Touch 和 Mouse，任一清理失败均阻止复用。内部切换转换策略时先撤销输入来源、释放当前原生 owner，再以新绑定重新协商；清理失败不应用设置，投屏继续。独立键盘和触笔记录不在当前 typed Touch/Mouse 合同内，未新增提权/UIAccess。
 
 Touch→Mouse 点击拖拽在 DOWN 时按下左键、MOVE 时拖动、UP/CANCEL 时释放。Touch→滚动在 DOWN 时只定位，移动超过 6 个本机坐标单位后发送连续滚动；尚未滚动就 UP 才点击，CANCEL 不点击；滚动锚点固定在起点，松手发送结束事件，无惯性，仅支持单点。类型转换位于已认证、校验、坐标映射后的串行原生执行链；线上的 typed input 数据不改写，接收端协商的 inputTypes 描述可接收类型，原生输出类型单独记录。转换后触点仍使用本机 owner、lease 和 ID 池，不恢复已移除的无 owner 注入命令。
 
-“Mouse · 组合手势（滚动 / 拖拽 / 右键 / 缩放）”合并日常操作：单指轻点点击，直接滑动滚动，静止达到拖拽长按阈值后移动才按住左键拖拽，松手释放。拖拽长按默认 300ms，可在 UI 调为 150–1000ms。右键方式可选“单指长按后松手”（默认）或“双指轻点”：默认单指静止 700ms 后松手产生一次右键；右键等待可调，不能短于拖拽等待，UI 自动抬高最小值，策略层拒绝无效组合。达到右键时长后若移动，则进入拖拽而非右键；Cancel 不点击。选择双指方式时，单指静止不触发右键，双指在 350ms 内轻点松开产生一次右键。两种方式互斥；捏合、平移、取消或拖拽中加入第二指均不补右键。捏合按配置输出：Mac 网页缩放使用前台应用的 Command＋/− 快捷键，属于显式兼容策略，不是原生捏合；Ctrl＋滚轮选项适合支持此语义的 Windows 应用，在 Mac 可能触发系统辅助缩放，默认不选。也可关闭缩放。缩放按比例阈值产生有界步数，不做惯性。
+“Mouse · 组合手势（滚动 / 拖拽 / 右键 / 缩放）”合并日常操作：单指轻点点击，直接滑动滚动，静止达到拖拽长按阈值后移动才按住左键拖拽，松手释放。拖拽长按默认 300ms，内部策略支持配置为 150–1000ms。右键方式可选“单指长按后松手”（默认）或“双指轻点”：默认单指静止 700ms 后松手产生一次右键；右键等待可调，不能短于拖拽等待，策略编辑器抬高最小值，策略层拒绝无效组合。达到右键时长后若移动，则进入拖拽而非右键；Cancel 不点击。选择双指方式时，单指静止不触发右键，双指在 350ms 内轻点松开产生一次右键。两种方式互斥；捏合、平移、取消或拖拽中加入第二指均不补右键。捏合按配置输出：Mac 网页缩放使用前台应用的 Command＋/− 快捷键，属于显式兼容策略，不是原生捏合；Ctrl＋滚轮选项适合支持此语义的 Windows 应用，在 Mac 可能触发系统辅助缩放，默认不选。也可关闭缩放。缩放按比例阈值产生有界步数，不做惯性。
 
 合并手势协商最多 2 个 Touch 接触。纯状态机位于 `src/touchback/touch-mouse-gestures.mjs`，显式传入时间与区域，不包含传输或 OS 调用；后续迁移接收端可复用判定规则，再将输出 Mouse 动作编码发送。当前发送端试验版使用到达时钟；最终接收端应使用本地采集时钟并屏蔽重复的兼容鼠标事件。macOS 通过 click-through、不抢焦点的桌面光圈显示拖拽蓄力（青色）、可拖拽并等待右键（绿色外圈＋紫色进度）、松手可右键（紫色旋转圈）、拖拽（蓝色）、双指（紫色双环）、捏合（橙色）。正常松手显示 280ms 旋转淡出确认，右键松手使用紫色；Cancel 不播放点击确认。光圈可关闭，无重复文字提示；IPC 绑定原生 owner/lease，清理时隐藏，停止刷新后自动消失。Windows 已补齐 typed Mouse 和手势转换，捏合可显式选择 Ctrl＋滚轮；Windows 桌面光圈暂未实现。原生 Windows 自测使用自有副屏窗口验证左/右键、拖拽、Ctrl 点击、横纵滚轮及退出清理，真实接收端整链路仍需现场验收。
 
 Windows 分享整个屏幕后，会短暂显示四角随机校验标记，用所选浏览器轨道识别对应的物理屏幕，成功后标记自动消失。主屏、副屏和负坐标均使用 Rust 持有的来源绑定；同分辨率屏幕也不靠尺寸猜测。识别失败时音视频继续，可停止后重新分享；窗口仍仅投屏。视频保持原浏览器轨道，校准只读少量角落像素，不恢复 WGC 视频采集。输出分辨率可等比缩小，输入映射到原始物理坐标。macOS 保留单主屏及辅助功能权限要求。停止、重新选择或显示布局变化时撤销旧输入绑定、释放触点，重新就绪后由接收端开流；拔插屏幕或调整布局后需重新分享。目前不支持旋转屏幕。原生 WGC、缩略图、持续窗口边框及其 IPC 命令已经删除。架构边界见 [浏览器采集架构](docs/architecture/browser-capture.md)。
 
-展开“反控收包诊断”或调用 `globalThis.__nearcastTouchbackDiagnostics()`，可查看 `appReady`、`sourceReady`、`nativeReady`、软件输入类型、streamId、本地 generation、队列、清理状态和错误。`outputPolicy` 记录配置；`nativeInput.lastConversion` 记录收到的类型、输出类型及产生的动作数，`nativeInput.lastSubmission` 记录系统确认的输出类型/API。`receiverEnabled` 为 null，接收端的 effectiveEnabled/lifecycleState 需在接收端查询；RPC 成功本身不证明原生输入生效。诊断不包含配对码或 native lease。typed 合同见 [TI-3 handoff](docs/superpowers/handoffs/2026-11-06-tx-typed-input-ti3.md)，该历史交接中的“仅 native、无转换”限制已由上述显式配置扩展。
+反控诊断 UI 和 General 的导出诊断行已隐藏／移除；Feedback 可收集诊断包，开发调试也可调用 `globalThis.__nearcastTouchbackDiagnostics()`，可查看 `appReady`、`sourceReady`、`nativeReady`、软件输入类型、streamId、本地 generation、队列、清理状态和错误。`outputPolicy` 记录配置；`nativeInput.lastConversion` 记录收到的类型、输出类型及产生的动作数，`nativeInput.lastSubmission` 记录系统确认的输出类型/API。`receiverEnabled` 为 null，接收端的 effectiveEnabled/lifecycleState 需在接收端查询；RPC 成功本身不证明原生输入生效。诊断不包含配对码或 native lease。typed 合同见 [TI-3 handoff](docs/superpowers/handoffs/2026-11-06-tx-typed-input-ti3.md)，该历史交接中的“仅 native、无转换”限制已由上述显式配置扩展。
 
 WebSocket 地址默认为 `wss://cast.nearhub.us`，也可以通过 Tauri 页面 URL 的 `?ws=` 参数覆盖，例如 `?ws=wss%3A%2F%2Flocalhost%3A8888`。
 
@@ -75,15 +75,15 @@ Tauri 原生仅浏览 `_nearcast._tcp.local.`，设备列表只展示 NearCast �
 
 原生 DNS-SD 缓存以 ServiceResolved/ServiceRemoved 跟踪在线状态，每 15 秒向界面发送完整快照，界面桥接租约为 45 秒；不会因为未变化的 TXT `ttl=60` 就移除仍在线的设备。请求目标来自 SRV 端口及该目标的 A/AAAA 地址，TXT endpoint 不决定连接主机或端口。
 
-首次选择 NearCast 后，原生端只进行 TLS 握手观察公钥，不发送 HTTP；随后用该公钥的精确校验连接 POST 固定 `/nearcast/trust-display`。请求仅含 `type/version/deviceId/requestId`，不会携带配对码或 reason。接收端显示自己的完整指纹 60 秒；发送端同时显示四行共 64 位大写十六进制 SHA256(DER SubjectPublicKeyInfo)。现场用户逐组核对、勾选并点击“确认并信任设备”后，才按精确 deviceId 保存公钥。信任保存在应用数据目录 `trusted-devices-v1.json`，使用原子替换；不修改 Windows 证书库。界面支持撤销信任。
+选择 NearCast 后，发送端自动建立设备连接身份：原生端从当前选中服务的 SRV/A/AAAA 地址进行 TLS 握手观察公钥，首次连接按精确 deviceId 保存 SPKI pin，后续选择验证已保存的 pin。此步骤不发送 HTTP、不请求显示指纹，不读取配对码。设备记录保存在应用数据目录 `trusted-devices-v1.json`，使用原子替换；不修改系统证书库。发送端隐藏指纹确认及信任操作区，输码页右上角只显示设备名称，Back 返回列表并取消本次选择及待完成请求。旧手工核对原生接口仍保留兼容。
 
-保存信任后才会通过 Rust rustls 桥接 POST `/nearcast/code-display`，reason 为 `sender-device-selected`；TLS 握手必须先通过已保存 SPKI 校验，才发送 HTTP。公钥变化会阻止显示码并要求重新现场核对，同一公钥续签或换 IP 不会丢失信任。只接收 `shown`、`unavailable`、`rate_limited`、`not_supported`，从不读取响应或 TXT 中的配对码。随后仍需现场读取并手动输入四位码；信任不会加入房间、授权媒体或 Touchback，也不会通过 WebSocket 回退请求。
+自动建立设备身份后，通过 Rust rustls 桥接 POST `/nearcast/code-display` 请求接收端显示所选连接方式的码，reason 为 `sender-device-selected`；TLS 握手必须先通过已保存 SPKI 校验，才发送 HTTP。公钥变化会阻止显示码并在输码页显示连接错误，同一公钥续签或换 IP 不会丢失记录。只接收 `shown`、`unavailable`、`rate_limited`、`not_supported`，从不读取响应或 TXT 中的配对码。随后仍需现场读取并手动输入四位码；设备身份建立不会加入房间、授权媒体或 Touchback，也不会通过 WebSocket 回退请求。
 
 “局域网投屏”默认开启：选择支持的新 RX，现场输入它显示的本地配对码，原生桥接连接该设备的本地 WSS，双方不配置公网 STUN/TURN。关闭开关后，下次连接使用原有云端协商与云端码；两种模式不自动回退。旧 RX 可手动选择云端模式。mDNS 仅提供 local/cloud 就绪提示，实际放码请求重新检查所选服务和运行标识，连接验证已保存的设备公钥。详见 [本地信令](docs/architecture/local-signaling.md)。
 
-这两个固定 HTTPS 操作直接连接已发现地址，不使用代理、重定向、Cookie 或环境认证，限制请求为 1 KiB、响应为 4 KiB，并设置网络时限。mDNS 不能自动建立信任。指纹缺失、核对过期、信任文件损坏或保存失败时仍可现场输入配对码。已保存的设备信任只用于这两个原生 HTTPS 操作；本地 WSS 仍由 WebView2 验证证书，不能用此信任绕过它。
+固定 HTTPS 操作直接连接已发现地址，不使用代理、重定向、Cookie 或环境认证，限制请求为 1 KiB、响应为 4 KiB，并设置网络时限。mDNS 仅提供已发现服务的地址和设备标识，公钥由实际 TLS 握手获取。服务更换或取消会使旧配对结果失效；信任文件损坏或保存失败不显示成功。本地 WSS 也通过原生 Rust 桥接并验证同一已保存 SPKI pin。云端模式仍可不选设备直接现场输码。
 
-`src` 协议模块与 `dist` 运行模块需同步；`dist/tauri-device-discovery.mjs` 的导入必须指向 `./discovery-devices.mjs`。运行 `cargo build --manifest-path src-tauri/Cargo.toml` 会把当前 `dist` 打入 Debug EXE。
+`src` 协议模块与 `dist` 运行模块需同步；`dist/tauri-device-discovery.mjs` 的导入必须指向 `./discovery-devices.mjs`。应用构建使用 `node scripts/build.mjs --debug --no-bundle -- --locked` 或 `npm run build:macos`。每次读取 `build-version.json` 后将 Build 加一写回，失败也保留次数；检查和测试只读取当前编号。裸 Cargo 只用于检查／测试，不作为分配新版本的应用构建入口。Windows PowerShell 建议直接调用 Node 脚本，避免 npm.ps1 丢弃带 `--` 的选项。
 
 当前验证包含真实 TLS 自签名测试、66 秒以上真实 mDNS 广播/撤回测试和模拟原生边界的 Edge UI 测试；尚未完成现场用户指纹核对、真实屏幕选择器、发送端到接收端的 WebRTC / Touchback 整链路验收。
 
@@ -93,9 +93,9 @@ Tauri 原生仅浏览 `_nearcast._tcp.local.`，设备列表只展示 NearCast �
 
 ## 打包与跨平台验证
 
-左上角“设置”打开独立设置页，包含画质、码率、系统声音、反控与输入转换、检查更新及 Feedback。设置保存在本机；打开设置不会中断投屏。Feedback 在用户同意后打包诊断并向 Mosapi 提交，应用关联为 Windows `application.connect.id=39` / macOS `=40`，与更新的 product-id 区分。实现与验证边界见 [设置与反馈](docs/architecture/settings-and-feedback.md)，Windows CI 与在线更新验收见 [发布约定](docs/release/version-and-mosapi.md)。
+每次启动先进入设备列表。默认窗口为 946 × 692，与确认的截图尺寸一致。设置入口打开独立设置页，包含语言、画质、码率、系统声音、反控、检查更新及 Feedback。界面支持中英日德四种语言，默认跟随系统，在 General 中即时切换并保存。输入转换配置隐藏并固定采用原生 Touch／Mouse 默认策略。设置保存在本机；打开设置不会中断投屏。Feedback 默认勾选上传同意，用户主动提交后才打包诊断并向 Mosapi 提交，应用关联为 Windows `application.connect.id=39` / macOS `=40`，与更新的 product-id 区分。实现与验证边界见 [设置与反馈](docs/architecture/settings-and-feedback.md)，Windows CI 与在线更新验收见 [发布约定](docs/release/version-and-mosapi.md)。
 
-Windows 仅构建 x64。日志写入 Tauri 应用日志目录，最多三个 1 MiB JSONL 文件轮转；每 30 秒采集一次数值性能指标及会话状态，不记录配对码、SDP/ICE 或音视频内容。底部“导出诊断”生成本机 JSON 报告，最多保留五份。系统声音仍为独立 WASAPI 采集，不采集麦克风；更新签名验证与 mDNS 发现保持。
+Windows 仅构建 x64。日志写入 Tauri 应用日志目录，最多三个 1 MiB JSONL 文件轮转；每 30 秒采集一次数值性能指标及会话状态，不记录配对码、SDP/ICE 或音视频内容。General 底部的平台／WebView 信息及“导出诊断”功能行已移除；Feedback 仍可收集诊断包。系统声音仍为独立 WASAPI 采集，不采集麦克风；更新签名验证与 mDNS 发现保持。
 
 Release 使用速度优化等级 3、ThinLTO、单编译单元及符号裁剪。Windows updater 仅处理当前 NSIS/MSI 原始包，移除旧 ZIP 更新包兼容；macOS updater 仍保留 `.app.tar.gz` 支持。WGC、窗口缩略图和原生边框源码已删除；Windows Mouse 通过受 owner/lease 保护的 typed 原生输入层执行，旧无 owner 注入命令保持移除。
 

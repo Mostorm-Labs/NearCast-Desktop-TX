@@ -2,8 +2,8 @@
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {createServer} from 'node:http';
-import {readFile} from 'node:fs/promises';
-import {resolve, sep} from 'node:path';
+import {readFile,mkdir} from 'node:fs/promises';
+import {resolve,sep,join} from 'node:path';
 
 const require = createRequire(import.meta.url);
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -14,7 +14,7 @@ const server = createServer(async (request, response) => {
     const path = resolve(root, '.' + (pathname === '/' ? '/index.html' : pathname));
     if (!path.startsWith(root + sep)) { response.writeHead(403).end(); return; }
     const body = await readFile(path);
-    response.setHeader('content-type', path.endsWith('.mjs') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : path.endsWith('.webp') ? 'image/webp' : 'text/html');
+    response.setHeader('content-type', path.endsWith('.mjs') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : path.endsWith('.svg') ? 'image/svg+xml' : path.endsWith('.png') ? 'image/png' : path.endsWith('.webp') ? 'image/webp' : 'text/html');
     response.end(body);
   } catch { response.writeHead(404).end(); }
 });
@@ -27,13 +27,30 @@ for (;;) {
 let browser;
 try {
   browser = await chromium.launch({channel: process.env.BROWSER_CHANNEL || 'msedge', headless: true});
-  const page = await browser.newPage({viewport:{width:960,height:640}});
+  const page = await browser.newPage({viewport:{width:960,height:640},locale:'zh-CN'});
+  const screenshot=async name=>{
+    if(!process.env.NEARCAST_UI_ARTIFACTS)return;
+    await mkdir(process.env.NEARCAST_UI_ARTIFACTS,{recursive:true});
+    const viewport=page.viewportSize();await page.setViewportSize({width:960,height:627});
+    await page.screenshot({path:join(process.env.NEARCAST_UI_ARTIFACTS,name+'.png'),fullPage:name==='session-capture-preview'});
+    await page.setViewportSize(viewport);
+  };
+  const checkCastingAssets=async()=>{
+    const assets=await page.locator('#casting-view img:visible').evaluateAll(images=>images.map(image=>({
+      src:image.getAttribute('src'),loaded:image.complete&&image.naturalWidth>0,width:image.getBoundingClientRect().width,height:image.getBoundingClientRect().height,
+    })));
+    assert.equal(assets.length,3,'two switches and their divider are the casting-card image slots');
+    assert.ok(assets.every(asset=>asset.loaded),JSON.stringify(assets));
+    assert.ok(assets.filter(asset=>asset.src.includes('switch')).every(asset=>asset.width===74&&asset.height===48),'switch SVGs retain their natural dimensions around the 54 × 28 control');
+    assert.ok(assets.find(asset=>asset.src.includes('divider')).width===560);
+  };
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   const pcmFixture=process.env.NEARCAST_AUDIO_PCM_FIXTURE?[...await readFile(process.env.NEARCAST_AUDIO_PCM_FIXTURE)]:null;
   await page.addInitScript(({pcmFixture}) => {
     globalThis.testReceiver = {signals: [], receivedTracks: [], frames: 0, mode: 'capture',sourceMessages:[],inputRpcId:100,discoveryListeners:{}};
     const state = globalThis.testReceiver;
+    state.receiverMaster=true;state.receiverSupportsInput=true;state.inputQueries=[];
     // This legacy/cloud interoperability case explicitly selects cloud mode.
     localStorage.setItem('nearhub-cast-settings-v1',JSON.stringify({localSignaling:false}));
     const receiver = new RTCPeerConnection({iceServers: []});
@@ -98,7 +115,14 @@ try {
           if(frame.payloadType===2){
             const message=JSON.parse(new TextDecoder().decode(frame.payload.subarray(1)));
             if(message.op===0)inputChannel.send(frameCodec.encodeStandardFrame(sessionCodec.rpcPayload({sid:'',op:2,d:{randomSeed:123,eventMasks:'050101'}}),{payloadType:2}));
-            if(message.op===3){state.inputReady=true;state.inputSid=message.sid;inputChannel.send(JSON.stringify({action:'nearcast-input-target',data:{version:1,contractFingerprint:'feac6fa2a4b9c927708c077746166259ffeb7d5f06dc6972b29f1fc30954c2d0',runtimeInstanceId:'rx-runtime-1',target:{sessionId:'share-1',sessionGeneration:'1',slotId:'0',bindingGeneration:'1',lifecycleGeneration:'1'}}}));}
+            if(message.op===3){state.inputReady=true;state.inputSid=message.sid;inputChannel.send(JSON.stringify({action:'nearcast-input-target',data:{version:1,contractFingerprint:'0082a3428b1e8038e74c2883ab4372cf2169c7b3c1c9407d41eeb70f87b324e8',runtimeInstanceId:'rx-runtime-1',target:{sessionId:'share-1',sessionGeneration:'1',slotId:'0',bindingGeneration:'1',lifecycleGeneration:'1'}}}));}
+            if(message.op===7&&['cast.getControlCapabilities','cast.getTouchbackState'].includes(message.d.method)){
+              state.inputQueries.push(message.d.method);
+              const result=message.d.method==='cast.getControlCapabilities'
+                ?{runtimeInstanceId:'rx-runtime-1',supportedControlVersions:[1],methods:state.receiverSupportsInput?['cast.getControlCapabilities','cast.getTouchbackState','cast.setTouchbackEnabled']:['cast.getControlCapabilities'],events:[],touchback:{inputTypes:state.receiverSupportsInput?['touch','mouse']:[],formats:['input-sample-v1'],protocols:['webcast','hid'],supportsControlPlane:true}}
+                :{target:message.d.params.target,receiverOptIn:false,controllerRequested:false,effectiveEnabled:false,acceptedInputTypes:[],lifecycleState:'inactive',resolutionPreference:'inherit',resolutionState:'inherit',canvasRevision:'1',geometryRevision:'1',revision:'0',diagnosticReason:state.receiverMaster?'RECEIVER_OPT_IN_REQUIRED':'RECEIVER_INPUT_DISABLED'};
+              inputChannel.send(frameCodec.encodeStandardFrame(sessionCodec.rpcPayload({sid:state.inputSid,op:8,d:{id:message.d.id,status:{ok:true,code:0},result}}),{payloadType:2}));
+            }
             if(message.op===7&&message.d.method==='cast.setTouchbackEnabled'){
               (state.senderControlRequests??=[]).push(message.d.params);
               inputChannel.send(frameCodec.encodeStandardFrame(sessionCodec.rpcPayload({sid:state.inputSid,op:8,d:{id:message.d.id,status:{ok:true,code:0},result:{controllerRequested:message.d.params.enabled}}}),{payloadType:2}));
@@ -136,6 +160,7 @@ try {
         const message = JSON.parse(text);
         if (message.type === 'join') {
           state.joinCode = message.pairCode;
+          if(state.rejectJoins)return;
           setTimeout(() => this.receive({type: 'joined', roomId: 'room-1', userId: 'sender-1', hostUserId: 'host-1'}), 50);
         } else if (['offer', 'ice-candidate'].includes(message.type)) {
           // This is the same routing contract enforced by NearCast.
@@ -146,6 +171,8 @@ try {
       close() { this.readyState = 3; this.onclose?.({code: 1000}); }
     };
     const CloudSocket=globalThis.WebSocket;
+    state.endSession=()=>socket.receive({type:'room_closed',roomId:'room-1'});
+    state.rejectPairing=()=>socket.receive({type:'join_failed',reason:'配对码已过期'});
     state.useNativeSignal=false;
     globalThis.WebSocket=new Proxy(CloudSocket,{construct(target,args){state.cloudSocketCount=(state.cloudSocketCount??0)+1;return Reflect.construct(target,args);}});
     // Only capture is substituted. SDP, ICE, DTLS, SCTP and RTP use Edge.
@@ -172,7 +199,7 @@ try {
     }});
     let audioCaptureId=null,audioSequence=0,audioPosition=0;
     globalThis.__TAURI__ = {core: {invoke: async (command,args={}) => {
-      if(command==='nearcast_trust_status')return{trusted:true,deviceId:args.deviceId,fingerprint:'A'.repeat(64)};
+      if(command==='nearcast_trust_pair')return{trusted:true,deviceId:args.deviceId,fingerprint:'A'.repeat(64)};
       if(command==='nearcast_code_display')return{type:'nearcast.code_display.result',version:args.request.version,requestId:args.request.requestId,deviceId:args.request.deviceId,
         backend:args.request.backend,runtimeInstanceId:args.request.runtimeInstanceId,status:'shown'};
       if(command==='nearcast_local_signal_open'){
@@ -254,13 +281,14 @@ try {
   });
   assert.equal(await page.locator('.device-row').count(),1);
   assert.equal(await page.locator('.device-name').textContent(),'Test NearCast Board');
-  assert.deepEqual(await page.locator('.group-title').allTextContents(),['NEARCAST RECEIVERS']);
-  assert.match(await page.locator('#device-status').textContent(),/^1 device found/);
+  assert.match(await page.locator('#device-status').textContent(),/1/);
+  assert.equal(await page.locator('#pair-form').isVisible(),false);
+  await page.locator('#connect-tab-code').click();
   assert.equal(await page.locator('#pair-form').isVisible(),true);
   await page.locator('#connect-tab-devices').click();
   assert.equal(await page.locator('#pair-form').isVisible(),false);
   await page.locator('.device-row.selectable').click();
-  assert.equal(await page.locator('#connect-tab-code').getAttribute('aria-selected'),'true');
+  assert.equal(await page.locator('#connect-tab-code').getAttribute('aria-pressed'),'true');
   assert.equal(await page.locator('#pair-device-name').textContent(),'Test NearCast Board');
   await page.locator('.code-digit').first().evaluate(input=>{
     input.dispatchEvent(new CompositionEvent('compositionstart',{data:''}));
@@ -273,7 +301,6 @@ try {
   await page.locator('#connect-tab-devices').click();
   await page.locator('#connect-tab-code').click();
   assert.equal(await page.locator('#pair-form').isVisible(),true);
-  await page.locator('#pair-clear-device').click();
   assert.equal(await page.locator('#pair-device-name').isVisible(),false);
   await page.locator('#connect-tab-devices').click();
   await page.locator('.device-row.selectable').click();
@@ -282,14 +309,45 @@ try {
   await page.locator('#connect-button').click();
   await page.waitForFunction(() => testReceiver.releaseAnswer || testReceiver.error);
   assert.equal(await page.locator('#casting-view').isVisible(), true);
+  assert.equal(await page.locator('#casting-input-enabled').count(),1,'connected card exposes the real remote-control preference');
+  assert.equal(await page.locator('#casting-input-enabled').isDisabled(),true,'remote control waits for authenticated RX capability and policy');
+  await page.locator('#casting-system-audio-enabled').uncheck();
+  assert.equal(await page.locator('#system-audio-enabled').isChecked(),false);
+  await page.locator('#casting-system-audio-enabled').check();
   assert.equal(await page.locator('#input-enabled').isChecked(), false);
   assert.equal(await page.locator('#share-button').isDisabled(), true, 'sharing waits for the control connection');
   await page.evaluate(() => testReceiver.releaseAnswer());
   await page.waitForFunction(() => testReceiver.channelOpen || testReceiver.error);
   assert.equal(await page.evaluate(() => testReceiver.error), undefined);
+  await page.waitForFunction(()=>!document.querySelector('#share-button').disabled);
+  await page.waitForFunction(()=>!document.querySelector('#casting-input-enabled').disabled);
+  await page.locator('#casting-input-enabled').check();
+  assert.equal(await page.locator('#input-enabled').isChecked(),true);
+  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('nearhub-cast-settings-v1')).inputEnabled),true);
+  await page.evaluate(()=>{testReceiver.receiverMaster=false;});
+  await page.waitForFunction(()=>document.querySelector('#casting-input-enabled').disabled);
+  assert.equal(await page.locator('#casting-input-enabled').isChecked(),false,'RX master-off is visibly unavailable even when local opt-in is saved');
+  assert.equal(await page.locator('#input-enabled').isChecked(),true,'receiver policy must not overwrite local preference');
+  assert.equal(await page.locator('#input-request-control').isDisabled(),true,'the alternate enable action obeys receiver policy');
+  await screenshot('casting-remote-disabled');
+  await page.evaluate(()=>{testReceiver.receiverMaster=true;});
+  await page.waitForFunction(()=>!document.querySelector('#casting-input-enabled').disabled);
+  assert.equal(await page.locator('#casting-input-enabled').isChecked(),true);
+  assert.equal(await page.evaluate(()=>testReceiver.senderControlRequests?.length??0),0,'master recovery never sends enable intent');
+  await page.locator('#casting-input-enabled').uncheck();
+  await page.locator('#casting-system-audio-enabled').uncheck();
+  await checkCastingAssets();
+  await screenshot('casting-ready');
+  await page.locator('#session-details > summary').click();
+  assert.equal(await page.locator('#preview-empty').isVisible(),true,'session preview explains that sharing has not started');
+  assert.equal(await page.locator('#input-request-control').isVisible(),false,'remote-control diagnostic actions stay hidden');
+  assert.equal(await page.locator('.touchback-diagnostics').isVisible(),false);
+  await page.locator('#session-details > summary').click();
+  await page.locator('#casting-system-audio-enabled').check();
   await page.evaluate(() => { testReceiver.mode = 'cancel'; });
   await share(true);
   assert.equal(await page.locator('#casting-view').isVisible(), true);
+  assert.equal(await page.locator('#casting-system-audio-enabled').isEnabled(),true,'cancelled selection restores the audio preference');
   await page.locator('#cast-error').waitFor({state:'visible'});
   assert.equal(await page.locator('#cast-error').isVisible(), true);
   assert.equal(await page.evaluate(()=>testReceiver.windowActions?.includes('minimize')??false),false);
@@ -297,7 +355,17 @@ try {
   await share(false);
   await page.waitForFunction(() => testReceiver.frames > 0 || testReceiver.error);
   assert.equal(await page.evaluate(() => testReceiver.error), undefined);
+  assert.equal(await page.locator('#casting-system-audio-enabled').isDisabled(),true,'capture owns audio selection until sharing stops');
+  assert.equal(await page.locator('#casting-system-audio-enabled').isChecked(),true);
+  assert.equal(await page.locator('#share-button').isVisible(),false);
+  assert.equal(await page.locator('#stop-share-button').isVisible(),true);
+  await page.locator('#session-details > summary').click();
   assert.equal(await page.locator('#preview-wrap').isVisible(), true);
+  assert.equal(await page.locator('#preview-empty').isVisible(),false);
+  assert.equal(await page.locator('#input-reconnect').isVisible(),false);
+  assert.equal(await page.locator('#touchback-status').isVisible(),false);
+  assert.doesNotMatch(await page.locator('#session-details').innerText(),/反控|诊断/,'expanded Session contains only the capture preview');
+  await screenshot('session-capture-preview');
   await page.waitForFunction(async()=>[...await testReceiver.receiverPeer.getStats()].some(([,row])=>row.type==='inbound-rtp'&&row.kind==='audio'&&row.totalAudioEnergy>0.00001));
   assert.equal(await page.evaluate(()=>testReceiver.browserPickerCalls),2,'one picker for cancellation and one successful selection');
   assert.equal(await page.evaluate(()=>testReceiver.captureOptions.audio),false,'Windows audio must not open another display picker');
@@ -310,22 +378,27 @@ try {
   assert.equal(await page.evaluate(()=>testReceiver.windowActions?.includes('minimize')??false),false,'sharing must keep the sender window visible');
   assert.equal(await page.evaluate(()=>testReceiver.senderPeer.getSenders().find(s=>s.track?.kind==='video').getParameters().encodings[0].maxFramerate),30);
   const settingsFrames=await page.evaluate(()=>testReceiver.frames);
-  await page.locator('#settings-open').click();
+  await page.locator('#settings-shortcut').click();
+  await page.locator('[data-settings-tab=general]').click();
   assert.equal(await page.locator('#settings-general').isVisible(),true);
   if(process.env.SETTINGS_SCREENSHOT)await page.screenshot({path:process.env.SETTINGS_SCREENSHOT,fullPage:true});
   assert.equal(await page.locator('#casting-view').isVisible(),false);
   await page.locator('#video-resolution').selectOption('1280x720');
   await page.locator('#video-bitrate-mode').selectOption('dynamic');
   await page.locator('#video-bitrate').selectOption('8000');
+  await page.locator('#system-audio-enabled').uncheck();
   await page.waitForFunction(n=>testReceiver.frames>n+3,settingsFrames);
   assert.equal(await page.evaluate(()=>testReceiver.browserVideoTrack.readyState),'live');
   await page.locator('#settings-close').click();
   assert.equal(await page.locator('#casting-view').isVisible(),true);
+  assert.equal(await page.locator('#casting-system-audio-enabled').isChecked(),true,'live audio status stays separate from the next-session preference');
+  assert.equal(await page.locator('#casting-system-audio-enabled').isDisabled(),true);
   assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('nearhub-cast-settings-v1')).video.resolution),'1280x720');
-  await page.locator('#settings-open').click();
+  await page.locator('#settings-shortcut').click();
   await page.locator('#video-resolution').selectOption('1920x1080');
   await page.locator('#video-bitrate-mode').selectOption('fixed');
   await page.locator('#video-bitrate').selectOption('12000');
+  await page.locator('#system-audio-enabled').check();
   await page.locator('#settings-close').click();
   // Browser's native Stop sharing button emits ended on the display track.
   await page.evaluate(()=>testReceiver.browserVideoTrack.dispatchEvent(new Event('ended')));
@@ -333,6 +406,7 @@ try {
   assert.equal(await page.evaluate(()=>testReceiver.windowActions?.some(kind=>kind==='show'||kind==='minimize')??false),false,'stopping capture must preserve manual window state');
   await page.waitForFunction(()=>testReceiver.shareStates.at(-1).sharing===false);
   assert.equal(await page.evaluate(()=>testReceiver.receiverPeer.connectionState),'connected');
+  assert.equal(await page.locator('#casting-system-audio-enabled').isEnabled(),true);
   const beforeRestart = await page.evaluate(() => testReceiver.frames);
   await share(false);
   await page.waitForFunction(() => testReceiver.signals.filter(x => x.type === 'offer').length >= 3);
@@ -345,9 +419,21 @@ try {
     const audio=[...stats.values()].find(r=>r.type==='outbound-rtp'&&r.kind==='audio');
     return stats.get(audio.codecId).mimeType.toLowerCase();
   }),'audio/opus');
-  await page.evaluate(()=>{testReceiver.armInput=true;});await page.locator('#input-enabled').evaluate(el=>{el.checked=true;el.dispatchEvent(new Event('change'));});
+  await page.evaluate(()=>{testReceiver.armInput=true;});await page.locator('#casting-input-enabled').check();
   await page.waitForFunction(()=>testReceiver.inputActive||testReceiver.error);
   assert.equal(await page.evaluate(()=>testReceiver.error),undefined);
+  await page.locator('#session-details > summary').click();
+  await checkCastingAssets();
+  await screenshot('casting-sharing');
+  await page.setViewportSize({width:360,height:480});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'compact casting does not overflow a narrow window');
+  await page.locator('#leave-button').scrollIntoViewIfNeeded();
+  assert.equal(await page.locator('#leave-button').isVisible(),true,'leave stays reachable in a short window');
+  await page.setViewportSize({width:960,height:640});
+  const compactFrames=await page.evaluate(()=>testReceiver.frames);
+  await page.waitForFunction(n=>testReceiver.frames>n+3,compactFrames);
+  assert.equal(await page.evaluate(()=>testReceiver.browserVideoTrack.readyState),'live','collapsing preview keeps the original video live');
+  await page.locator('#session-details > summary').click();
   await page.evaluate(async()=>{
     const {encodeInputFrame}=await import('/touchback/typed-codec.mjs');
     testReceiver.sendSample=(seqId,phase)=>testReceiver.sendInputBytes(encodeInputFrame({
@@ -478,32 +564,63 @@ try {
   await page.evaluate(()=>testReceiver.sendSample(1,0));await page.waitForFunction(()=>__nearcastTouchbackDiagnostics().submittedSeqId===1);
   await page.evaluate(()=>testReceiver.sendSample(2,2));await page.waitForFunction(()=>__nearcastTouchbackDiagnostics().submittedSeqId===2);
   assert.deepEqual(errors,[]);
-  await page.evaluate(()=>testReceiver.sendMalformedInput());
+  await page.evaluate(()=>{testReceiver.receiverSupportsInput=false;testReceiver.sendMalformedInput();});
   await page.waitForFunction(()=>!document.querySelector('#input-reconnect').disabled);
   const beforeFault=await page.evaluate(()=>testReceiver.frames);
   await page.waitForFunction(n=>testReceiver.frames>n+2,beforeFault);
-  await page.locator('#input-reconnect').click();
+  await page.locator('#input-reconnect').evaluate(button=>button.click());
   await page.waitForFunction(()=>testReceiver.channelCount===2&&__nearcastTouchbackDiagnostics()?.appReady);
+  await page.waitForFunction(()=>__nearcastTouchbackDiagnostics()?.receiverSupported===false);
+  assert.equal(await page.locator('#casting-input-enabled').isDisabled(),true,'RX without input capability cannot toggle remote control');
   await page.locator('#leave-button').click();
   await page.waitForFunction(()=>!document.querySelector('#code-view').hidden);
+  assert.equal(await page.locator('#connect-panel-devices').isVisible(),true,'Leave receiver returns to device selection');
+  assert.deepEqual(await page.locator('.code-digit').evaluateAll(inputs=>inputs.map(input=>input.value)),['','','','']);
+  assert.equal(await page.locator('#pair-device-name').isVisible(),false);
   await page.waitForFunction(()=>testReceiver.audioStops===testReceiver.audioStarts);
   assert.equal(await page.evaluate(()=>document.querySelector('#preview').srcObject),null);
-  await page.locator('#export-diagnostics').click();
-  await page.waitForFunction(()=>document.querySelector('#diagnostics-export-status').textContent.includes('nearcast-diagnostics-test.json'));
+  await page.locator('#settings-open').click();
+  assert.equal(await page.locator('#export-diagnostics').count(),0);
+  await page.locator('#settings-close').click();
   assert.ok((await page.evaluate(()=>testReceiver.logSamples)).every(row=>Object.keys(row).every(key=>['event','status','metrics','scroll','video'].includes(key))));
   assert.ok((await page.evaluate(()=>testReceiver.logSamples)).some(row=>row.video?.sourceFramesPerSecond>0&&row.video?.codec==='h264'),'actual WebRTC source and codec statistics persist');
   assert.ok((await page.evaluate(()=>testReceiver.logSamples)).some(row=>row.scroll?.detent120.received.samples>0),'wheel totals persist before stop or export');
   assert.deepEqual(errors,[]);
   await page.reload();
   await page.waitForFunction(()=>testReceiver.discoveryServices);
+  await page.locator('#connect-tab-code').click();
   await page.locator('.code-digit').first().focus();await page.keyboard.type('1234');
   await page.locator('#connect-button').click();
   await page.waitForFunction(()=>testReceiver.releaseAnswer);
   await page.evaluate(()=>testReceiver.releaseAnswer());
   await page.waitForFunction(()=>testReceiver.channelOpen&&!document.querySelector('#share-button').disabled);
   assert.equal(await page.locator('#target-name').textContent(),'NearCast');
+  await page.locator('#settings-shortcut').click();
+  await page.evaluate(()=>testReceiver.endSession());
+  await page.waitForFunction(()=>document.querySelector('#casting-view').dataset.status==='idle');
+  assert.equal(await page.locator('#settings-view').isVisible(),true,'remote disconnection preserves an open Settings page');
+  await page.locator('#settings-close').click();
+  assert.equal(await page.locator('#connect-panel-devices').isVisible(),true,'remote room closure returns to the device list');
+  assert.equal(await page.locator('#code-error').isVisible(),true,'the receiver disconnect reason remains visible');
+  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('nearhub-cast-settings-v1')).localSignaling),false,'returning to devices preserves the cloud preference');
+  // Leave must also work after room admission while media negotiation is pending.
+  await page.reload();await page.waitForFunction(()=>testReceiver.discoveryServices);
+  await page.locator('#connect-tab-code').click();
+  await page.locator('.code-digit').first().focus();await page.keyboard.type('1234');await page.locator('#connect-button').click();
+  await page.waitForFunction(()=>testReceiver.releaseAnswer);
+  assert.equal(await page.locator('#share-button').isDisabled(),true);
   await page.locator('#leave-button').click();
-  await page.waitForFunction(()=>!document.querySelector('#code-view').hidden);
+  assert.equal(await page.locator('#connect-panel-devices').isVisible(),true,'leaving during negotiation returns to devices');
+  await page.locator('#connect-tab-code').click();
+  assert.equal(await page.locator('#code-error').isVisible(),false);
+  // A rejected code has no accepted session: leave the code editable for retry.
+  await page.evaluate(()=>{testReceiver.rejectJoins=true;});
+  await page.locator('.code-digit').first().focus();await page.keyboard.type('ABCD');
+  await page.locator('#connect-button').click();await page.waitForFunction(()=>testReceiver.joinCode==='ABCD');
+  await page.evaluate(()=>testReceiver.rejectPairing());
+  await page.waitForFunction(()=>!document.querySelector('#connect-button').disabled&&!document.querySelector('#code-error').hidden);
+  assert.equal(await page.locator('#connect-panel-code').isVisible(),true,'an invalid code stays on the pairing page');
+  assert.deepEqual(await page.locator('.code-digit').evaluateAll(inputs=>inputs.map(input=>input.value)),['A','B','C','D']);
   // A fresh fixture receiver owns the new native-signaling connection.
   await page.reload();await page.waitForFunction(()=>testReceiver.discoveryServices);
   const cloudBefore=await page.evaluate(()=>testReceiver.cloudSocketCount??0);
@@ -511,18 +628,25 @@ try {
     testReceiver.discoveryListeners['nearcast://mdns-service']({payload:{serviceType:'_nearcast._tcp.local.',instance:'Local._nearcast._tcp.local.',hostname:'local-board.local.',port:78,addresses:['192.0.2.42'],
       txt:{id:'local-board',display:'Local fixture',capability:'webcast,code-display-v1,trust-display-v1,code-display-v2,signaling-select-v1',runtime:'runtime-local','local-state':'ready','cloud-state':'ready','status-rev':'1'}}});
   });
-  await page.locator('#settings-open').click();await page.locator('#local-signaling-enabled').check();await page.locator('#settings-close').click();
-  await page.locator('#connect-tab-devices').click();await page.getByRole('button',{name:/Local fixture/}).click();
+  await page.locator('#settings-open').click();await page.locator('[data-settings-tab=general]').click();await page.locator('#local-signaling-enabled').check();await page.locator('#settings-close').click();
+  await page.getByRole('button',{name:/Local fixture/}).click();
   await page.waitForFunction(()=>document.querySelector('#code-display-status').textContent.includes('配对码已'));
   await page.locator('.code-digit').first().focus();await page.keyboard.type('1234');await page.locator('#connect-button').click();
   await page.waitForFunction(()=>testReceiver.releaseAnswer);await page.evaluate(()=>testReceiver.releaseAnswer());
   await page.waitForFunction(()=>testReceiver.channelOpen&&!document.querySelector('#share-button').disabled);
   assert.equal(await page.evaluate(()=>testReceiver.cloudSocketCount??0),cloudBefore,'LAN mode must not open cloud signaling');
   assert.deepEqual(await page.evaluate(()=>testReceiver.senderPeer.getConfiguration().iceServers),[]);
+  await page.locator('#casting-system-audio-enabled').uncheck();
   await share(false);await page.waitForFunction(()=>testReceiver.frames>2);
+  assert.equal(await page.evaluate(()=>document.querySelector('#preview').srcObject.getAudioTracks().length),0,'the casting-card audio switch controls the actual capture');
+  assert.equal(await page.locator('#casting-system-audio-enabled').isChecked(),false);
   await page.locator('#leave-button').click();await page.waitForFunction(()=>!document.querySelector('#code-view').hidden);
+  assert.equal(await page.locator('#connect-panel-devices').isVisible(),true,'LAN leave also returns to devices');
+  assert.deepEqual(await page.locator('.code-digit').evaluateAll(inputs=>inputs.map(input=>input.value)),['','','','']);
+  assert.equal(await page.locator('#pair-device-name').isVisible(),false);
   console.log(JSON.stringify({result:'PASS',videoBackend:'browser',originalTrack:true,independentPcmOpus:true,screenOnlyInput:true,multiDisplayCalibration:true,negativeCoordinates:true,layoutInvalidation:true,screenReselection:true,touchMouseTouch:true,wheelBackpressure:true,windowAndMultiDisplayVideo:true,senderReuse:true,frames:await page.evaluate(()=>testReceiver.frames)},null,2));
 } finally {
   await browser?.close();
+  server.closeAllConnections();
   await new Promise(resolve => server.close(resolve));
 }

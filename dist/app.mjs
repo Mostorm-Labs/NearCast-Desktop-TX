@@ -1,12 +1,12 @@
 import {LauncherWebCastClient, DEFAULT_ENDPOINT} from './webcast/launcher-webcast-client.mjs';
 import {browserPlatform} from './webcast/source-info.mjs';
 import {localSocketFactory,signalingChoice} from './webcast/local-signaling.mjs';
-import {ReceiverTrust, formatFingerprint} from './webcast/receiver-trust.mjs';
+import {ReceiverTrust} from './webcast/receiver-trust.mjs';
 import {WebCastTouchbackSender} from './webcast/touchback-sender.mjs';
 import {showInputConsent} from './touchback/consent-ui.mjs';
 import {createPlatformInputAdapter} from './touchback/platform-input.mjs';
 import {TauriDeviceDiscovery} from './tauri-device-discovery.mjs';
-import {loadPlatformInfo, platformSummary, screenCaptureError, touchbackSummary} from './platform-capabilities.mjs';
+import {loadPlatformInfo, screenCaptureError, touchbackSummary} from './platform-capabilities.mjs';
 import {canAttachTouchbackChannel} from './webcast/touchback-channel-policy.mjs';
 import {normalizeVideoQuality,VIDEO_FRAME_RATE} from './webcast/video-quality.mjs';
 import {MacOsPermissions} from './macos-permissions.mjs';
@@ -16,6 +16,8 @@ import {createDiagnostics} from './diagnostics.mjs';
 import {loadPreferences,savePreferences,mountSettings,mountFeedback} from './settings.mjs';
 import {mountPairingInput} from './pairing-input.mjs';
 import {mountWindowControls} from './window-controls.mjs';
+import {i18n} from './i18n.mjs';
+import {DEFAULT_OUTPUT_POLICY} from './touchback/output-policy.mjs';
 
 const tauri = globalThis.__TAURI__ ?? {};
 const invoke = tauri.core?.invoke ?? (async () => false);
@@ -27,17 +29,6 @@ const digits = [...document.querySelectorAll('.code-digit')];
 const connectButton = document.querySelector('#connect-button');
 const codeError = document.querySelector('#code-error');
 const codeDisplayStatus = document.querySelector('#code-display-status');
-const trustCard = document.querySelector('#trust-card');
-const trustTitle = document.querySelector('#trust-title');
-const trustCopy = document.querySelector('#trust-copy');
-const trustFingerprint = document.querySelector('#trust-fingerprint');
-const trustCheck = document.querySelector('#trust-check');
-const trustCheckLabel = document.querySelector('#trust-check-label');
-const trustConfirm = document.querySelector('#trust-confirm');
-const trustRetry = document.querySelector('#trust-retry');
-const trustCancel = document.querySelector('#trust-cancel');
-const trustRevoke = document.querySelector('#trust-revoke');
-const trustError = document.querySelector('#trust-error');
 const targetName = document.querySelector('#target-name');
 const castStatus = document.querySelector('#cast-status');
 const shareButton = document.querySelector('#share-button');
@@ -48,7 +39,6 @@ const preview = document.querySelector('#preview');
 const systemAudioEnabled=document.querySelector('#system-audio-enabled');
 const systemAudioStatus=document.querySelector('#system-audio-status');
 const castError = document.querySelector('#cast-error');
-const platformStatus = document.querySelector('#platform-status');
 const touchbackStatus = document.querySelector('#touchback-status');
 const deviceGroups = document.querySelector('#device-groups');
 const deviceStatus = document.querySelector('#device-status');
@@ -57,11 +47,14 @@ const videoResolution = document.querySelector('#video-resolution');
 const videoBitrateMode = document.querySelector('#video-bitrate-mode');
 const videoBitrate = document.querySelector('#video-bitrate');
 const videoQualitySummary = document.querySelector('#video-quality-summary');
+const permissionsPanel = document.querySelector('#macos-permissions');
 const permissionRows = document.querySelector('#permission-rows');
 const refreshPermissionsButton = document.querySelector('#refresh-permissions');
 const permissionsError = document.querySelector('#permissions-error');
 const permissions = new MacOsPermissions({invoke});
 const inputEnabled = document.querySelector('#input-enabled');
+const castingInputEnabled = document.querySelector('#casting-input-enabled');
+const castingAudioEnabled = document.querySelector('#casting-system-audio-enabled');
 const inputState = document.querySelector('#input-state');
 const inputReconnect = document.querySelector('#input-reconnect');
 const inputCleanup = document.querySelector('#input-cleanup');
@@ -84,16 +77,20 @@ const gesturePinchHelp=document.querySelector('#gesture-pinch-help');
 const gestureFeedback=document.querySelector('#gesture-feedback');
 const inputProvider=createPlatformInputAdapter({}, {invoke});
 const preferences=loadPreferences();
+const languageSelect=document.querySelector('#language-select');
+languageSelect.value=preferences.language;i18n.setLanguage(preferences.language);
 const localSignalingEnabled=document.querySelector('#local-signaling-enabled');
 localSignalingEnabled.checked=preferences.localSignaling;
 let codeRoute=null;
 videoResolution.value=preferences.video.resolution;videoBitrateMode.value=preferences.video.bitrateMode;videoBitrate.value=String(preferences.video.bitrateKbps);
 systemAudioEnabled.checked=preferences.systemAudio;inputEnabled.checked=preferences.inputEnabled;
 const persistPreferences=()=>{
-  try{savePreferences({video:videoQuality,localSignaling:localSignalingEnabled.checked,systemAudio:systemAudioEnabled.checked,inputEnabled:inputEnabled.checked,policy:inputProvider.policy});
-    document.querySelector('#settings-save-status').textContent='设置已保存在本机。画质和声音在下次分享时生效。';}
-  catch{document.querySelector('#settings-save-status').textContent='无法保存设置，本次运行仍可使用。';}
+  try{savePreferences({video:videoQuality,language:languageSelect.value,localSignaling:localSignalingEnabled.checked,systemAudio:systemAudioEnabled.checked,inputEnabled:inputEnabled.checked,policy:inputProvider.policy});
+    i18n.text(document.querySelector('#settings-save-status'),'settings.saved');}
+  catch{i18n.text(document.querySelector('#settings-save-status'),'settings.saveFailed');}
+  renderCastingPreferences();
 };
+languageSelect.addEventListener('change',()=>{i18n.setLanguage(languageSelect.value);persistPreferences();});
 for(const input of [videoResolution,videoBitrateMode,videoBitrate,systemAudioEnabled])input.addEventListener('change',()=>{videoQuality=normalizeVideoQuality({resolution:videoResolution.value,bitrateMode:videoBitrateMode.value,bitrateKbps:videoBitrate.value});persistPreferences();});
 let policyPending=false;
 const outputLabels={touch:'Touch',mouse:'Mouse'};
@@ -149,6 +146,7 @@ let selectedEndpoint = defaultEndpoint;
 let selectedDevice = null;
 let activeDevice = null;
 let currentStatus = 'idle';
+let sessionAccepted = false;
 const settingsPage=mountSettings({document,isConnected:()=>['joined','connected','sharing'].includes(currentStatus),
   onSelectTab:tab=>{if(tab==='permissions')void refreshPermissions();}});
 mountFeedback({document,invoke});
@@ -162,6 +160,24 @@ let capturePending = false;
 let captureProvider = null;
 let client;
 let diagnosticLogger;
+const renderCastingPreferences=(state=touchback?.diagnostics())=>{
+  const receiverUnavailable=state?.receiverSupported===false||state?.receiverEnabled===false;
+  castingInputEnabled.checked=inputEnabled.checked&&!receiverUnavailable;
+  castingInputEnabled.disabled=!state?.appReady||!state?.receiverStateReady||state?.receiverSupported!==true||state?.receiverEnabled!==true;
+  i18n.text(document.querySelector('#casting-input-help'),state?.receiverSupported===false?'cast.remoteUnsupported'
+    :state?.receiverEnabled===false?'cast.remoteOff'
+    :castingInputEnabled.disabled?'cast.remoteWaiting':'cast.remoteHelp');
+  const request=document.querySelector('#input-request-control');
+  if(request)request.disabled=castingInputEnabled.disabled||!state?.sourceReady;
+  const sharing=Boolean(client?.stream);
+  const hasAudio=sharing&&client.stream.getAudioTracks().some(track=>track.readyState==='live');
+  castingAudioEnabled.checked=sharing?hasAudio:systemAudioEnabled.checked;
+  castingAudioEnabled.disabled=capturePending||sharing;
+  i18n.text(document.querySelector('#casting-audio-help'),sharing?hasAudio?'cast.audioLive':'cast.audioNone':'cast.audioNext');
+};
+for(const [shortcut,setting]of [[castingInputEnabled,inputEnabled],[castingAudioEnabled,systemAudioEnabled]]){
+  shortcut.addEventListener('change',()=>{if(shortcut.disabled){renderCastingPreferences();return;}setting.checked=shortcut.checked;setting.dispatchEvent(new Event('change'));});
+}
 let windowDiagnostics={};
 const diagnosticWindow=()=>({...windowDiagnostics,pageVisibility:document.visibilityState});
 let videoQuality = normalizeVideoQuality({resolution: videoResolution.value, bitrateMode: videoBitrateMode.value, bitrateKbps: videoBitrate.value});
@@ -175,7 +191,7 @@ const renderControlDiagnostics = () => {
   if(scroll){const r=scroll.detent120.received,s=scroll.detent120.submitted;
     document.querySelector('#scroll-diagnostic-summary').textContent=`滚轮诊断版 · 累计纵轴（正／负）：接收 ${r.positiveY}／${r.negativeY}，提交 ${s.positiveY}／${s.negativeY} · 原始包 ${r.samples}，提交调用 ${s.samples}。测试后点击“导出诊断”。`;}
   const audio=captureProvider?.diagnostics()?.audio;
-  if(systemAudioStatus)systemAudioStatus.textContent=audio?.error?`系统声音不可用，视频继续：${audio.error}`:audio?.state==='capturing'?'正在分享默认播放设备的系统声音':captureProvider?.current?'本次分享没有音频轨道':'开始分享后采集系统声音';
+  if(systemAudioStatus)i18n.text(systemAudioStatus,audio?.error?'audio.error':audio?.state==='capturing'?'audio.capturing':captureProvider?.current?'audio.disabled':'audio.idle',{error:i18n.error(audio?.error)});
 };
 // Full JSON diagnostics are observability, not a per-input rendering task.
 // Limit DOM/stringification work while the high-rate input queue drains.
@@ -194,14 +210,15 @@ setInterval(async()=>{
 },1000);
 
 const setError = (element, error) => {
-  element.textContent = error ? (error.message || String(error)) : '';
+  element.textContent = error ? i18n.error(error) : '';
+  if(error)element.dataset.errorMessage=error.message||String(error);else delete element.dataset.errorMessage;
   element.hidden = !error;
 };
-const setCodeDisplayStatus = text => { codeDisplayStatus.textContent = text || ''; };
+const setCodeDisplayStatus = (key,values={}) => { if(key)i18n.text(codeDisplayStatus,key,values);else{delete codeDisplayStatus.dataset.i18n;codeDisplayStatus.textContent='';} };
 const renderVideoQuality = () => {
   videoQuality = normalizeVideoQuality({resolution: videoResolution.value, bitrateMode: videoBitrateMode.value, bitrateKbps: videoBitrate.value});
-  const resolution = videoQuality.resolution === 'auto' ? 'Auto' : videoQuality.resolution.replace('x', ' × ');
-  videoQualitySummary.textContent = `${videoQuality.bitrateMode === 'fixed' ? 'Fixed' : 'Dynamic'} · ${resolution} · ${VIDEO_FRAME_RATE} FPS${videoQuality.bitrateMode === 'fixed' ? ` · ${videoQuality.bitrateKbps / 1000} Mbps` : ''}`;
+  const resolution = videoQuality.resolution === 'auto' ? i18n.t('quality.auto') : videoQuality.resolution.replace('x', ' × ');
+  videoQualitySummary.textContent = `${i18n.t(videoQuality.bitrateMode === 'fixed' ? 'quality.fixed' : 'quality.dynamic')} · ${resolution} · ${VIDEO_FRAME_RATE} FPS${videoQuality.bitrateMode === 'fixed' ? ` · ${videoQuality.bitrateKbps / 1000} Mbps` : ''}`;
   videoBitrate.disabled = false;
 };
 videoResolution.addEventListener('change', renderVideoQuality);
@@ -209,29 +226,16 @@ videoBitrateMode.addEventListener('change', renderVideoQuality);
 videoBitrate.addEventListener('change', renderVideoQuality);
 renderVideoQuality();
 const renderTrust = state => {
-  trustCard.hidden = !state || state.phase === 'idle' || state.phase === 'trusted' && !state.fingerprint;
-  trustCard.open = state?.phase !== 'trusted';
-  trustTitle.textContent = state?.phase === 'trusted' ? '已配对 · 接收端指纹' : '现场核对接收端指纹';
-  trustCheck.checked = false; trustConfirm.disabled = true; trustConfirm.hidden = state?.phase !== 'compare'; trustCheckLabel.hidden = true; trustRevoke.hidden = true;
-  trustRetry.hidden = !['changed','expired','untrusted','error'].includes(state?.phase) || !state.device?.supportsTrustDisplay;
-  trustFingerprint.textContent = '';
-  setError(trustError, state?.error ? new Error(state.error) : null);
-  if (!state || state.phase === 'idle') return;
-  if (state.phase === 'trusted') { trustCopy.textContent = '此设备已完成现场核对，可以请求接收端显示配对码。'; trustFingerprint.textContent = formatFingerprint(state.fingerprint); trustRevoke.hidden = false; return; }
-  if (state.phase === 'compare') { trustCopy.textContent = `${state.previousFingerprint && state.previousFingerprint !== state.fingerprint ? '此设备的公钥已变化。' : ''}请确认接收端顶部显示的指纹与下方四行内容完全一致，核对后勾选确认。`; trustFingerprint.textContent = formatFingerprint(state.fingerprint); trustCheckLabel.hidden = false; return; }
-  if (state.phase === 'preparing' || state.phase === 'checking') { trustCopy.textContent = '正在建立安全连接并请求接收端显示指纹…'; trustFingerprint.textContent = ''; return; }
-  if (state.phase === 'unsupported') { trustCopy.textContent = '接收端没有提供指纹显示能力，请现场查看配对码并手动输入。'; trustFingerprint.textContent = ''; return; }
-  if (state.phase === 'changed') { trustCopy.textContent = '接收端公钥已变化，已阻止请求。请重新在现场核对新的完整指纹。'; trustFingerprint.textContent = state.fingerprint ? formatFingerprint(state.fingerprint) : ''; trustRevoke.hidden = !state.fingerprint; return; }
-  if (state.phase === 'expired') { trustCopy.textContent = '指纹核对已过期，请重新显示指纹。'; trustFingerprint.textContent = ''; }
-  else if (state.phase === 'saving') trustCopy.textContent = '正在保存现场确认…';
-  else if (state.phase === 'error') trustCopy.textContent = '无法完成设备信任，请使用现场配对码或重试。';
-  else if (state.phase === 'untrusted') trustCopy.textContent = '已撤销此设备信任，重新请求配对码前需要再次现场核对。';
+  if (state?.phase === 'checking') setCodeDisplayStatus('pair.connecting');
+  else if (['error','changed'].includes(state?.phase)) setCodeDisplayStatus(String(state.error).includes('NEARCAST_KEY_MISMATCH')
+    ?'pair.changed':'pair.failed',{error:i18n.error(state.error)});
 };
 const codeValue = () => digits.map(input => input.value.trim()).join('').toUpperCase();
 const setView = status => {
   diagnosticLogger?.status(status);
   currentStatus = status;
   const connected = ['joined', 'connected', 'sharing'].includes(status);
+  if(connected)sessionAccepted=true;
   codeView.hidden = connected;
   castingView.hidden = !connected;
   settingsPage.render();
@@ -239,7 +243,13 @@ const setView = status => {
   digits.forEach(input => { input.disabled = status !== 'idle'; });
   shareButton.disabled = capturePending || !['connected', 'sharing'].includes(status);
   deviceGroups.querySelectorAll('.device-row.selectable').forEach(row => { row.disabled = status !== 'idle'; });
-  castStatus.textContent = status === 'sharing' ? 'Your screen is being shared to the receiver.' : status === 'connected' ? 'Receiver is ready for casting.' : 'Connecting to receiver…';
+  i18n.text(castStatus,status==='sharing'?'cast.sharing':status==='connected'?'cast.ready':'pair.connecting');
+  castingView.dataset.status=status;
+  document.querySelector('#connect-tab-devices').disabled=status!=='idle';
+  document.querySelector('#return-to-devices').disabled=status!=='idle';
+  if(status==='idle')document.querySelector('#session-details').open=false;
+  if(status==='idle'&&sessionAccepted){sessionAccepted=false;activeDevice=null;returnToDevices();}
+  renderCastingPreferences();
 };
 const pairingInput=mountPairingInput({inputs:digits,help:document.querySelector('#pair-input-help'),onChange:()=>setError(codeError,null)});
 
@@ -254,6 +264,7 @@ const buildTouchback = () => new WebCastTouchbackSender({
     inputReconnect.disabled = state.cleanupPending || !['connected','sharing'].includes(currentStatus);
     inputPolicyApply.disabled=policyPending||state.cleanupPending;
     touchbackStatus.textContent = touchbackSummary(platformInfo ?? {});
+    renderCastingPreferences(state);
     scheduleControlDiagnostics();
   },
 });
@@ -287,7 +298,7 @@ inputState.after(requestControl);requestControl.addEventListener('click',async()
   requestControl.disabled=true;
   try{if(!inputEnabled.checked){inputEnabled.checked=true;persistPreferences();await touchback.setEnabled(true);}await touchback.requestReceiverControl(true);}
   catch(error){inputState.textContent=`反控未开启：${error.message||error}`;}
-  finally{requestControl.disabled=false;}
+  finally{renderCastingPreferences();}
 });
 let haloPending=false;
 const haloTimer=setInterval(async()=>{
@@ -317,16 +328,16 @@ client = new LauncherWebCastClient({
   videoQuality,
   codeDisplayTransport: ({instance, request}) => invoke('nearcast_code_display', {instance, request}),
   onStatus: setView,
-  onError: error => { setError(codeError, error); client.stop({notify: false}); activeDevice = null; },
+  onError: async error => { await client.stop({notify: false}); activeDevice = null;setError(codeError, error); },
   onCodeDisplayResult: result => {
     if (result.requestId !== codeDisplayRequestId) return;
     codeRoute=result.status==='shown'?{backend:result.backend??'cloud',deviceId:result.deviceId,runtimeInstanceId:result.runtimeInstanceId}:null;
-    const messages = {shown: '配对码已在接收端显示，请输入 4 位配对码。', unavailable: '接收端暂时无法显示配对码，请现场查看接收端。', rate_limited: '请求过于频繁，请稍后再试。', not_supported: '该接收端不支持远程显示配对码，请现场查看。'};
+    const messages = {shown:'pair.shown',unavailable:'pair.unavailable',rate_limited:'pair.rateLimited',not_supported:'pair.noDisplay'};
     setCodeDisplayStatus(messages[result.status] || '');
   },
   onCodeDisplayError: (error, request) => {
     if (request.requestId !== codeDisplayRequestId) return;
-    setCodeDisplayStatus(`无法请求接收端显示配对码：${error.message || error}`);
+    setCodeDisplayStatus('pair.displayFailed',{error:i18n.error(error)});
     if (String(error.message || error).includes('NEARCAST_KEY_MISMATCH')) trustManager.keyMismatch(error.message || error);
   },
   onSessionEnded: () => { controlGeneration++; touchback.fence(); void captureProvider?.stop().catch(error => setError(castError,error)); },
@@ -346,55 +357,61 @@ client = new LauncherWebCastClient({
     void touchback.setCaptureTrack(stream?.getVideoTracks()[0] ?? null);
     preview.srcObject = stream;
     previewWrap.hidden = !stream;
+    document.querySelector('#preview-empty').hidden = Boolean(stream);
     shareButton.hidden = Boolean(stream);
     stopShareButton.hidden = !stream;
     if (stream) preview.play?.().catch(() => {});
+    renderCastingPreferences();
   },
 });
 
 const requestCodeDisplayFor = device => {
-  if (!device?.supportsCodeDisplay) { setCodeDisplayStatus('该接收端不支持远程显示配对码，请现场查看。'); return; }
+  if (!device?.supportsCodeDisplay) { setCodeDisplayStatus('pair.noDisplay'); return; }
   try {const choice=signalingChoice(device,localSignalingEnabled.checked);codeRoute=null;
     codeDisplayRequestId = client.requestCodeDisplay({device: {...device, trustRequired: true, trustState: trustDevice && trustDevice.discoveryId === device.discoveryId && trustManager.state.phase === 'trusted' ? 'trusted' : 'untrusted'},backend:choice.backend, reason: 'sender-device-selected'}); }
-  catch (error) { setCodeDisplayStatus(error.message || String(error)); }
+  catch (error) { setCodeDisplayStatus('pair.displayFailed',{error:i18n.error(error)}); }
 };
 
-const trustManager = new ReceiverTrust({invoke, onChange: renderTrust, onTrusted: device => {
+const trustManager = new ReceiverTrust({invoke, automatic:true, onChange: renderTrust, onTrusted: device => {
   if (!trustDevice || device.discoveryId !== trustDevice.discoveryId || currentStatus !== 'idle') return;
   trustDevice = device;
-  if (device.supportsCodeDisplay) { setCodeDisplayStatus('指纹已确认，正在请求接收端显示配对码…'); requestCodeDisplayFor(device); }
+  if (device.supportsCodeDisplay) { setCodeDisplayStatus('pair.showing'); requestCodeDisplayFor(device); }
+  else setCodeDisplayStatus('pair.look');
 }});
-trustCheck.addEventListener('change', () => { trustConfirm.disabled = !trustCheck.checked; });
-trustConfirm.addEventListener('click', async () => { try { await trustManager.confirm(trustCheck.checked); } catch (error) { setError(trustError, error); } });
-trustRetry.addEventListener('click', () => trustManager.prepare());
-trustCancel.addEventListener('click', () => { trustManager.cancel(); trustDevice = null; client.cancelCodeDisplay(); codeDisplayRequestId = null; setCodeDisplayStatus('已取消指纹核对，可现场输入配对码。'); });
-trustRevoke.addEventListener('click', async () => { try { client.cancelCodeDisplay(); codeDisplayRequestId = null; await trustManager.revoke(); setCodeDisplayStatus('已撤销信任。'); } catch (error) { setError(trustError, error); } });
+const clearSelectedDevice=()=>{
+  trustManager.cancel();trustDevice=null;selectedDevice=null;codeRoute=null;selectedEndpoint=defaultEndpoint;client.endpoint=defaultEndpoint;
+  client.cancelCodeDisplay();codeDisplayRequestId=null;setCodeDisplayStatus('');setError(codeError,null);
+  const name=document.querySelector('#pair-device-name');name.hidden=true;name.textContent='';name.removeAttribute('title');
+  pairingInput.clear();
+};
 const connectionTabs=[document.querySelector('#connect-tab-code'),document.querySelector('#connect-tab-devices')];
 const selectConnectionTab=tab=>{
   const manual=tab===connectionTabs[0];
-  for(const button of connectionTabs){const selected=button===tab;button.setAttribute('aria-selected',String(selected));button.tabIndex=selected?0:-1;document.getElementById(button.getAttribute('aria-controls')).hidden=!selected;}
-  document.querySelector('#connect-heading').textContent=manual?'输入配对码':'选择接收端';
-  document.querySelector('#connect-description').textContent=manual?'输入接收端显示的 4 位配对码，直接连接。':'选择局域网中的设备，输入接收端显示的配对码。';
-
+  codeView.dataset.connection=manual?'code':'devices';
+  document.documentElement.dataset.connection=codeView.dataset.connection;
+  for(const button of connectionTabs){const selected=button===tab;button.setAttribute('aria-pressed',String(selected));button.tabIndex=0;document.getElementById(button.getAttribute('aria-controls')).hidden=!selected;}
+  i18n.text(document.querySelector('#connect-heading'),'home.welcome');
+  i18n.text(document.querySelector('#connect-description'),'home.description');
 };
-selectConnectionTab(connectionTabs[localSignalingEnabled.checked?1:0]);
-for(const [index,tab]of connectionTabs.entries()){
-  tab.addEventListener('click',()=>selectConnectionTab(tab));
-  tab.addEventListener('keydown',event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?1:1-index;selectConnectionTab(connectionTabs[next]);connectionTabs[next].focus();}});
-}
+selectConnectionTab(connectionTabs[1]);
+const returnToDevices=()=>{
+  clearSelectedDevice();selectConnectionTab(connectionTabs[1]);
+  if(!settingsPage.active)document.querySelector('#refresh-devices').focus();
+};
+document.querySelector('#return-to-devices').addEventListener('click',()=>{
+  if(currentStatus==='idle')returnToDevices();
+});
+for(const tab of connectionTabs)tab.addEventListener('click',()=>{
+  if(tab===connectionTabs[1]){if(currentStatus==='idle')returnToDevices();return;}
+  selectConnectionTab(tab);
+  digits[0].focus();
+});
 localSignalingEnabled.addEventListener('change',()=>{
   persistPreferences();codeRoute=null;client.cancelCodeDisplay();codeDisplayRequestId=null;
   if(currentStatus==='idle')selectConnectionTab(connectionTabs[localSignalingEnabled.checked?1:0]);
   if(currentStatus==='idle'&&selectedDevice)void trustManager.select(selectedDevice);
 });
 
-document.querySelector('#pair-clear-device').addEventListener('click',()=>{
-  if(currentStatus!=='idle')return;
-  trustManager.cancel();trustDevice=null;selectedDevice=null;codeRoute=null;selectedEndpoint=defaultEndpoint;client.endpoint=defaultEndpoint;
-  client.cancelCodeDisplay();codeDisplayRequestId=null;setCodeDisplayStatus('');setError(codeError,null);
-  document.querySelector('#pair-device-name').hidden=true;document.querySelector('#pair-clear-device').hidden=true;
-  pairingInput.clear();digits[0].focus();
-});
 pairForm.addEventListener('submit', async event => {
   event.preventDefault();
   if(currentStatus!=='idle')return;
@@ -428,43 +445,45 @@ pairForm.addEventListener('submit', async event => {
 shareButton.addEventListener('click', async () => {
   if (capturePending) return;
   capturePending = true; shareButton.disabled = true;
+  renderCastingPreferences();
   setError(castError, null);
   try { client.videoQuality = videoQuality; await client.startScreenShare({video: true, audio: systemAudioEnabled.checked}); }
   catch (error) { setError(castError, screenCaptureError(error, platformInfo)); }
-  finally { capturePending = false; shareButton.disabled = !['connected', 'sharing'].includes(currentStatus); }
+  finally { capturePending = false; shareButton.disabled = !['connected', 'sharing'].includes(currentStatus); renderCastingPreferences(); }
 });
 stopShareButton.addEventListener('click', async () => { setError(castError, null); await client.stopStream(); });
-leaveButton.addEventListener('click', async () => { setError(castError, null); touchback.fence(); await client.stop(); pairingInput.clear(); });
+leaveButton.addEventListener('click', async () => { setError(castError, null); touchback.fence(); await client.stop(); });
 window.addEventListener('beforeunload', () => { touchback.fence(); trustManager.cancel(); client.stop({notify: false}); });
 
 const renderDevices = devices => {
   if (selectedDevice && currentStatus === 'idle') {
     const current = devices.find(device => device.discoveryId === selectedDevice.discoveryId && device.selectable);
     if (!current || current.instance !== selectedDevice.instance || current.endpoint !== selectedDevice.endpoint || current.deviceId !== selectedDevice.deviceId || current.capability !== selectedDevice.capability||current.signaling?.runtimeInstanceId!==selectedDevice.signaling?.runtimeInstanceId) {
-      trustManager.cancel(); trustDevice = null;
-      selectedDevice = null;codeRoute=null; selectedEndpoint = defaultEndpoint; client.endpoint = defaultEndpoint; client.cancelCodeDisplay(); codeDisplayRequestId = null;
-      setCodeDisplayStatus('接收端已离线或服务发生变化，请重新扫描并选择。');
+      clearSelectedDevice();
+      setCodeDisplayStatus('pair.offline');
     } else {
       selectedDevice = current;
+      document.querySelector('#pair-device-name').textContent=current.displayName;
+      document.querySelector('#pair-device-name').title=current.displayName;
       if (trustDevice) { trustDevice = current; trustManager.device = current; }
     }
   }
   deviceGroups.replaceChildren();
-  const groups = [{protocol: 'webcast', label: 'NEARCAST RECEIVERS', icon: '▣'}];
+  const groups = [{protocol: 'webcast'}];
   const available = devices.filter(device => device.protocol === 'webcast');
-  deviceStatus.textContent = available.length ? `${available.length} device${available.length === 1 ? '' : 's'} found on your local network` : 'No receivers found yet — keep scanning…';
+  i18n.text(deviceStatus,available.length?'discovery.found':'discovery.empty',{count:available.length});
   for (const group of groups) {
     const entries = devices.filter(device => device.protocol === group.protocol);
     if (!entries.length) continue;
     const section = document.createElement('div'); section.className = 'device-group';
-    const title = document.createElement('div'); title.className = 'group-title'; title.textContent = group.label; section.append(title);
     for (const device of entries) {
       const row = document.createElement('button'); row.type = 'button'; row.className = `device-row ${device.selectable ? 'selectable' : 'disabled'}`;
       row.disabled = !device.selectable || currentStatus !== 'idle';
       row.setAttribute('aria-pressed', String(device.selectable && device.discoveryId === selectedDevice?.discoveryId));
-      row.innerHTML = `<span class="device-icon">${group.icon}</span><span class="device-copy"><span class="device-name"></span><span class="device-meta"></span></span><span class="device-action">${device.selectable ? '使用设备' : 'Display only'}</span>`;
+      row.innerHTML = `<img class="device-icon" src="./assets/figma/display.svg" width="28" height="28" alt="" /><span class="device-copy"><span class="device-name"></span><span class="device-meta"></span></span><img class="row-chevron" src="./assets/figma/chevron.svg" width="20" height="20" alt="" />`;
       row.querySelector('.device-name').textContent = device.displayName;
       row.querySelector('.device-meta').textContent = device.addresses?.[0] ? `${device.addresses[0]}${device.port ? `:${device.port}` : ''}` : device.hostname || device.model || device.protocol;
+      row.title=[device.displayName,row.querySelector('.device-meta').textContent,device.selectable?'':i18n.t('discovery.displayOnly')].filter(Boolean).join(' · ');
       if (device.selectable) row.addEventListener('click', () => {
         if (currentStatus !== 'idle') return;
         client.cancelCodeDisplay(); codeDisplayRequestId = null;
@@ -472,9 +491,10 @@ const renderDevices = devices => {
         selectedDevice = device; trustDevice = device; selectedEndpoint = defaultEndpoint; client.endpoint = selectedEndpoint;
         codeRoute=null;
         document.querySelector('#pair-device-name').textContent=device.displayName;
-        document.querySelector('#pair-device-name').hidden=false;document.querySelector('#pair-clear-device').hidden=false;
+        document.querySelector('#pair-device-name').title=device.displayName;
+        document.querySelector('#pair-device-name').hidden=false;
         selectConnectionTab(connectionTabs[0]);digits[0].focus();setError(codeError, null);
-        setCodeDisplayStatus(device.supportsTrustDisplay ? '正在请求现场核对指纹…' : '该接收端不支持指纹显示，请现场输入配对码。');
+        setCodeDisplayStatus('pair.connecting');
         trustManager.select(device);
       });
       section.append(row);
@@ -486,45 +506,66 @@ const renderDevices = devices => {
 const discovery = new TauriDeviceDiscovery({invoke, listen});
 const startDiscovery = async () => {
   trustManager.cancel(); trustDevice = null; client.cancelCodeDisplay(); codeDisplayRequestId = null;
-  refreshDevices.disabled = true; deviceStatus.textContent = 'Scanning for NearCast receivers…';
+  refreshDevices.disabled = true;i18n.text(deviceStatus,'discovery.scanning');
   try { await discovery.stop().catch(() => {}); await discovery.start(renderDevices); }
-  catch (error) { deviceStatus.textContent = `Scan unavailable: ${error.message || error}`; }
+  catch (error) { i18n.text(deviceStatus,'discovery.failed',{error:i18n.error(error)}); }
   finally { refreshDevices.disabled = false; }
 };
 refreshDevices.addEventListener('click', startDiscovery);
 
 const renderPermissions = () => {
-  for (const row of permissions.rows()) {
-    let toggle = permissionRows.querySelector(`[data-permission="${row.id}"]`);
-    if (!toggle) {
-      const item = document.createElement('div'); item.className = 'permission-row';
-      const control = document.createElement('div'); control.className = 'permission-control';
-      const title = document.createElement('span'); title.className = 'permission-title'; title.textContent = row.title;
-      toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'permission-toggle'; toggle.dataset.permission = row.id;
-      toggle.setAttribute('aria-label', `${row.title}权限设置`);
-      toggle.setAttribute('aria-describedby', `permission-status-${row.id}`);
-      toggle.title = `前往系统设置配置${row.title}`;
-      toggle.addEventListener('click', async () => {
-        if (permissionActionPending) return;
-        permissionActionPending = true; permissionSettingsOpened = row.id;
-        setError(permissionsError, null); renderPermissions();
-        try { await permissions.openSettings(row.id); }
-        catch (error) { setError(permissionsError, error); }
-        finally { permissionActionPending = false; renderPermissions(); }
-      });
-      const detail = document.createElement('p'); detail.className = 'permission-detail';
-      const state = document.createElement('span'); state.className = 'permission-state'; state.id = `permission-status-${row.id}`; state.setAttribute('aria-live', 'polite');
-      detail.append(state, document.createElement('br'), row.help);
-      control.append(title, toggle); item.append(control, detail); permissionRows.append(item);
+  const mac=platformInfo?.os==='macos',os=platformInfo?.os??'unknown';
+  const presentation={
+    localNetwork:{title:'Local Network',help:'Discover and connect to NearHub Cast receivers on your local network.',icon:'permission-network.png'},
+    screenRecording:{title:'Screen & System Audio Recording',help:'Capture and share the selected screen.',icon:'permission-screen.png'},
+    accessibility:{title:'Accessibility',help:'Allow the receiver to control your mouse.',icon:'permission-accessibility.png'},
+  };
+  if(permissionRows.dataset.platform!==os){permissionRows.replaceChildren();permissionRows.dataset.platform=os;}
+  for (const [index,row] of permissions.rows().entries()) {
+    const copy=presentation[row.id];
+    let item=permissionRows.querySelector(`[data-permission-row="${row.id}"]`);
+    if(!item){
+      if(index){const divider=document.createElement('img');divider.className='permission-divider';divider.src='./assets/figma/settings-divider.svg';divider.alt='';permissionRows.append(divider);}
+      item=document.createElement('div');item.className='permission-row';item.dataset.permissionRow=row.id;
+      const body=document.createElement('div');body.className='permission-copy';
+      const icon=document.createElement('img');icon.className='permission-icon';icon.src='./assets/figma/'+copy.icon;icon.alt='';icon.width=40;icon.height=40;
+      const text=document.createElement('div');
+      const title=document.createElement('span');title.className='permission-title';
+      const help=document.createElement('p');help.className='permission-detail';
+      const state=document.createElement('span');state.id=`permission-status-${row.id}`;state.className=mac?'permission-state sr-only':'permission-platform-state';state.setAttribute('aria-live','polite');
+      text.append(title,help);body.append(icon,text);item.append(body);
+      if(mac){
+        const toggle=document.createElement('button');toggle.type='button';toggle.className='permission-toggle';toggle.dataset.permission=row.id;
+        toggle.setAttribute('aria-describedby',state.id);
+        toggle.addEventListener('click',async()=>{
+          if(permissionActionPending)return;
+          permissionActionPending=true;permissionSettingsOpened=row.id;setError(permissionsError,null);renderPermissions();
+          try{await permissions.openSettings(row.id);}catch(error){setError(permissionsError,error);}
+          finally{permissionActionPending=false;renderPermissions();}
+        });
+        item.append(state,toggle);
+      }else item.append(state);
+      permissionRows.append(item);
     }
-    toggle.disabled = permissionActionPending;
-    toggle.dataset.state = row.enabled === null ? 'unknown' : row.enabled ? 'on' : 'off';
-    if (row.enabled === null) { toggle.removeAttribute('role'); toggle.removeAttribute('aria-checked'); }
-    else { toggle.setAttribute('role', 'switch'); toggle.setAttribute('aria-checked', String(row.enabled)); }
-    const state = document.querySelector(`#permission-status-${row.id}`);
-    state.textContent = row.status;
-    if (row.id === 'localNetwork' && row.enabled === null) state.textContent = '待确认 · 请在系统设置中查看';
+    i18n.text(item.querySelector('.permission-title'),'permission.'+row.id);
+    i18n.text(item.querySelector('.permission-detail'),'permission.'+({localNetwork:'localHelp',screenRecording:'screenHelp',accessibility:'accessibilityHelp'}[row.id]));
+    const state=item.querySelector(`#permission-status-${row.id}`);
+    if(mac){
+      const toggle=item.querySelector('button');toggle.disabled=permissionActionPending;
+      toggle.setAttribute('aria-label',i18n.t('permission.open',{name:i18n.t('permission.'+row.id)}));toggle.title=toggle.getAttribute('aria-label');
+      const value=row.enabled===null?'unknown':row.enabled?'on':'off';
+      if(toggle.dataset.state!==value){
+        toggle.dataset.state=value;toggle.replaceChildren();
+        if(value==='unknown')toggle.textContent='?';
+        else{const image=document.createElement('img');image.src=`./assets/figma/switch-${value}.svg`;image.alt='';toggle.append(image);}
+      }
+      if(row.enabled===null){toggle.removeAttribute('role');toggle.removeAttribute('aria-checked');}
+      else{toggle.setAttribute('role','switch');toggle.setAttribute('aria-checked',String(row.enabled));}
+      i18n.text(state,row.enabled===null?'permission.checkSystem':row.id==='localNetwork'?'permission.available':row.enabled?'permission.on':'permission.off');
+    }else i18n.text(state,os==='windows'?(row.id==='localNetwork'?'permission.managed':row.id==='screenRecording'?(platformInfo.screenCapture?'permission.onSelect':'common.unavailable'):'permission.notRequired'):'permission.unknown');
   }
+  refreshPermissionsButton.hidden=!mac;
+  i18n.text(document.querySelector('#permissions-help'),mac?'permission.macHelp':os==='windows'?'permission.windowsHelp':'permission.desktopHelp');
 };
 const refreshPermissions = async () => {
   if (platformInfo?.os !== 'macos') return;
@@ -541,6 +582,14 @@ window.addEventListener('focus', async () => {
   if (opened === 'localNetwork' && currentStatus === 'idle') await startDiscovery();
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshPermissions(); });
+const refreshLanguage=()=>{
+  renderCastingPreferences();renderVideoQuality();renderPermissions();
+  for(const row of deviceGroups.querySelectorAll('.device-row.disabled'))row.title=[row.querySelector('.device-name').textContent,row.querySelector('.device-meta').textContent,i18n.t('discovery.displayOnly')].filter(Boolean).join(' · ');
+  for(const input of digits)input.setAttribute('aria-label',i18n.t('pair.digit',{number:input.dataset.pairDigit}));
+  const heading=document.querySelector('#casting-heading');heading.firstChild.textContent=i18n.t('cast.targetPrefix');
+  for(const node of document.querySelectorAll('[data-error-message]'))node.textContent=i18n.error(node.dataset.errorMessage);
+};
+i18n.subscribe(refreshLanguage);i18n.apply();refreshLanguage();
 setView('idle');
 platformReady = loadPlatformInfo(invoke).then(async info => {
   platformInfo = info;
@@ -556,12 +605,11 @@ platformReady = loadPlatformInfo(invoke).then(async info => {
     onStatus: state => { if(state.binding==='calibrating')document.querySelector('#capture-help').textContent='正在识别分享的屏幕，请稍候；四角校验标记将自动消失。';else document.querySelector('#capture-help').textContent=state.displayBinding?.state==='bound'?'已确认分享的屏幕，可开启反控。':'系统选屏后自动识别屏幕；窗口仅投屏，识别失败可停止后重试。';if (state.error) setError(castError, new Error(state.error)); },
   });
   client.mediaDevices = captureProvider;
-  settingsPage.setPlatform(info.os);
-  if (info.os === 'macos') { renderPermissions(); refreshPermissions(); }
-  platformStatus.textContent = platformSummary(info);
+  permissionsPanel.hidden = false;renderPermissions();
+  if (info.os === 'macos') refreshPermissions();
   touchbackStatus.textContent = touchbackSummary(info);
   touchback.status();
-  try{await inputProvider.setOutputPolicy(preferences.policy);}
+  try{await inputProvider.setOutputPolicy(DEFAULT_OUTPUT_POLICY);}
   catch{inputPolicyStatus.textContent='已保存的转换不适用于本机，当前使用原生输入。';}
   await touchback.setEnabled(inputEnabled.checked);
   await renderPolicyConfiguration().catch(error=>{inputPolicyStatus.textContent=`无法读取输入能力：${error.message||error}`;});
@@ -574,13 +622,6 @@ if(tauri.core?.invoke){
   window.addEventListener('error',()=>diagnosticLogger.error());
   window.addEventListener('unhandledrejection',()=>diagnosticLogger.error());
   window.addEventListener('beforeunload',()=>diagnosticLogger.stop());
-  const exportButton=document.querySelector('#export-diagnostics'),exportStatus=document.querySelector('#diagnostics-export-status');
-  exportButton.addEventListener('click',async()=>{
-    exportButton.disabled=true;
-    try{exportStatus.textContent='诊断已保存：'+await diagnosticLogger.export();}
-    catch{exportStatus.textContent='无法导出诊断，请检查本机日志目录权限。';}
-    finally{exportButton.disabled=false;}
-  });
 }
 if (tauri.core?.invoke) {
   const updates = mountUpdates({document, invoke, listen, isSharing: () => Boolean(client.stream),

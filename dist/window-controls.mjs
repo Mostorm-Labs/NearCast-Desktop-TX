@@ -1,5 +1,6 @@
 // Move through ordinary set_position calls instead of Windows' native modal
 // move loop. Keep only the newest position while an IPC call is in flight.
+import {i18n} from './i18n.mjs';
 export function mountWindowControls({document,invoke,beforeClose=async()=>{}}){
   const bar=document.querySelector('#window-titlebar'),drag=document.querySelector('#window-drag');
   const min=document.querySelector('#window-minimize'),max=document.querySelector('#window-maximize'),close=document.querySelector('#window-close'),error=document.querySelector('#window-error');
@@ -8,12 +9,12 @@ export function mountWindowControls({document,invoke,beforeClose=async()=>{}}){
   const call=async action=>{
     const result=await invoke('nearcast_window_action',{action});
     if(result&&typeof result.maximized==='boolean'){
-      state=result;max.setAttribute('aria-label',state.maximized?'还原窗口':'最大化窗口');max.title=max.getAttribute('aria-label');
+      state=result;max.setAttribute('aria-label',i18n.t(state.maximized?'window.restore':'window.maximize'));max.title=max.getAttribute('aria-label');
       max.dataset.maximized=String(state.maximized);
     }
     return result;
   };
-  const report=e=>{error.textContent='窗口操作失败：'+String(e?.message??e);error.hidden=false;};
+  const report=e=>{i18n.text(error,'window.failed',{error:i18n.error(e)});error.hidden=false;};
   const refresh=()=>call({kind:'state'}).catch(report);
   const pump=async()=>{
     if(moving)return;moving=true;
@@ -49,5 +50,6 @@ export function mountWindowControls({document,invoke,beforeClose=async()=>{}}){
   const end=event=>{if(gesture?.id===event.pointerId){gesture=null;if(drag.hasPointerCapture(event.pointerId))drag.releasePointerCapture(event.pointerId);}};
   for(const name of ['pointerup','pointercancel','lostpointercapture'])drag.addEventListener(name,end);
   document.defaultView.addEventListener('resize',refresh);document.defaultView.addEventListener('focus',refresh);
+  i18n.subscribe(()=>{max.setAttribute('aria-label',i18n.t(state?.maximized?'window.restore':'window.maximize'));max.title=max.getAttribute('aria-label');});
   void refresh();
 }

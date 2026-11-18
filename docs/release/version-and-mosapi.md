@@ -20,7 +20,7 @@ X.Y.Z.Build
 | `Y` | 增加向下兼容的用户功能，或标记兼容的功能弃用 |
 | `Z` | 向下兼容的 bug 修复、性能优化或安全修复 |
 
-`Build` 是 CI 生成的十进制流水线构建号，从 1 开始递增。一次发布工作流为所有平台产物分配同一个 Build，保证例如 `0.2.0.37` 在 Windows 和 macOS 上代表同一份逻辑发布。重新生成并发布产物必须产生新的 Build；同一次 workflow 的重试不能覆盖已上传的版本记录，应创建新的 workflow run。
+`Build` 来自仓库根目录 `build-version.json`，包含 `logicalVersion` 和最后分配的 `build`。每次应用构建先读取、加一、原子写回；失败也保留已分配次数。同一批 Windows/macOS 产物使用一次编号。检查和测试不递增。修改逻辑版本不重置 Build，不能覆盖已发布版本。
 
 版本比较必须数字化：
 
@@ -30,7 +30,7 @@ X.Y.Z.Build
 
 不能用字典序比较，例如 `0.1.101.2` 必须大于 `0.1.99.20`。兼容 `v0.2.0.37` 输入，但内部统一去掉 `v` 前缀。
 
-仓库中的 Cargo/Tauri 基础版本保持三段 `X.Y.Z`；CI 生成临时 overlay，使用合法 SemVer `X.Y.Z+Build` 供 Tauri 生成 bundle 和签名。业务层独立比较四段数字，不能依赖 SemVer build metadata 的排序。四段完整版本必须同时写入：
+Cargo/Tauri 基础版本保持三段 `X.Y.Z`；计数文件决定本次逻辑版本，统一构建入口生成 overlay，使用合法 SemVer `X.Y.Z+Build` 供 Tauri 生成 bundle 和签名。业务层独立比较四段数字，不能依赖 SemVer build metadata 的排序。四段完整版本必须同时写入：
 
 - 构建环境和产物元数据；
 - 安装包文件名；
@@ -39,7 +39,11 @@ X.Y.Z.Build
 
 推荐首个发布标识为 `0.1.0.1`，但正式采用哪个逻辑版本由发布负责人决定。
 
-Build 来自专用 Release workflow 的 `github.run_number`，Windows/macOS 共用。失败后重新构建须创建新 run；workflow 禁止使用相同 run 的 rerun 发布，避免重复 Build。不要重命名或重建 workflow 导致计数重置。
+构建入口为 `node scripts/build.mjs <Tauri 参数>`（npm 别名为 `npm run build`）；Mac 权限联调继续用 `npm run build:macos`。Tauri hook 拒绝绕过统一入口的应用打包。build.rs 从文件读取同一版本，界面、文件资源和安装包使用一致的四段编号。文件缺失、损坏、越界或已分配版本不匹配时失败，不自动归零。
+
+本地的计数文件随源码保存；不同机器／工作树各有一份，不能把独立本地计数视为全局分布式唯一编号。打包同一批平台时先分配一次，将该文件复制到各构建机，并设置 `NEARCAST_BUILD_VERSION=X.Y.Z.Build`，构建入口校验后复用，不再次加一。构建前同步计数，合并时保留较大次数。
+
+可信 CI 在 `build-counter` 元数据分支保存同样的 JSON，以普通快进 push 原子预留编号，不修改源码分支或使用 GitHub run_number。并发任务推送冲突时重新读取并递增；预留成功后失败也不会回收。PR 检查只在临时 checkout 本地递增，不写远端计数；不可将这种产物直接作为正式版本发布。Release 平台矩阵下载同一份已预留文件并复用。发布仍要求新 workflow run，防止重传既有资产；本次修改不自动创建远端分支或发布。
 
 MSI 只比较 ProductVersion 的前三段，因此其内部安装器版本使用 `1.0.Build`。例如对外 `0.2.0.37` 对应 MSI `1.0.37`；这不是软件逻辑版本。NSIS 的数字 build metadata 生成四段文件版本，更新模式允许同 SemVer 逻辑版本的新构建覆盖；macOS `CFBundleVersion` 使用 Build。发布脚本检查 Windows 原生字段上限 65535；超过时必须先调整映射，不能静默截断或归零。
 
