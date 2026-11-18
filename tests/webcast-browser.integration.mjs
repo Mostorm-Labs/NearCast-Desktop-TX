@@ -454,7 +454,7 @@ try {
   assert.equal(await page.evaluate(()=>testReceiver.lastNativeAction.records[0].y),179);
   await page.evaluate(()=>testReceiver.sendSample(2,2));
   await page.waitForFunction(()=>__nearcastTouchbackDiagnostics().touchContacts===0);
-  for(const [kind,displays,blocked] of [['window',1,'BROWSER_WINDOW_INPUT_UNSUPPORTED'],['monitor',2,'BROWSER_MULTIPLE_DISPLAYS_UNPROVEN'],['monitor',1,null]]){
+  for(const [kind,displays,blocked] of [['window',1,'BROWSER_WINDOW_INPUT_UNSUPPORTED'],['browser',1,'BROWSER_WINDOW_INPUT_UNSUPPORTED'],['monitor',2,'BROWSER_MULTIPLE_DISPLAYS_UNPROVEN'],['monitor',1,null]]){
     await page.locator('#stop-share-button').click();
     await page.evaluate(([kind,count])=>{testReceiver.captureKind=kind;testReceiver.displayCount=count;},[kind,displays]);
     await share();
@@ -464,14 +464,64 @@ try {
       await page.waitForFunction(reason=>__nearcastTouchbackDiagnostics().detail?.includes(reason),blocked);
       assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().sourceReady),false);
     }else await page.waitForFunction(()=>testReceiver.inputActive&&__nearcastTouchbackDiagnostics().sourceReady);
+    if(kind!=='monitor'){
+      assert.equal(await page.locator('#casting-input-enabled').isDisabled(),true,'window and tab sharing cannot enable remote control');
+      assert.equal(await page.locator('#casting-input-enabled').isChecked(),false,'a saved opt-in must not look active for window sharing');
+      assert.match(await page.locator('#casting-input-help').innerText(),/窗口投屏不支持反控.*整个屏幕/);
+      assert.equal(await page.locator('#input-request-control').isDisabled(),true,'the alternate enable action obeys the capture restriction');
+      const requests=await page.evaluate(()=>testReceiver.senderControlRequests?.length??0);
+      await page.locator('#casting-input-enabled').evaluate(input=>input.click());
+      assert.equal(await page.evaluate(()=>testReceiver.senderControlRequests?.length??0),requests,'clicking the unavailable switch cannot request receiver input');
+      await page.locator('#settings-shortcut').click();await page.locator('[data-settings-tab=general]').click();
+      assert.equal(await page.locator('#input-enabled').isDisabled(),true,'General explains the same capture restriction');
+      assert.equal(await page.locator('#input-enabled').isChecked(),true,'window sharing preserves the saved local opt-in');
+      await page.locator('#input-enabled').evaluate(input=>{input.checked=true;input.dispatchEvent(new Event('change'));});
+      assert.equal(await page.evaluate(()=>testReceiver.senderControlRequests?.length??0),requests,'a late enable event cannot bypass the capture restriction');
+      assert.equal(await page.locator('#input-enabled').isChecked(),true,'a blocked attempt preserves the previous local opt-in');
+      for(const [language,words]of [['en',/entire screen/],['ja',/画面全体/],['de',/gesamten Bildschirm/],['zh',/整个屏幕/]]){
+        await page.locator('#language-select').selectOption(language);
+        assert.match(await page.locator('#settings-input-help').innerText(),words);
+        assert.match(await page.locator('#casting-input-help').textContent(),words);
+        assert.match(await page.locator('#input-enabled').getAttribute('title'),words);
+        assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('nearhub-cast-settings-v1')).inputEnabled),true,'language changes cannot clear the remembered opt-in');
+      }
+      await page.setViewportSize({width:360,height:480});
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'the window-only guidance fits narrow settings');
+      await page.setViewportSize({width:960,height:640});await page.locator('#settings-close').click();
+      assert.equal(await page.locator('#casting-input-enabled').isDisabled(),true);
+      await screenshot('casting-window-remote-unavailable');
+    }else{
+      assert.equal(await page.locator('#casting-input-enabled').isDisabled(),false,'monitor selection restores the switch without changing the local preference');
+      assert.equal(await page.locator('#casting-input-enabled').isChecked(),true);
+      assert.equal(await page.locator('#input-enabled').isDisabled(),false);
+    }
     const before=await page.evaluate(()=>testReceiver.frames);
     await page.waitForFunction(n=>testReceiver.frames>n+2,before);
     assert.equal(await page.evaluate(()=>testReceiver.receivedTracks.filter(t=>t==='video').length),1);
     assert.equal(await page.evaluate(()=>testReceiver.receivedTracks.filter(t=>t==='audio').length),1);
   }
+  // An existing opt-out must also survive a window share and a blocked enable.
+  await page.locator('#stop-share-button').click();
+  await page.waitForFunction(()=>!document.querySelector('#casting-input-enabled').disabled);
+  await page.locator('#casting-input-enabled').uncheck();
+  await page.waitForFunction(()=>!__nearcastTouchbackDiagnostics().localEnabled);
+  await page.evaluate(()=>{testReceiver.captureKind='window';});await share();
+  await page.waitForFunction(()=>document.querySelector('#preview').srcObject?.getVideoTracks()[0]?.readyState==='live');
+  assert.equal(await page.locator('#casting-input-enabled').isDisabled(),true);
+  await page.locator('#settings-shortcut').click();await page.locator('[data-settings-tab=general]').click();
+  assert.equal(await page.locator('#input-enabled').isChecked(),false);
+  await page.locator('#input-enabled').evaluate(input=>{input.checked=true;input.dispatchEvent(new Event('change'));});
+  assert.equal(await page.locator('#input-enabled').isChecked(),false,'blocked enable restores an existing opt-out');
+  assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().localEnabled),false);
+  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('nearhub-cast-settings-v1')).inputEnabled),false);
+  assert.match(await page.locator('#settings-input-help').innerText(),/窗口投屏不支持反控/);
+  await page.locator('#settings-close').click();await page.locator('#stop-share-button').click();
+  await page.waitForFunction(()=>!document.querySelector('#casting-input-enabled').disabled);
+  await page.locator('#casting-input-enabled').check();
+  await page.waitForFunction(()=>__nearcastTouchbackDiagnostics().localEnabled);
+  await page.evaluate(()=>{testReceiver.captureKind='monitor';});
   // Production pixel matching against an actual browser video frame, using a
   // deterministic native bridge fixture. Same-sized displays cannot be guessed.
-  await page.locator('#stop-share-button').click();
   await page.evaluate(()=>{testReceiver.testCalibration=true;testReceiver.displayCount=2;testReceiver.selectedDisplay=1;});
   await share();
   await page.waitForFunction(()=>testReceiver.inputActive&&__nearcastTouchbackDiagnostics().sourceReady);
