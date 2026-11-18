@@ -21,6 +21,7 @@ export class WebCastTouchbackSender{
     this.scrollDiagnostics=new ScrollDiagnostics();
     this.stats={textReceived:0,binaryReceived:0,recentControl:[],lastOpenRequest:null,receivedTouchSamples:0,receivedMouseSamples:0,lastReceivedInput:null};
     this.onConsentRequest=onConsentRequest;this.onEnabledChanged=onEnabledChanged;this.consent=null;this.consentController=null;this.consentIds=new Set();
+    this.receiverVersion=0;this.resetReceiverState();
   }
   feedback(event){try{this.onTouchFeedback(event);}catch{/* Feedback cannot own a session. */}}
   status(){const snapshot=this.diagnostics();this.onStatus(this.engine?.state==='active'?'accepted':this.server?.ready?'session_ready':'waiting',{...snapshot,nativeOwnerId:this.engine?.owner?.ownerId??null});}
@@ -67,7 +68,7 @@ export class WebCastTouchbackSender{
     this.channel=channel;const generation=this.generation;
     this.engine=this.makeEngine(generation);
     const server=new AxtpServer({send:frame=>{if(this.server===server&&this.channel===channel&&channel.readyState==='open')channel.send(frame);},
-      onReady:()=>{if(this.server===server)void this.refreshSource();},
+      onReady:()=>{if(this.server===server){void this.refreshSource();void this.refreshReceiverState();}},
       onFault:failure=>{if(this.server!==server)return;this.detail=String(failure.message??failure);this.reason='INPUT_SESSION_FAULT';this.source=null;this.sendSource();void this.retire(this.engine,'protocol fault');channel.close?.();this.status();},
       onRequest:(method,params,context)=>this.requestFromReceiver(method,params,context),
       onStream:frame=>{
@@ -82,7 +83,7 @@ export class WebCastTouchbackSender{
       },
     });
     this.server=server;this.tickTimer=setInterval(()=>{if(this.server===server)server.tick();},250);this.tickTimer.unref?.();
-    this.probeTimer=setInterval(()=>void this.refreshSource(),1000);this.probeTimer.unref?.();
+    this.probeTimer=setInterval(()=>{void this.refreshSource();void this.refreshReceiverState();},1000);this.probeTimer.unref?.();
     await this.refreshSource();return generation===this.generation;
   }
   requestFromReceiver(method,params,context){
@@ -106,9 +107,10 @@ export class WebCastTouchbackSender{
     const valid=data?.version===1&&data.contractFingerprint===INPUT_CONTRACT.fingerprint&&text(data.runtimeInstanceId)&&target&&
       targetFields.every(field=>text(target[field]))&&Object.keys(target).every(field=>targetFields.includes(field))&&
       ['sessionGeneration','bindingGeneration','lifecycleGeneration'].every(field=>/^[1-9]\d*$/.test(target[field])&&BigInt(target[field])<=0xffffffffffffffffn);
-    if(!valid){this.cancelConsent();this.target=null;this.invalidateSource('TARGET_CONTRACT_MISMATCH');return{status:'invalid_target'};}
+    if(!valid){this.cancelConsent();this.target=null;this.resetReceiverState();this.invalidateSource('TARGET_CONTRACT_MISMATCH');return{status:'invalid_target'};}
     const value={runtimeInstanceId:data.runtimeInstanceId,target:structuredClone(target)};
-    if(canonical(this.target)!==canonical(value)){this.cancelConsent();this.consentIds.clear();this.target=value;this.invalidateSource('TARGET_CHANGED');}
+    if(canonical(this.target)!==canonical(value)){this.cancelConsent();this.consentIds.clear();this.target=value;this.resetReceiverState();this.invalidateSource('TARGET_CHANGED');}
+    void this.refreshReceiverState();
     const request=data.controlRequest;
     if(request&&text(request.requestId)&&request.timeoutMs===8000){
       if(request.cancel===true){if(this.consent?.requestId===request.requestId){this.cancelConsent();this.sendSource();}}
@@ -132,11 +134,57 @@ export class WebCastTouchbackSender{
   }
   async requestReceiverControl(enabled=true){
     if(!this.server?.ready||!this.target)throw new InputError('INVALID_STATE','接收端反控通道尚未就绪');
+    if(enabled&&this.receiverSupported===false)throw new InputError('NOT_SUPPORTED','接收端不支持反控');
+    if(enabled&&this.receiverEnabled===false)throw new InputError('PERMISSION_DENIED','接收端已关闭反控总开关');
     if(enabled&&(!this.enabled||!this.source))throw new InputError('INVALID_STATE','请先允许反控并分享整个屏幕');
     const server=this.server,generation=this.generation;
     const result=await server.request('cast.setTouchbackEnabled',{target:this.target.target,enabled:enabled===true,commandId:crypto.randomUUID()});
     if(server!==this.server||generation!==this.generation)throw new InputError('CANCELED','反控会话已更换');
     return result;
+  }
+  resetReceiverState(){
+    this.receiverVersion++;this.receiverRefresh=null;this.receiverCapabilities=null;
+    this.receiverSupported=null;this.receiverEnabled=null;this.receiverStateReady=false;this.receiverReason=null;
+  }
+  refreshReceiverState(){
+    if(!this.server?.ready||!this.target||this.receiverSupported===false)return Promise.resolve();
+    if(this.receiverRefresh)return this.receiverRefresh;
+    const server=this.server,generation=this.generation,version=this.receiverVersion,target=structuredClone(this.target);
+    const current=()=>server===this.server&&server.ready&&generation===this.generation&&version===this.receiverVersion&&canonical(target)===canonical(this.target);
+    const refresh=(async()=>{
+      try{
+        if(!this.receiverCapabilities){
+          const caps=await server.request('cast.getControlCapabilities',{});if(!current())return;
+          if(caps?.runtimeInstanceId!==target.runtimeInstanceId||!Array.isArray(caps.methods)||!Array.isArray(caps.supportedControlVersions))throw new InputError('INVALID_STATE','Invalid receiver capabilities');
+          this.receiverCapabilities=caps;
+          this.receiverSupported=caps.supportedControlVersions.includes(1)&&caps.methods.includes('cast.getTouchbackState')&&caps.methods.includes('cast.setTouchbackEnabled')&&
+            caps.touchback?.supportsControlPlane===true&&Array.isArray(caps.touchback.formats)&&caps.touchback.formats.includes('input-sample-v1')&&
+            Array.isArray(caps.touchback.protocols)&&caps.touchback.protocols.includes('webcast')&&Array.isArray(caps.touchback.inputTypes)&&caps.touchback.inputTypes.some(type=>['touch','mouse'].includes(type));
+          if(!this.receiverSupported){this.receiverReason='RECEIVER_INPUT_UNSUPPORTED';this.status();return;}
+        }
+        // Older paired RX channels expose only target state. Never send a
+        // master query unless this authenticated channel advertises it.
+        let master;
+        if(this.receiverCapabilities.methods.includes('cast.getTouchbackMaster')){
+          master=await server.request('cast.getTouchbackMaster',{});if(!current())return;
+          if(master?.runtimeInstanceId!==target.runtimeInstanceId||typeof master.enabled!=='boolean'||!/^(0|[1-9]\d*)$/.test(master.revision))throw new InputError('INVALID_STATE','Invalid receiver master state');
+        }
+        const state=await server.request('cast.getTouchbackState',{target:target.target});if(!current())return;
+        if(canonical(state?.target)!==canonical(target.target)||typeof state.receiverOptIn!=='boolean'||typeof state.effectiveEnabled!=='boolean'||typeof state.diagnosticReason!=='string')throw new InputError('INVALID_STATE','Invalid receiver target state');
+        // effectiveEnabled=false also covers ordinary inactive routes and
+        // local capture gaps; it is not evidence of receiver master policy.
+        this.receiverEnabled=master?master.enabled:state.diagnosticReason!=='RECEIVER_INPUT_DISABLED';
+        this.receiverStateReady=true;this.receiverReason=this.receiverEnabled?null:'RECEIVER_INPUT_DISABLED';
+      }catch(failure){
+        if(!current())return;
+        this.receiverEnabled=null;this.receiverStateReady=false;this.receiverReason='RECEIVER_INPUT_UNKNOWN';
+        if(['NOT_SUPPORTED','NOT_IMPLEMENTED','RPC_METHOD_NOT_FOUND'].includes(failure.code)){this.receiverSupported=false;this.receiverReason='RECEIVER_INPUT_UNSUPPORTED';}
+      }
+      if(current())this.status();
+    })();
+    this.receiverRefresh=refresh;
+    void refresh.finally(()=>{if(this.receiverRefresh===refresh)this.receiverRefresh=null;});
+    return refresh;
   }
   invalidateSource(reason){
     this.feedback({stage:'clear'});this.refreshVersion++;this.source=null;this.sourceKey=null;this.reason=reason;this.sendSource();
@@ -212,6 +260,7 @@ export class WebCastTouchbackSender{
   }
   fence(reason='session ended'){
     this.cancelConsent();this.consentIds.clear();
+    this.resetReceiverState();
     this.feedback({stage:'clear'});this.generation++;this.refreshVersion++;clearInterval(this.tickTimer);clearInterval(this.probeTimer);
     this.server?.dispose();this.server=null;this.channel=null;this.identity=null;this.target=null;this.source=null;this.sourceKey=null;this.wireStateKey=null;this.captureSeen=false;
     const closing=this.retire(this.engine,reason);this.status();return closing.finally(()=>this.status());
@@ -222,7 +271,7 @@ export class WebCastTouchbackSender{
     const cleanupPending=Boolean(state.cleanupPending||retiredInputs.length);
     const cleanupError=retiredInputs.map(input=>input.lastError).find(Boolean);
     return{controlChannelReady:this.channel?.readyState==='open',appReady:this.server?.ready===true,nativeReady:this.lastProbe?.nativeReady===true,
-      sourceReady:Boolean(this.source),localEnabled:this.enabled,receiverEnabled:null,nativeInputTypes:[...(this.lastProbe?.nativeTypes??this.lastProbe?.inputTypes??[])],
+      sourceReady:Boolean(this.source),localEnabled:this.enabled,receiverEnabled:this.receiverEnabled,receiverSupported:this.receiverSupported,receiverStateReady:this.receiverStateReady,receiverDisabledReason:this.receiverReason,nativeInputTypes:[...(this.lastProbe?.nativeTypes??this.lastProbe?.inputTypes??[])],
       disabledReason:cleanupPending?'NATIVE_CLEANUP_PENDING':this.source?null:this.reason,detail:this.detail,...state,lastError:state.lastError??cleanupError??null,
       retiredInputs,cleanupPending,injectionCount:state.submittedRecords??0,nativeInput:this.provider.snapshot?.()??null};
   }

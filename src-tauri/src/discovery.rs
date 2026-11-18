@@ -49,6 +49,9 @@ impl DiscoveryCache {
     pub fn trust_display_target(&self, instance: &str, device_id: &str) -> Result<ResolvedTarget, String> {
         self.display_target(instance, device_id, "trust-display-v1")
     }
+    pub fn pairing_target(&self, instance: &str, device_id: &str) -> Result<ResolvedTarget, String> {
+        self.display_target(instance, device_id, "webcast")
+    }
     pub fn local_signal_target(&self,instance:&str,device_id:&str,runtime:&str)->Result<ResolvedTarget,String>{
         let entry=self.entries.get(&format!("_nearcast._tcp.local.:{instance}")).ok_or("Receiver discovery expired; scan again")?;
         if runtime.is_empty()||entry.txt.get("runtime").map(String::as_str)!=Some(runtime)||entry.txt.get("local-state").map(String::as_str)!=Some("ready"){
@@ -69,6 +72,7 @@ impl DiscoveryCache {
     }
 }
 
+#[derive(PartialEq, Eq)]
 pub struct ResolvedTarget {
     pub hostname: String,
     pub port: u16,

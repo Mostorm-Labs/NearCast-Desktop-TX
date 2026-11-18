@@ -1,0 +1,65 @@
+/* NearRooms · pairing (1876:11511), ready (1889:11846), sharing (1892:12020). */
+html[data-view="home"][data-connection="code"] .settings-shortcut { display: grid; }
+.home-screen[data-connection="code"] { padding-bottom: 40px; }
+.home-screen[data-connection="code"] .discovery-card { max-width: none; min-height: 376px; padding: 0 24px 24px; gap: 0; }
+.home-screen[data-connection="code"] .home-divider,
+.home-screen[data-connection="code"] #settings-open { display: none; }
+.home-screen[data-connection="devices"] #return-to-devices { display: none; }
+.home-screen #connect-panel-code { width: 100%; margin: 0; padding: 0; }
+.pair-back { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 60px; padding: 0 8px; }
+.pair-back #connect-tab-devices { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; padding: 0; border: 0; border-radius: 4px; color: var(--text-primary); background: transparent; font: inherit; font-size: 16px; font-weight: 600; line-height: 24px; cursor: pointer; }
+.pair-back #connect-tab-devices:disabled { opacity: .5; cursor: wait; }
+.pair-target { display: flex; align-items: center; justify-content: flex-end; min-width: 0; }
+.pair-selected-device { overflow: hidden; max-width: 360px; margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.pairing-illustration { display: block; margin: 0 auto 24px; object-fit: contain; }
+#pair-form .code-digit { width: 66px; height: 66px; border: 1px solid var(--panel-border); border-radius: 16px; color: var(--text-primary); background: var(--page-background); font: inherit; font-size: 30px; font-weight: 600; box-shadow: none; }
+#pair-form .code-digit:focus { border-color: var(--accent); box-shadow: none; outline: 0; }
+.code-cell { position: relative; display: block; }
+.code-caret { display: none; position: absolute; top: 14px; left: calc(50% - 1px); width: 2px; height: 38px; background: var(--accent); pointer-events: none; }
+.code-digit:focus:placeholder-shown + .code-caret { display: block; }
+.pair-instruction { margin: 11px 0 0; color: var(--text-primary); font-size: 14px; line-height: 20px; }
+#connect-panel-code .code-display-status { min-height: 0; margin: 12px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 18px; }
+#connect-panel-code .code-display-status:empty { display: none; }
+#connect-panel-code #connect-button { min-height: 40px; margin-top: 32px; padding: 10px 16px; border-radius: 8px; color: var(--text-primary); background: var(--accent); font-size: 16px; font-weight: 500; line-height: 20px; box-shadow: none; }
+.casting-screen { display: flex; flex-direction: column; gap: 12px; width: min(644px,100%); margin: auto 0; padding: 86px 0 0; }
+.casting-panel { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; min-height: 376px; padding: 24px; border: 2px solid var(--panel-border); border-radius: 18px; background: radial-gradient(ellipse 80% 22% at 50% 0,#439bfc0d,transparent),#1e212e33; box-shadow: 0 0 40px #0003; text-align: center; }
+.casting-heading h1 { margin: 0; color: var(--text-primary); font-size: 22px; font-weight: 600; line-height: 26px; letter-spacing: 0; overflow-wrap: anywhere; }
+.casting-heading h1 span { color: var(--accent); }
+.casting-heading > p { margin: 4px 0 0; color: var(--text-tertiary); font-size: 14px; line-height: 17px; }
+.casting-preferences { display: flex; flex-direction: column; gap: 12px; width: 100%; margin: 24px 0 20px; padding: 16px; border-radius: 16px; background: var(--panel-background); text-align: left; }
+.casting-setting { display: flex; align-items: center; gap: 16px; }
+.casting-setting h2 { margin: 0; color: var(--text-primary); font-size: 16px; font-weight: 600; line-height: 24px; }
+.casting-setting p { margin: 4px 0 0; color: var(--text-tertiary); font-size: 14px; line-height: 20px; }
+.casting-divider { display: block; max-width: 100%; height: 1px; object-fit: cover; }
+.casting-switch .switch-hover { display: none; left: -10px; top: -10px; }
+.casting-switch input:checked:hover:not(:disabled) + .switch-images .switch-on { display: none; }
+.casting-switch input:checked:hover:not(:disabled) + .switch-images .switch-hover { display: block; }
+.casting-panel .casting-actions { flex: 0 0 auto; gap: 8px; width: min(240px,100%); margin: auto auto 0; }
+.casting-panel .button { min-height: 36px; padding: 8px 14px; border-radius: 8px; font-size: 14px; font-weight: 500; line-height: 20px; box-shadow: none; }
+.casting-panel .primary { background: var(--accent); }
+.casting-panel .danger { background: #ef4444; }
+.casting-panel .secondary { color: var(--text-primary); background: var(--panel-border); }
+.casting-panel .button:hover:not(:disabled), #connect-button:hover:not(:disabled) { transform: none; filter: brightness(1.08); }
+.casting-panel .error { width: 100%; max-width: none; margin-top: 16px; text-align: left; overflow-wrap: anywhere; }
+.session-details { width: 100%; padding: 0 8px; color: var(--text-tertiary); font-size: 12px; line-height: 20px; text-align: left; }
+.session-details > summary { width: fit-content; margin: auto; border-radius: 4px; cursor: pointer; }
+.session-details > summary:hover { color: var(--text-secondary); }
+.session-details[open] { padding: 16px; border: 1px solid var(--panel-border); border-radius: 12px; background: #1e212e80; }
+.casting-screen:has(.session-details[open]) { margin-top: 28px; padding-top: 0; }
+.session-details .preview-wrap { margin: 16px 0 0; }
+.session-details .preview-wrap video { max-height: 220px; }
+.preview-empty { margin: 16px 0 0; text-align: center; }
+.session-details summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width:650px) {
+  .home-screen[data-connection="code"] .discovery-card { padding: 0 16px 24px; }
+  .pair-back { padding: 0; }
+  .pair-selected-device { max-width: 160px; }
+  #pair-form .code-input { gap: 10px; }
+  #pair-form .code-digit { width: 58px; height: 66px; }
+  .pair-instruction { font-size: 13px; }
+  .casting-panel { padding: 24px 16px; }
+  .casting-setting p { font-size: 13px; }
+}
+@media (max-height:560px) {
+  .casting-screen { margin-top: 16px; margin-bottom: 0; padding-top: 0; }
+}

@@ -6,7 +6,7 @@
 
 发现依旧使用 `_nearcast._tcp.local.`。新增 `signaling-select-v1,code-display-v2` 能力及
 `runtime/status-rev/local-state/cloud-state` TXT；状态只作为提示，不作为 TLS 信任。
-目的地来自原生 DNS-SD 的 SRV/A/AAAA，已保存的 SPKI pin 验证实际接收端。
+目的地来自原生 DNS-SD 的 SRV/A/AAAA。选择设备后，`nearcast_trust_pair` 自动观察 TLS 公钥；首次连接保存 SPKI pin，已有记录则验证相同公钥，取消或服务更换会废弃旧结果。发送端不展示指纹核对操作，随后使用已保存的 SPKI pin 验证实际接收端。
 
 选定服务后，调用 v2 `/nearcast/code-display`，携带 `backend: local|cloud` 与
 `runtimeInstanceId`。RX 现场显示对应服务的码，HTTP 只返回匹配的确认，不传回配对码。

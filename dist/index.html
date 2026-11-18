@@ -5,67 +5,77 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NearHub Cast</title>
   <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./home.css" />
+  <link rel="stylesheet" href="./settings.css" />
+  <link rel="stylesheet" href="./casting.css" />
 </head>
 <body>
+  <span class="header-glow" aria-hidden="true"><img src="./assets/figma/header-glow.svg" width="32" height="32" alt="" /></span>
   <header id="window-titlebar" class="window-titlebar" hidden>
     <div id="window-drag" class="window-drag"><span class="window-app-icon" aria-hidden="true">N</span><span>NearHub Cast</span></div>
-    <div class="window-buttons"><button id="window-minimize" type="button" aria-label="最小化窗口" title="最小化窗口"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6h10"/></svg></button><button id="window-maximize" type="button" aria-label="最大化窗口" title="最大化窗口"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 1.5h9v9h-9z"/></svg></button><button id="window-close" type="button" aria-label="关闭窗口" title="关闭窗口"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m1.5 1.5 9 9m0-9-9 9"/></svg></button></div>
+    <div class="window-buttons"><button data-i18n-aria-label="window.minimize" data-i18n-title="window.minimize" id="window-minimize" type="button" aria-label="最小化窗口" title="最小化窗口"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6h10"/></svg></button><button id="window-maximize" type="button" aria-label="最大化窗口" title="最大化窗口"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 1.5h9v9h-9z"/></svg></button><button data-i18n-aria-label="window.close" data-i18n-title="window.close" id="window-close" type="button" aria-label="关闭窗口" title="关闭窗口"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m1.5 1.5 9 9m0-9-9 9"/></svg></button></div>
   </header>
   <p id="window-error" class="window-error" role="status" hidden></p>
   <main class="webcast-sender">
-    <header class="topbar"><button id="settings-open" class="settings-entry" type="button" aria-label="打开设置">⚙ 设置</button><div class="logo"><span class="logo-mark">N</span><span>NearHub Cast</span></div><div class="update-heading"><span id="app-version"></span><button id="update-button" type="button" class="refresh">检查更新</button></div></header>
+    <header class="topbar"><div class="logo"><img class="logo-mark" src="./assets/figma/brand-mark.svg" width="36" height="36" alt="" /><span>NearHub Cast</span></div><div class="update-heading"><button data-i18n-aria-label="common.openSettings" data-i18n-title="common.settings" id="settings-shortcut" data-settings-open class="settings-shortcut" type="button" aria-label="打开设置" title="Casting Settings"><img src="./assets/figma/settings.svg" width="16" height="16" alt="" /></button><span id="app-version"></span></div></header>
 
-    <section id="macos-permissions" class="permissions-panel" aria-labelledby="permissions-title" hidden>
-      <div class="permissions-heading"><h2 id="permissions-title">macOS 权限</h2><button id="refresh-permissions" class="refresh" type="button">刷新状态</button></div>
-      <p class="permissions-help">点击开关前往系统设置修改，返回后自动刷新。授权后如未生效，请重新启动应用。</p>
-      <div id="permission-rows" class="permission-grid"></div>
-      <p id="permissions-error" class="error" role="status" hidden></p>
-    </section>
 
-    <section id="code-view" class="sender-panel">
-      <div class="connection-tabs" role="tablist" aria-label="连接方式">
-        <button id="connect-tab-code" role="tab" aria-selected="true" aria-controls="connect-panel-code" type="button">输入配对码</button>
-        <button id="connect-tab-devices" role="tab" aria-selected="false" aria-controls="connect-panel-devices" tabindex="-1" type="button">查找设备</button>
-      </div>
-      <div class="panel-eyebrow">WEBCAST SENDER</div>
-      <h1 id="connect-heading">输入配对码</h1>
-      <p id="connect-description" class="panel-desc">输入接收端显示的 4 位配对码，直接连接。</p>
-      <p id="platform-status" class="platform-status" aria-live="polite">正在读取平台能力…</p>
 
-      <section id="connect-panel-code" role="tabpanel" aria-labelledby="connect-tab-code"><p id="pair-device-name" class="pair-selected-device" hidden></p><button id="pair-clear-device" class="refresh" type="button" hidden>清除设备选择，直接输码</button>      <form id="pair-form">
-        <div class="code-input" aria-label="Pairing code">
-          <input class="code-digit" maxlength="1" readonly pattern="[A-Z0-9]" inputmode="url" autocomplete="one-time-code" aria-label="Pairing code digit 1" />
-          <input class="code-digit" maxlength="1" readonly pattern="[A-Z0-9]" inputmode="url" aria-label="Pairing code digit 2" />
-          <input class="code-digit" maxlength="1" readonly pattern="[A-Z0-9]" inputmode="url" aria-label="Pairing code digit 3" />
-          <input class="code-digit" maxlength="1" readonly pattern="[A-Z0-9]" inputmode="url" aria-label="Pairing code digit 4" />
+    <section id="code-view" class="home-screen" aria-labelledby="connect-heading" data-connection="devices">
+      <header class="home-intro"><h1 id="connect-heading" data-i18n="home.welcome">Welcome to cast screen</h1><p id="connect-description" class="panel-desc" data-i18n="home.description">Mirror your screen to a nearby display.</p></header>
+      <div class="discovery-card">
+
+      <section id="connect-panel-code" aria-label="Pair with a receiver" data-i18n-aria-label="pair.title">
+        <div class="pair-back"><button data-i18n-aria-label="pair.return" id="connect-tab-devices" aria-controls="connect-panel-devices" type="button"><span class="back-icon"><img src="./assets/figma/back.svg" alt="" /></span><span data-i18n="common.back">Back</span></button><div class="pair-target"><p id="pair-device-name" class="pair-selected-device" hidden></p></div></div>
+        <img class="pairing-illustration" src="./assets/figma/pairing-display.png" width="142" height="95" alt="" />
+        <form id="pair-form">
+        <div class="code-input" aria-label="Pairing code" data-i18n-aria-label="pair.code">
+          <span class="code-cell"><input class="code-digit" maxlength="1" readonly pattern="[A-Z0-9]" inputmode="url" placeholder=" " autocomplete="one-time-code" aria-label="Pairing code digit 1" data-pair-digit="1" /><span class="code-caret" aria-hidden="true"></span></span>
+          <span class="code-cell"><input class="code-digit" maxlength="1" readonly pattern="[A-Z0-9]" inputmode="url" placeholder=" " aria-label="Pairing code digit 2" data-pair-digit="2" /><span class="code-caret" aria-hidden="true"></span></span>
+          <span class="code-cell"><input class="code-digit" maxlength="1" readonly pattern="[A-Z0-9]" inputmode="url" placeholder=" " aria-label="Pairing code digit 3" data-pair-digit="3" /><span class="code-caret" aria-hidden="true"></span></span>
+          <span class="code-cell"><input class="code-digit" maxlength="1" readonly pattern="[A-Z0-9]" inputmode="url" placeholder=" " aria-label="Pairing code digit 4" data-pair-digit="4" /><span class="code-caret" aria-hidden="true"></span></span>
         </div>
-        <p id="pair-input-help" class="pair-help" role="status">请输入 4 位英文字母或数字，每格一位。</p>
+        <p class="pair-instruction" data-i18n="pair.instruction">Enter the 4-character code shown on your receiver.</p>
+        <p data-i18n="pair.help" id="pair-input-help" class="sr-only" role="status">请输入 4 位英文字母或数字，每格一位。</p>
         <p id="code-display-status" class="code-display-status" aria-live="polite"></p>
-        <details id="trust-card" class="trust-card" hidden aria-live="polite">
-          <summary id="trust-title" class="trust-title">现场核对接收端指纹</summary>
-          <p id="trust-copy" class="trust-copy"></p>
-          <pre id="trust-fingerprint" class="trust-fingerprint"></pre>
-          <label id="trust-check-label" class="trust-check" hidden><input id="trust-check" type="checkbox" /> 我已在接收端逐组核对完整指纹</label>
-          <div class="trust-actions"><button id="trust-confirm" class="button primary" type="button" hidden disabled>确认并信任设备</button><button id="trust-retry" class="button primary" type="button" hidden>重新显示指纹</button><button id="trust-cancel" class="button secondary" type="button">取消</button><button id="trust-revoke" class="button secondary" type="button" hidden>撤销此设备信任</button></div>
-          <p id="trust-error" class="error" hidden></p>
-        </details>
-        <button id="connect-button" class="button primary" type="submit">连接接收端</button>
+        <button data-i18n="pair.join" id="connect-button" class="button primary" type="submit">Join receiver</button>
       </form>
-      <p id="code-error" class="error" hidden></p>
 </section>
-      <section id="connect-panel-devices" class="devices" role="tabpanel" aria-labelledby="connect-tab-devices" hidden>
-        <div class="devices-heading"><div><span class="section-kicker">LOCAL NETWORK</span><h2 id="devices-title">Available receivers</h2></div><button id="refresh-devices" class="refresh" type="button">↻ Scan</button></div>
-        <div id="device-status" class="device-status">Scanning for NearCast receivers…</div>
+      <section id="connect-panel-devices" class="devices" aria-labelledby="devices-title">
+        <div class="devices-heading"><div><h2 id="devices-title" data-i18n="discovery.title">Select a display</h2><p data-i18n="discovery.scanning" id="device-status" class="device-status" role="status">Scanning for nearby displays…</p></div><button data-i18n="discovery.scan" id="refresh-devices" class="refresh" type="button">↻ Scan</button></div>
         <div id="device-groups"></div>
       </section>
+      <p id="code-error" class="error" role="alert" hidden></p>
+      <img class="home-divider" src="./assets/figma/divider.svg" width="592" height="1" alt="" />
+      <button data-i18n-aria-label="common.openSettings" id="settings-open" data-settings-open class="settings-entry" type="button" aria-label="打开设置" aria-controls="settings-view"><span class="settings-entry-label"><span class="settings-icon"><img src="./assets/figma/settings.svg" width="16" height="16" alt="" /></span><span data-i18n="common.settings">Casting Settings</span></span><img class="row-chevron" src="./assets/figma/chevron.svg" width="20" height="20" alt="" /></button>
+      </div>
+      <div class="connection-tabs" aria-label="Connection navigation" data-i18n-aria-label="pair.navigation">
+        <button data-i18n="pair.direct" id="connect-tab-code" aria-controls="connect-panel-code" type="button">直接输入配对码</button>
+        <button data-i18n="pair.return" id="return-to-devices" aria-controls="connect-panel-devices" type="button">返回设备选择列表</button>
+      </div>
     </section>
 
-    <section id="casting-view" class="sender-panel casting-panel" hidden>
-      <div class="cast-icon">⌁</div>
-      <div class="panel-eyebrow">CONNECTED TO RECEIVER</div>
-      <h1>Sharing to <span id="target-name">NearCast</span></h1>
-      <p id="cast-status" class="panel-desc">Receiver is ready for casting.</p>
-      <div id="preview-wrap" class="preview-wrap" hidden><video id="preview" autoplay muted playsinline></video><span class="preview-badge">LOCAL PREVIEW</span></div>
+    <section id="casting-view" class="casting-screen" aria-labelledby="casting-heading" hidden>
+      <div class="casting-panel">
+        <header class="casting-heading"><h1 id="casting-heading">Sharing to <span id="target-name">NearCast</span></h1><p id="cast-status" role="status">Receiver is ready for casting.</p></header>
+        <div class="casting-preferences">
+          <div class="casting-setting"><div class="setting-copy"><h2 id="casting-input-title" data-i18n="cast.remote">Allow Remote Control</h2><p id="casting-input-help">Waiting for the receiver’s remote-control status.</p></div><label class="settings-switch casting-switch"><input id="casting-input-enabled" type="checkbox" role="switch" disabled aria-labelledby="casting-input-title" aria-describedby="casting-input-help" /><span class="switch-images" aria-hidden="true"><img class="switch-off" src="./assets/figma/casting-switch-off.svg" alt="" /><img class="switch-on" src="./assets/figma/casting-switch-on.svg" alt="" /><img class="switch-hover" src="./assets/figma/switch-sharing-on.svg" alt="" /></span></label></div>
+          <img class="casting-divider" src="./assets/figma/casting-divider.svg" width="560" height="1" alt="" />
+          <div class="casting-setting"><div class="setting-copy"><h2 id="casting-audio-title" data-i18n="cast.audio">Share System Audio</h2><p id="casting-audio-help">Takes effect when sharing starts. Microphone audio is excluded.</p></div><label class="settings-switch casting-switch"><input id="casting-system-audio-enabled" type="checkbox" role="switch" checked aria-labelledby="casting-audio-title" aria-describedby="casting-audio-help" /><span class="switch-images" aria-hidden="true"><img class="switch-off" src="./assets/figma/casting-switch-off.svg" alt="" /><img class="switch-on" src="./assets/figma/casting-switch-on.svg" alt="" /><img class="switch-hover" src="./assets/figma/switch-sharing-on.svg" alt="" /></span></label></div>
+        </div>
+        <div class="casting-actions">
+          <button data-i18n="cast.start" id="share-button" class="button primary" type="button">Start Sharing</button>
+          <button data-i18n="cast.stop" id="stop-share-button" class="button danger" type="button" hidden>Stop Sharing</button>
+          <button data-i18n="cast.leave" id="leave-button" class="button secondary" type="button">Leave receiver</button>
+        </div>
+        <p id="cast-error" class="error" role="alert" hidden></p>
+      </div>
+      <details id="session-details" class="session-details">
+        <summary data-i18n="preview.title">Session Preview</summary>
+      <p data-i18n="preview.empty" id="preview-empty" class="preview-empty" role="status">开始分享后可预览采集画面。</p>
+      <div id="preview-wrap" class="preview-wrap" hidden><video id="preview" autoplay muted playsinline></video><span class="preview-badge" data-i18n="preview.local">LOCAL PREVIEW</span></div>
+      </details>
+      <div hidden>
       <section class="macos-interaction" aria-label="反向控制">
         <p id="input-state" aria-live="polite">反控未启用</p>
         <p id="input-flow" class="quality-help" aria-live="off"></p>
@@ -73,47 +83,59 @@
         <button id="input-reconnect" class="refresh" type="button" disabled>重建反控连接</button>
         <button id="input-cleanup" class="refresh" type="button" hidden>重试释放输入</button>
       </section>
-      <p class="quality-help">投屏画质、系统声音和反控方式可在左上角“设置”中调整。</p>
-      <div class="casting-actions">
-        <button id="share-button" class="button primary" type="button">Start sharing</button>
-        <button id="stop-share-button" class="button danger" type="button" hidden>Stop sharing</button>
-        <button id="leave-button" class="button secondary" type="button">Leave receiver</button>
-      </div>
-      <p id="cast-error" class="error" hidden></p>
       <p id="touchback-status" class="platform-status" aria-live="polite"></p>
       <details class="touchback-diagnostics">
         <summary>反控收包诊断</summary>
         <p id="scroll-diagnostic-summary">滚轮诊断版 · 保持原有滚动倍率；测试后点击“导出诊断”。</p>
         <pre id="touchback-diagnostics"></pre>
       </details>
+      </div>
     </section>
 
-    <section id="settings-view" class="settings-page" aria-labelledby="settings-title" hidden>
-      <div class="settings-header"><div><span class="section-kicker">NEARHUB CAST</span><h1 id="settings-title" tabindex="-1">设置</h1></div><button id="settings-close" class="button secondary" type="button">返回投屏</button></div>
-      <nav class="settings-tabs" aria-label="设置分类"><button type="button" data-settings-tab="general" aria-pressed="true">通用设置</button><button type="button" data-settings-tab="updates" aria-pressed="false">检查更新</button><button type="button" data-settings-tab="feedback" aria-pressed="false">Feedback</button></nav>
-      <section id="settings-general" class="settings-content" aria-label="通用设置">
-          <h2>连接方式</h2>
-          <label><input id="local-signaling-enabled" type="checkbox" checked> 局域网投屏</label>
-          <p class="quality-help">开启时仅连接所选接收端的本地服务；关闭后使用云端协商。下次连接生效。</p>
-        <h2>投屏与声音</h2>
-      <section class="video-quality" aria-labelledby="video-quality-title">
-        <div class="quality-heading"><span id="video-quality-title">Video quality</span><span id="video-quality-summary">Fixed · 1920 × 1080 · 12 Mbps</span></div>
+    <section id="settings-view" class="settings-page" aria-labelledby="settings-title" data-tab="permissions" hidden>
+      <div class="settings-back"><button id="settings-close" type="button"><span class="back-icon"><img src="./assets/figma/back.svg" alt="" /></span><span data-i18n="common.back">Back</span></button></div>
+      <h1 data-i18n="settings.title" id="settings-title" tabindex="-1">Cast Settings</h1>
+      <nav class="settings-tabs" role="tablist" aria-label="Settings categories" data-i18n-aria-label="settings.categories">
+        <button data-i18n="settings.permissions" id="settings-tab-permissions" type="button" role="tab" data-settings-tab="permissions" aria-controls="settings-permissions" aria-selected="true" aria-pressed="true">Permissions</button>
+        <button data-i18n="settings.general" id="settings-tab-general" type="button" role="tab" data-settings-tab="general" aria-controls="settings-general" aria-selected="false" aria-pressed="false" tabindex="-1">General</button>
+        <button data-i18n="settings.updates" id="settings-tab-updates" type="button" role="tab" data-settings-tab="updates" aria-controls="settings-updates" aria-selected="false" aria-pressed="false" tabindex="-1">Check for Updates</button>
+        <button data-i18n="settings.feedback" id="settings-tab-feedback" type="button" role="tab" data-settings-tab="feedback" aria-controls="settings-feedback" aria-selected="false" aria-pressed="false" tabindex="-1">Feedback</button>
+      </nav>
+      <div class="settings-scroll">
+        <section id="settings-permissions" class="settings-content" role="tabpanel" aria-labelledby="settings-tab-permissions" tabindex="0">
+          <section id="macos-permissions" class="permissions-panel" aria-label="System permissions" data-i18n-aria-label="permission.title">
+            <div id="permission-rows" class="permission-grid"></div>
+            <div class="permissions-footer"><p id="permissions-help" class="permissions-help">正在读取系统权限…</p><button data-i18n="common.refresh" id="refresh-permissions" class="refresh" type="button" hidden>Refresh</button></div>
+            <p id="permissions-error" class="error" role="status" hidden></p>
+          </section>
+        </section>
+        <section id="settings-general" class="settings-content" role="tabpanel" aria-labelledby="settings-tab-general" tabindex="0" hidden>
+          <section class="settings-card language-card" aria-labelledby="language-title">
+            <label for="language-select"><span id="language-title" data-i18n="settings.language">Language</span><select id="language-select"><option value="system" data-i18n="settings.system">Follow system</option><option value="zh">中文</option><option value="en">English</option><option value="ja">日本語</option><option value="de">Deutsch</option></select></label>
+            <p class="quality-help" data-i18n="settings.languageHelp">Choose your display language. Changes apply immediately.</p>
+          </section>
+      <section class="video-quality settings-card" aria-labelledby="video-quality-title">
+        <div class="quality-heading"><h2 id="video-quality-title" data-i18n="quality.title">Quality Settings</h2><span id="video-quality-summary" class="sr-only">Fixed · 1920 × 1080 · 12 Mbps</span></div><p class="quality-subtitle" data-i18n="quality.next">Takes effect when sharing starts</p>
         <div class="quality-grid">
-          <label>Resolution<select id="video-resolution"><option value="auto">Auto (source)</option><option value="1280x720">1280 × 720</option><option value="1920x1080" selected>1920 × 1080</option><option value="2560x1440">2560 × 1440</option><option value="3840x2160">3840 × 2160</option></select></label>
-          <label>Bitrate mode<select id="video-bitrate-mode"><option value="dynamic">Dynamic (adaptive)</option><option value="fixed" selected>Fixed target</option></select></label>
-          <label>Bitrate<select id="video-bitrate"><option value="2000">2 Mbps</option><option value="4000">4 Mbps</option><option value="8000">8 Mbps</option><option value="12000" selected>12 Mbps</option><option value="20000">20 Mbps</option></select></label>
+          <label><span data-i18n="quality.resolution">Resolution</span><select id="video-resolution"><option data-i18n="quality.auto" value="auto">Auto (source)</option><option value="1280x720">1280 × 720</option><option value="1920x1080" selected>1920 × 1080</option><option value="2560x1440">2560 × 1440</option><option value="3840x2160">3840 × 2160</option></select></label>
+          <label><span data-i18n="quality.mode">Bitrate mode</span><select id="video-bitrate-mode"><option data-i18n="quality.dynamic" value="dynamic">Dynamic (adaptive)</option><option data-i18n="quality.fixed" value="fixed" selected>Fixed target</option></select></label>
+          <label><span data-i18n="quality.bitrate">Target Bitrate</span><select id="video-bitrate"><option value="2000">2 Mbps</option><option value="4000">4 Mbps</option><option value="8000">8 Mbps</option><option value="12000" selected>12 Mbps</option><option value="20000">20 Mbps</option></select></label>
         </div>
-        <p class="quality-help">Dynamic adapts down under congestion; fixed tries to hold the selected target. Changes apply the next time you start sharing.</p>
       </section>
-      <div id="system-audio-settings" hidden>
-        <label><input id="system-audio-enabled" type="checkbox" checked> 分享系统声音（下次开始分享时生效）</label>
-        <p class="quality-help">采集默认播放设备的全部系统声音，分享窗口时也一样；不采集麦克风。</p>
-        <p id="system-audio-status" class="quality-help" aria-live="polite"></p>
-      </div>
-        <section class="macos-interaction"><h2>反向控制</h2>
-        <label><input id="input-enabled" type="checkbox"> 允许接收端反控本机</label>
-        <details class="input-mapping" open>
-          <summary>输入转换配置</summary>
+          <section class="settings-card setting-row" aria-labelledby="remote-control-title">
+            <div class="setting-copy"><h2 id="remote-control-title" data-i18n="cast.remote">Allow Remote Control</h2><p data-i18n="settings.remoteHelp">Allow the display to control this computer when remote control is enabled.</p></div>
+            <label class="settings-switch"><input id="input-enabled" type="checkbox" role="switch" aria-labelledby="remote-control-title" /><span class="switch-images" aria-hidden="true"><img class="switch-off" src="./assets/figma/switch-off.svg" alt="" /><img class="switch-on" src="./assets/figma/switch-general-on.svg" alt="" /></span></label>
+          </section>
+          <section id="system-audio-settings" class="settings-card setting-row" aria-labelledby="system-audio-title" hidden>
+            <div class="setting-copy"><h2 id="system-audio-title" data-i18n="cast.audio">Share System Audio</h2><p data-i18n="settings.audioHelp">分享系统声音，下次开始分享时生效；不采集麦克风。</p><p id="system-audio-status" class="quality-help" aria-live="polite"></p></div>
+            <label class="settings-switch"><input id="system-audio-enabled" type="checkbox" role="switch" checked aria-labelledby="system-audio-title" /><span class="switch-images" aria-hidden="true"><img class="switch-off" src="./assets/figma/switch-off.svg" alt="" /><img class="switch-on" src="./assets/figma/switch-general-on.svg" alt="" /></span></label>
+          </section>
+          <section class="settings-card setting-row" aria-labelledby="local-signaling-title">
+            <div class="setting-copy"><h2 id="local-signaling-title" data-i18n="settings.local">Local Network Casting</h2><p data-i18n="settings.localHelp">开启时仅连接所选设备的本地服务；关闭后使用云端协商。下次连接生效。</p></div>
+            <label class="settings-switch"><input id="local-signaling-enabled" type="checkbox" role="switch" checked aria-labelledby="local-signaling-title" /><span class="switch-images" aria-hidden="true"><img class="switch-off" src="./assets/figma/switch-off.svg" alt="" /><img class="switch-on" src="./assets/figma/switch-general-on.svg" alt="" /></span></label>
+          </section>
+        <details class="input-mapping settings-card" hidden>
+          <summary>Advanced Input Settings <span>输入转换与手势</span></summary>
           <div class="input-mapping-grid">
             <label>收到 Touch 时，本机输出<select id="input-touch-output" aria-describedby="input-touch-help" disabled></select></label>
             <label>收到 Mouse 时，本机输出<select id="input-mouse-output" aria-describedby="input-mouse-help" disabled></select></label>
@@ -145,22 +167,34 @@
           <p id="input-policy-status" class="quality-help" role="status">正在读取本机输入能力…</p>
           <p class="quality-help">应用时会释放当前输入并重新协商；接收端可能需要重新开启反控。设置保存在本机。</p>
         </details>
+          <p id="settings-save-status" class="quality-help" role="status" data-i18n="settings.saveHelp">画质与声音在下次分享时生效；反控开关立即生效。</p>
         </section>
-        <p id="settings-save-status" class="quality-help" role="status">画质与声音在下次分享时生效；反控开关立即生效。输入转换需点击应用。</p>
-      </section>
-      <section id="settings-updates" class="settings-content" aria-label="检查更新" hidden><h2>软件更新</h2><p>当前版本 <span id="settings-version">—</span></p><p id="settings-update-status" role="status">启动后自动检查更新。</p><p class="quality-help">后台检查并下载更新；安装前由你确认，安装时会结束投屏。</p><button id="settings-update-check" class="button primary" type="button">检查更新</button><p id="settings-update-error" class="error" hidden></p></section>
-      <section id="settings-feedback" class="settings-content" aria-label="Feedback" hidden><h2>Feedback</h2><p>描述问题并上传本机诊断，帮助我们定位投屏或反控故障。</p><form id="feedback-form"><label>邮箱（用于回复）<input id="feedback-email" type="email" maxlength="254" required autocomplete="email" /></label><label>问题描述<textarea id="feedback-message" rows="5" maxlength="4000" required placeholder="发生了什么？可以如何复现？"></textarea></label><label class="feedback-consent"><input id="feedback-consent" type="checkbox" required /> 同意将问题描述、邮箱及诊断 ZIP 上传到 Mosapi。诊断包含版本、平台和有界运行日志，不含配对码、音视频或设备信任密钥。</label><button id="feedback-submit" class="button primary" type="submit">打包诊断并发送</button><p id="feedback-status" role="status"></p></form></section>
+        <section id="settings-updates" class="settings-content" role="tabpanel" aria-labelledby="settings-tab-updates" tabindex="0" hidden>
+          <div class="update-state-heading"><img id="settings-update-icon" src="./assets/figma/update-available.svg" alt="" hidden /><p id="settings-update-status" role="status">启动后自动检查更新。</p></div>
+          <div class="settings-card version-card"><div><p data-i18n="update.currentVersion">Current Version</p><strong id="settings-version">—</strong></div><div id="settings-update-target" hidden><p data-i18n="update.targetVersion">Update Version</p><strong id="settings-update-version"></strong></div></div>
+          <section id="settings-update-release" hidden><h2 data-i18n="update.whatsNew">What’s New</h2><pre id="settings-update-notes"></pre></section>
+          <p id="settings-update-error" class="error" role="status" hidden></p>
+          <div class="settings-update-actions"><button data-i18n="update.check" id="settings-update-check" class="button secondary" type="button">Check for Updates</button><button id="update-button" type="button" class="button primary">检查更新</button></div>
+        </section>
+        <section id="settings-feedback" class="settings-content" role="tabpanel" aria-labelledby="settings-tab-feedback" tabindex="0" hidden>
+          <form id="feedback-form">
+            <div class="feedback-fields"><label for="feedback-email"><span data-i18n="feedback.email">Email</span><input data-i18n-placeholder="feedback.emailPlaceholder" id="feedback-email" type="email" maxlength="254" required autocomplete="email" placeholder="Please enter your email" /></label><label for="feedback-message"><span data-i18n="feedback.message">Message</span><textarea data-i18n-placeholder="feedback.messagePlaceholder" id="feedback-message" rows="5" maxlength="4000" required placeholder="Describe the issue and how to reproduce it"></textarea></label></div>
+            <label class="feedback-consent"><input id="feedback-consent" type="checkbox" required checked /><span data-i18n="feedback.consent">同意上传问题描述及诊断包至NearHub。日志不含配对码、音视频或设备信息密钥。</span></label>
+            <div class="feedback-actions"><p id="feedback-status" role="status"></p><button data-i18n="feedback.submit" id="feedback-submit" class="button primary" type="submit">Submit</button></div>
+          </form>
+        </section>
+      </div>
     </section>
-
-    <footer>Launcher-compatible WebCast · <button id="export-diagnostics" type="button" class="refresh">导出诊断</button><p id="diagnostics-export-status" role="status" style="overflow-wrap:anywhere;user-select:text"></p></footer>
   </main>
-  <dialog id="update-dialog" class="update-dialog" aria-labelledby="update-title">
-    <h2 id="update-title">软件更新</h2>
-    <p id="update-detail" aria-live="polite"></p>
-    <pre id="update-notes"></pre>
-    <progress id="update-progress" aria-label="更新下载进度" hidden></progress>
-    <p id="update-error" class="error" role="status" hidden></p>
-    <div class="update-actions"><button id="update-check" class="refresh" type="button">检查更新</button><button id="update-later" class="button secondary" type="button">暂不更新</button><button id="update-install" class="button primary" type="button" disabled>立即更新并重启</button></div>
+  <dialog id="update-dialog" class="update-dialog" aria-labelledby="update-title" aria-describedby="update-detail">
+    <header class="update-dialog-header"><h2 id="update-title" data-i18n="update.title">Software Update</h2><button data-i18n-aria-label="common.close" id="update-close" type="button" aria-label="关闭更新弹窗"><img src="./assets/figma/close.svg" alt="" /></button></header>
+    <div class="update-dialog-body">
+      <p id="update-detail" aria-live="polite"></p>
+      <progress id="update-progress" aria-label="Update download progress" data-i18n-aria-label="update.progress" hidden></progress>
+      <pre id="update-notes"></pre>
+      <p id="update-error" class="error" role="status" hidden></p>
+      <div class="update-actions"><button data-i18n="update.check" id="update-check" class="refresh" type="button">检查更新</button><button id="update-later" class="button secondary" type="button">关闭</button><button id="update-install" class="button primary" type="button" disabled>立即更新并重启</button></div>
+    </div>
   </dialog>
   <script type="module" src="./bootstrap.mjs"></script>
 </body>

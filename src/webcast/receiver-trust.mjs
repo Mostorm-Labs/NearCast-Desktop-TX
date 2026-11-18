@@ -5,8 +5,8 @@ export function formatFingerprint(value) {
 }
 
 export class ReceiverTrust {
-  constructor({invoke, onChange = () => {}, onTrusted = () => {}, now = () => Date.now()} = {}) {
-    this.invoke = invoke; this.onChange = onChange; this.onTrusted = onTrusted; this.now = now;
+  constructor({invoke, onChange = () => {}, onTrusted = () => {}, now = () => Date.now(), automatic = false} = {}) {
+    this.invoke = invoke; this.onChange = onChange; this.onTrusted = onTrusted; this.now = now; this.automatic = automatic;
     this.state = {phase:'idle'}; this.device = null; this.generation = 0; this.timer = null;
   }
   update(phase, values = {}) { this.state = {phase,device:this.device,...values}; this.onChange(this.state); }
@@ -23,6 +23,12 @@ export class ReceiverTrust {
     if (!this.validDevice()) { this.update('error',{error:'接收端已离线，请重新扫描。'}); return; }
     this.update('checking');
     try {
+      if (this.automatic) {
+        const paired = await this.invoke('nearcast_trust_pair',{instance:device.instance,deviceId:device.deviceId});
+        if (generation !== this.generation) return;
+        if (!this.validDevice() || paired?.trusted !== true || paired.deviceId !== device.deviceId || !isPin(paired.fingerprint)) throw new Error('无法完成设备连接，请返回列表重试。');
+        this.update('trusted',{fingerprint:paired.fingerprint}); this.onTrusted(this.device); return;
+      }
       const saved = await this.invoke('nearcast_trust_status',{deviceId:device.deviceId});
       if (generation !== this.generation) return;
       if (saved?.trusted === true && saved.deviceId === device.deviceId && isPin(saved.fingerprint)) {

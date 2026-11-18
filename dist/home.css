@@ -1,0 +1,78 @@
+/* NearRooms · device discovery, Figma node 1872:11107. */
+:root {
+  --page-background: #14161f;
+  --panel-background: #282b39;
+  --panel-border: #383c4f;
+  --text-primary: #fff;
+  --text-secondary: #ffffffb3;
+  --text-tertiary: #ffffff80;
+  --accent: #439bfc;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--page-background);
+}
+body { min-width: 360px; background: var(--page-background); }
+body::before { display: none; }
+.header-glow { position: fixed; top: -127px; left: 50%; transform: translateX(-50%); width: 374px; height: 374px; pointer-events: none; }
+.webcast-sender { min-height: 100vh; padding: 52px 24px 24px; }
+.topbar { position: absolute; top: 0; left: 0; width: 100%; height: 52px; padding: 8px 16px; gap: 12px; background: var(--page-background); }
+.topbar .logo { gap: 0; font-size: 16px; line-height: 24px; letter-spacing: 0; }
+.logo-mark { display: block; flex: 0 0 36px; width: 36px; height: 36px; border-radius: 0; background: none; box-shadow: none; }
+.update-heading { gap: 14px; color: var(--text-tertiary); font-size: 12px; line-height: 16px; }
+.settings-shortcut { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
+.settings-shortcut:hover { background: #ffffff0d; }
+html:not([data-view="casting"]) .settings-shortcut { display: none; }
+.home-screen { display: flex; flex-direction: column; align-items: center; gap: 20px; width: min(644px, 100%); margin: auto 0; padding: 12px 0 0; }
+.home-intro { width: 100%; text-align: center; }
+.home-intro h1 { margin: 0; font-size: 24px; font-weight: 700; line-height: 32px; letter-spacing: 0; }
+.home-intro .panel-desc { max-width: none; margin: 0; color: var(--text-secondary); font-size: 14px; line-height: 20px; }
+.discovery-card { display: flex; flex-direction: column; gap: 16px; width: 100%; padding: 24px; border: 2px solid var(--panel-border); border-radius: 18px; background: radial-gradient(ellipse 80% 22% at 50% 0, #439bfc0d, transparent), #1e212e33; box-shadow: 0 0 40px #0003; }
+.devices { margin: 0; padding: 0; border: 0; text-align: left; }
+.devices-heading { align-items: center; gap: 12px; padding: 0 8px; }
+.devices h2 { margin: 0; color: var(--text-primary); font-size: 18px; font-weight: 600; line-height: 28px; letter-spacing: 0; }
+.device-status { margin: 0; color: var(--text-tertiary); font-size: 12px; line-height: 16px; }
+#refresh-devices { flex: 0 0 auto; padding: 2px 4px; color: var(--accent); font-size: 14px; font-weight: 500; line-height: 20px; text-decoration: underline; text-underline-offset: 3px; }
+#refresh-devices:disabled { opacity: .5; cursor: wait; }
+#device-groups { height: 204px; flex: 0 0 204px; margin-top: 16px; overflow-y: auto; overscroll-behavior: contain; padding: 1px; margin-inline: -1px; }
+.device-group { margin: 0; }
+.device-row { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 46px; padding: 8px 12px; border: 1px solid var(--panel-border); border-radius: 12px; color: var(--text-primary); background: var(--panel-background); font: inherit; text-align: left; transition: border-color .15s, background-color .15s, box-shadow .15s; }
+.device-row + .device-row { margin-top: 6px; }
+.device-row.selectable:hover, .device-row[aria-pressed="true"] { border-color: var(--accent); background: linear-gradient(#439bfc1a, #439bfc1a), var(--panel-background); box-shadow: 0 0 5px #439bfc4d; }
+.device-icon { display: block; flex: 0 0 28px; width: 28px; height: 28px; border-radius: 0; background: none; }
+.device-copy { min-width: 0; flex: 1; }
+.device-name { font-size: 14px; font-weight: 400; line-height: 20px; }
+.device-meta { display: none; }
+.row-chevron { display: block; flex: 0 0 20px; width: 20px; height: 20px; transform: rotate(-90deg); }
+.home-divider { display: block; max-width: 100%; height: 1px; object-fit: cover; }
+.settings-entry { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 30px; padding: 4px 12px; border: 0; border-radius: 8px; color: var(--text-primary); background: transparent; font: inherit; font-size: 14px; line-height: 20px; text-align: left; cursor: pointer; }
+.settings-entry:hover { background: #ffffff08; }
+.settings-entry-label { display: flex; align-items: center; gap: 6px; }
+.settings-icon { display: grid; place-items: center; flex: 0 0 22px; width: 22px; height: 22px; }
+.home-screen .connection-tabs { margin: -10px 0 0; padding: 0; border: 0; border-radius: 0; background: none; }
+.home-screen .connection-tabs button { flex: none; padding: 3px 8px; color: var(--text-tertiary); font-size: 12px; line-height: 20px; background: none; box-shadow: none; }
+.home-screen .connection-tabs button:hover { color: var(--accent); }
+.home-screen[data-connection="devices"] #connect-tab-devices, .home-screen[data-connection="code"] #connect-tab-code { display: none; }
+#connect-panel-code { margin: 0; padding: 12px 0; text-align: center; }
+.home-screen[data-connection="code"] .discovery-card { max-width: 560px; }
+.settings-diagnostics { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 24px 0 0; padding-top: 18px; border-top: 1px solid var(--panel-border); text-align: left; }
+.settings-diagnostics .platform-status { margin: 0; }
+#diagnostics-export-status { flex-basis: 100%; margin: 0; }
+.settings-page { border-color: var(--panel-border); background: var(--page-background); }
+.window-titlebar { height: 52px; border: 0; background: var(--page-background); }
+.window-drag > span { visibility: hidden; }
+.custom-window .topbar { z-index: 1001; padding-right: 154px; background: transparent; pointer-events: none; }
+.custom-window .topbar .update-heading { pointer-events: auto; }
+.custom-window .webcast-sender { padding-top: 52px; }
+.window-error { top: 52px; }
+button:focus-visible, .code-digit:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 650px) {
+  .webcast-sender { padding-right: 16px; padding-left: 16px; }
+  .topbar .logo { font-size: 14px; }
+  .home-screen { padding-top: 16px; }
+  .discovery-card { padding: 20px 16px; }
+  .home-intro h1 { font-size: 22px; }
+  .home-intro .panel-desc { font-size: 13px; }
+}
+@media (max-height: 560px) {
+  .home-screen { margin-top: 0; margin-bottom: auto; }
+}
+@media (prefers-reduced-motion: reduce) { .device-row { transition: none; } }

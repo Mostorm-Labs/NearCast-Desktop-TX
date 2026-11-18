@@ -17,3 +17,13 @@ test('missing, corrupt or unsupported preferences safely fall back and never ena
   assert.equal(loadPreferences({getItem:()=>' {"inputEnabled":"true"}'}).inputEnabled,false);
   assert.throws(()=>savePreferences(defaults,{setItem:()=>{throw Error('full');}}),/full/);
 });
+
+test('language follows the system by default and a chosen locale survives preference saves',()=>{
+  const store=storage();assert.equal(loadPreferences(store).language,'system');
+  for(const language of ['zh','en','ja','de','system']){
+    savePreferences({...loadPreferences(store),language},store);
+    assert.equal(loadPreferences(store).language,language);
+  }
+  assert.equal(loadPreferences({getItem:()=>' {"language":"fr","systemAudio":false}'}).language,'system');
+  assert.equal(loadPreferences({getItem:()=>' {"language":"fr","systemAudio":false}'}).systemAudio,false);
+});

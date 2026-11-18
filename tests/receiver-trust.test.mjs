@@ -6,7 +6,7 @@ import {normalizeDiscoveryDevice} from '../src/discovery/devices.mjs';
 const pin = 'A1B2'.repeat(16);
 const device = (changes = {}) => ({deviceId:'Board-ID',instance:'Board._nearcast._tcp.local.',protocol:'webcast',selectable:true,supportsTrustDisplay:true,expiresAt:Date.now()+60000,...changes});
 const candidate = {deviceId:'Board-ID',candidateId:'ticket',fingerprint:pin,previousFingerprint:null,expiresAt:Date.now()+60000};
-function fixture(overrides = {}) {
+function fixture(overrides = {}, options = {}) {
   const calls=[]; const ready=[]; const updates=[];
   const invoke = async (command,args) => {
     calls.push([command,args]);
@@ -14,7 +14,7 @@ function fixture(overrides = {}) {
     if (command==='nearcast_trust_status') return {trusted:false,fingerprint:null,deviceId:args.deviceId};
     if (command==='nearcast_trust_prepare') return {...candidate};
   };
-  const trust = new ReceiverTrust({invoke,onChange:state=>updates.push(state),onTrusted:receiver=>ready.push(receiver)});
+  const trust = new ReceiverTrust({invoke,onChange:state=>updates.push(state),onTrusted:receiver=>ready.push(receiver),...options});
   return {trust,calls,ready,updates};
 }
 
@@ -23,6 +23,38 @@ test('discovery exposes trust-display only for NearCast with explicit capability
   assert.equal(normalizeDiscoveryDevice(service).supportsTrustDisplay,true);
   assert.throws(()=>normalizeDiscoveryDevice({...service,serviceType:'_airplay._tcp.local.'}),/unsupported/i);
   assert.equal(normalizeDiscoveryDevice({...service,txt:{...service.txt,capability:'webcast'}}).supportsTrustDisplay,false);
+});
+
+test('automatic pairing establishes the selected receiver identity without a fingerprint-display prompt',async()=>{
+  const {trust,calls,ready,updates}=fixture({nearcast_trust_pair:async args=>({trusted:true,deviceId:args.deviceId,fingerprint:pin})},{automatic:true});
+  await trust.select(device({supportsTrustDisplay:false}));
+  assert.equal(trust.state.phase,'trusted');assert.equal(ready.length,1);
+  assert.deepEqual(calls.find(([command])=>command==='nearcast_trust_pair')[1],{deviceId:'Board-ID',instance:'Board._nearcast._tcp.local.'});
+  assert.equal(calls.some(([command])=>['nearcast_trust_prepare','nearcast_trust_confirm'].includes(command)),false);
+  assert.equal(updates.some(state=>state.phase==='compare'),false);
+  trust.cancel();
+});
+
+test('automatic pairing ignores canceled and switched replies, and never accepts another device identity',async()=>{
+  const pending=[];
+  const {trust,ready}=fixture({nearcast_trust_pair:args=>new Promise(resolve=>pending.push({args,resolve}))},{automatic:true});
+  const first=trust.select(device());await new Promise(resolve=>setImmediate(resolve));
+  const second=trust.select(device({deviceId:'Second-ID',instance:'Second'}));await new Promise(resolve=>setImmediate(resolve));
+  pending[0].resolve({trusted:true,deviceId:'Board-ID',fingerprint:pin});await first;
+  assert.equal(ready.length,0);
+  pending[1].resolve({trusted:true,deviceId:'Board-ID',fingerprint:pin});await second;
+  assert.equal(trust.state.phase,'error');assert.equal(ready.length,0);
+  const canceled=trust.select(device());await new Promise(resolve=>setImmediate(resolve));
+  trust.cancel();pending[2].resolve({trusted:true,deviceId:'Board-ID',fingerprint:pin});await canceled;
+  assert.equal(trust.state.phase,'idle');assert.equal(ready.length,0);
+});
+
+test('automatic pairing preserves native errors without claiming success or retrying a changed pin',async()=>{
+  const {trust,ready,calls}=fixture({nearcast_trust_pair:async()=>{throw new Error('NEARCAST_KEY_MISMATCH');}},{automatic:true});
+  await trust.select(device());
+  assert.equal(trust.state.phase,'error');assert.match(trust.state.error,/NEARCAST_KEY_MISMATCH/);assert.equal(ready.length,0);
+  assert.equal(calls.filter(([command])=>command==='nearcast_trust_pair').length,1);
+  trust.cancel();
 });
 
 test('full fingerprint displays four lines of four groups without truncation',()=>{
