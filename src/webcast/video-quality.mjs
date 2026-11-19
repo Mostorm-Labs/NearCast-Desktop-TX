@@ -6,7 +6,7 @@ const RESOLUTION_VALUES = Object.freeze({
   '3840x2160': {width: 3840, height: 2160},
 });
 
-export const DEFAULT_VIDEO_QUALITY = Object.freeze({resolution: '1920x1080', bitrateMode: 'fixed', bitrateKbps: 12000});
+export const DEFAULT_VIDEO_QUALITY = Object.freeze({resolution: '1920x1080', bitrateMode: 'dynamic', bitrateKbps: 8000});
 export const VIDEO_FRAME_RATE = 30;
 export const VIDEO_RESOLUTIONS = Object.freeze(Object.keys(RESOLUTION_VALUES));
 export const VIDEO_BITRATES_KBPS = Object.freeze([2000, 4000, 8000, 12000, 20000]);

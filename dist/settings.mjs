@@ -18,7 +18,15 @@ export function savePreferences(value,storage=globalThis.localStorage){
 export function mountSettings({document,isConnected,isOnboarding=()=>false,onSelectTab=()=>{}}){
   const view=document.querySelector('#settings-view'),open=document.querySelector('#settings-open');
   const entries=[...new Set([open,...document.querySelectorAll('[data-settings-open]')])];
-  let active=false,opener=open;
+  const title=document.querySelector('#settings-title'),advanced=[...document.querySelectorAll('[data-settings-advanced]')];
+  let active=false,opener=open,advancedVisible=false,advancedClicks=0;
+  // The reveal gesture is local to this launch; only parameter values persist.
+  for(const section of advanced)section.hidden=true;
+  title.addEventListener('click',()=>{
+    if(!active||++advancedClicks<8)return;
+    advancedClicks=0;advancedVisible=!advancedVisible;
+    for(const section of advanced)section.hidden=!advancedVisible;
+  });
   const render=()=>{
     const onboarding=isOnboarding();
     view.hidden=!active||onboarding;document.querySelector('#code-view').hidden=onboarding||active||isConnected();document.querySelector('#casting-view').hidden=onboarding||active||!isConnected();
@@ -26,7 +34,7 @@ export function mountSettings({document,isConnected,isOnboarding=()=>false,onSel
     for(const entry of entries)entry.setAttribute('aria-expanded',String(active));
   };
   for(const entry of entries)entry.addEventListener('click',()=>{opener=entry;active=true;render();document.querySelector('#settings-title').focus();onSelectTab(view.dataset.tab);});
-  document.querySelector('#settings-close').addEventListener('click',()=>{active=false;render();const target=opener.getClientRects().length?opener:entries.find(entry=>entry.getClientRects().length);target?.focus();});
+  document.querySelector('#settings-close').addEventListener('click',()=>{active=false;advancedClicks=0;render();const target=opener.getClientRects().length?opener:entries.find(entry=>entry.getClientRects().length);target?.focus();});
   const tabs=[...document.querySelectorAll('[data-settings-tab]')];
   const selectTab=button=>{
     for(const tab of tabs){

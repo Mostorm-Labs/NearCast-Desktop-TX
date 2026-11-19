@@ -385,6 +385,9 @@ try {
   await page.locator('#settings-shortcut').click();
   await page.locator('[data-settings-tab=general]').click();
   assert.equal(await page.locator('#settings-general').isVisible(),true);
+  assert.equal(await page.locator('.video-quality').isVisible(),false,'advanced video controls start hidden during a live cast');
+  for(let index=0;index<8;index++)await page.locator('#settings-title').click();
+  assert.equal(await page.locator('.video-quality').isVisible(),true);
   await page.locator('#theme-select').selectOption('light');
   assert.equal(await page.locator('html').getAttribute('data-theme'),'light','appearance changes immediately during a live cast');
   if(process.env.SETTINGS_SCREENSHOT)await page.screenshot({path:process.env.SETTINGS_SCREENSHOT,fullPage:true});

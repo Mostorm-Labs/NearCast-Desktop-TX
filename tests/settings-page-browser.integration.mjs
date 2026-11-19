@@ -67,15 +67,30 @@ try{
     assert.ok(assets.length>=6&&assets.every(asset=>asset.loaded&&asset.width>0&&asset.height>0),JSON.stringify(assets));
     if(process.env.NEARCAST_UI_ARTIFACTS){await mkdir(process.env.NEARCAST_UI_ARTIFACTS,{recursive:true});await page.screenshot({path:join(process.env.NEARCAST_UI_ARTIFACTS,'settings-permissions-'+os+'.png')});}
     await page.locator('[data-settings-tab=general]').click();
+    const quality=page.locator('.video-quality');
+    const clickTitle=async count=>{for(let index=0;index<count;index++)await page.locator('#settings-title').click();};
+    assert.equal(await quality.isVisible(),false,'advanced video controls start hidden');
+    assert.equal(await page.locator('#video-resolution').inputValue(),'1920x1080');
+    assert.equal(await page.locator('#video-bitrate-mode').inputValue(),'dynamic');
+    assert.equal(await page.locator('#video-bitrate').inputValue(),'8000');
+    await clickTitle(7);assert.equal(await quality.isVisible(),false,'seven title clicks cannot reveal advanced controls');
+    await clickTitle(1);assert.equal(await quality.isVisible(),true,'the eighth title click reveals existing controls');
+    await clickTitle(7);assert.equal(await quality.isVisible(),true,'seven more clicks do not hide controls');
+    await clickTitle(1);assert.equal(await quality.isVisible(),false,'eight more clicks hide controls');
+    if(process.env.NEARCAST_UI_ARTIFACTS){await page.screenshot({path:join(process.env.NEARCAST_UI_ARTIFACTS,'settings-general-default-'+os+'.png')});}
+    await clickTitle(8);
     await page.locator('#video-resolution').selectOption('2560x1440');
-    await page.locator('#video-bitrate-mode').selectOption('dynamic');
-    await page.locator('#video-bitrate').selectOption('8000');
+    await page.locator('#video-bitrate-mode').selectOption('fixed');
+    await page.locator('#video-bitrate').selectOption('20000');
     await page.locator('#system-audio-enabled').uncheck();
     await page.locator('#local-signaling-enabled').uncheck();
     await page.locator('#input-enabled').check();
     const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('nearhub-cast-settings-v1')));
-    assert.deepEqual(saved.video,{resolution:'2560x1440',bitrateMode:'dynamic',bitrateKbps:8000});
+    assert.deepEqual(saved.video,{resolution:'2560x1440',bitrateMode:'fixed',bitrateKbps:20000});
     assert.equal(saved.systemAudio,false);assert.equal(saved.localSignaling,false);assert.equal(saved.inputEnabled,true);
+    await clickTitle(8);assert.equal(await quality.isVisible(),false);
+    assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('nearhub-cast-settings-v1'))),saved,'hiding advanced controls cannot change saved settings');
+    await clickTitle(8);
     assert.equal(await page.locator('.input-mapping').isVisible(),false,'input conversion is hidden while the default policy still applies');
     assert.equal(await page.locator('#export-diagnostics').count(),0,'the diagnostic export row and action are removed');
     await page.locator('#settings-close').click();
@@ -84,12 +99,17 @@ try{
     if(os==='macos')await page.locator('#onboarding-not-now').click();
     assert.equal(await page.locator('#connect-panel-devices').isVisible(),true);
     await page.locator('#settings-open').click();await page.locator('[data-settings-tab=general]').click();
+    assert.equal(await quality.isVisible(),false,'reloading always hides advanced controls');
+    await clickTitle(7);assert.equal(await quality.isVisible(),false,'the reveal click count starts over after reload');
+    await clickTitle(1);assert.equal(await quality.isVisible(),true);
     assert.equal(await page.locator('#video-resolution').inputValue(),'2560x1440');
+    assert.equal(await page.locator('#video-bitrate-mode').inputValue(),'fixed');
+    assert.equal(await page.locator('#video-bitrate').inputValue(),'20000','saved advanced video values survive while controls start hidden');
     assert.equal(await page.locator('#local-signaling-enabled').isChecked(),false);
     assert.equal(await page.locator('#system-audio-enabled').isChecked(),false);
     assert.equal(await page.locator('#input-enabled').isChecked(),true);
     await page.locator('#video-resolution').selectOption('1920x1080');
-    await page.locator('#video-bitrate-mode').selectOption('fixed');await page.locator('#video-bitrate').selectOption('12000');
+    await page.locator('#video-bitrate-mode').selectOption('dynamic');await page.locator('#video-bitrate').selectOption('8000');
     if(process.env.NEARCAST_UI_ARTIFACTS)await page.screenshot({path:join(process.env.NEARCAST_UI_ARTIFACTS,'settings-general-'+os+'.png')});
     await page.locator('[data-settings-tab=feedback]').click();
     assert.equal(await page.locator('#feedback-consent').isChecked(),true,'feedback consent starts checked');
@@ -107,5 +127,5 @@ try{
     assert.deepEqual(errors,[]);
     await context.close();
   }
-  console.log('PASS: Windows capability facts, macOS settings/refresh without fake grants, persisted controls, advanced input entry and small-window Settings');
+  console.log('PASS: eight-click video settings toggle, hidden after reload, persistent advanced values, Windows/macOS permissions and small-window Settings');
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
