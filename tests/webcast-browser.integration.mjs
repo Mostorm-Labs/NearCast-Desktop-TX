@@ -373,7 +373,7 @@ try {
   await page.waitForFunction(async()=>[...await testReceiver.receiverPeer.getStats()].some(([,row])=>row.type==='inbound-rtp'&&row.kind==='audio'&&row.totalAudioEnergy>0.00001));
   assert.equal(await page.evaluate(()=>testReceiver.browserPickerCalls),2,'one picker for cancellation and one successful selection');
   assert.equal(await page.evaluate(()=>testReceiver.captureOptions.audio),false,'Windows audio must not open another display picker');
-  assert.deepEqual(await page.evaluate(()=>testReceiver.captureOptions.video),{frameRate:{ideal:30,max:30}});
+  assert.deepEqual(await page.evaluate(()=>testReceiver.captureOptions.video),{displaySurface:'monitor',frameRate:{ideal:30,max:30}},'Windows requests the screen pane first without changing the capture frame-rate cap');
   assert.equal(await page.evaluate(()=>document.querySelector('#preview').srcObject.getVideoTracks()[0]===testReceiver.browserVideoTrack),true,'the original browser track must reach preview/WebRTC');
   assert.equal(await page.evaluate(()=>__nearcastTouchbackDiagnostics().capture.backend),'browser');
   await page.waitForFunction(()=>testReceiver.sourceInfoMessages?.at(-1)?.source.displaySurface==='monitor');
