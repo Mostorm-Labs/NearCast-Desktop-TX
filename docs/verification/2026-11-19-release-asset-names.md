@@ -9,3 +9,5 @@ GitHub API 对同一资产执行原名重命名也保持点号名称，不能通
 源分支的计数同步到已预留的 48，后续流水线从元数据分支继续递增，不复用 46 或覆盖 48。
 
 参考：[GitHub Release assets API](https://docs.github.com/en/rest/releases/assets#upload-a-release-asset)。
+
+最终修复版本为 `0.2.0.50`。已直接使用签名清单中的四个 GitHub 镜像 URL 成功下载，公开文件名与清单一致；全部包、清单签名、SHA-256、聚合 ZIP 和 Mosapi 关联文件均验证通过，见 [正式发布验收](2026-11-19-tx-stable-release.md)。

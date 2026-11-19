@@ -271,9 +271,9 @@ GitHub Secrets：
 6. 点击安装，确认投屏/声音停止、输入释放，安装并重启后版本升至新 Build，设置仍保留。
 7. 在干净 Windows 测试机上重复 MSI→MSI；分别验证取消 UAC、离线、下载中断可重试。自动化本地测试覆盖清单/安装包签名不符和缓存篡改拒绝；不得以关闭验证的方式完成安装测试。
 
-当前实现已通过本地浏览器与 Rust 校验、签名及安装包生成。早期两次 Windows alpha CI 在 GitHub 创建 Release 时返回 HTTP 403；配置专用发布凭据后，2026-11-16 的 [Release TX #43864899826](https://github.com/Mostorm-Labs/NearCast-Desktop-TX/actions/runs/43864899826) 已完成 Windows/macOS 构建、GitHub 与 Mosapi 发布。该次 macOS 构建的 Apple 凭据为空，不能视为 Developer ID 和公证验收。**跨 Build 安装和自动重启仍未验收。** 不将本地结果或 CI 构建成功视为安装验收成功。仅发布阶段失败且尚未创建 Mosapi 记录时可重试失败 job，沿用原有已签名产物；若任何资产已公开或 Mosapi 记录已创建，需检查状态并分配新的 Build，不覆盖已发布版本。
+当前实现已通过本地浏览器与 Rust 校验、签名及安装包生成。早期两次 Windows alpha CI 在 GitHub 创建 Release 时返回 HTTP 403；配置专用发布凭据后，2026-11-16 的 [Release TX #43864899826](https://github.com/Mostorm-Labs/NearCast-Desktop-TX/actions/runs/43864899826) 已完成 Windows/macOS 构建、GitHub 与 Mosapi 发布。该次 macOS 构建的 Apple 凭据为空，不能视为 Developer ID 和公证验收。**跨 Build 安装和自动重启仍未验收。** 不将本地结果或 CI 构建成功视为安装验收成功。仅发布阶段失败且尚未创建 Mosapi 记录时可重试失败 job，沿用原有已签名产物；未取得托管 runner、尚未开始构建便被取消的 job，也可在同一 workflow run 内单独重试，复用该批预留计数及其他已完成平台产物。代码或产物需要修改、或任何资产已经公开或 Mosapi 记录已经创建时，需检查状态并分配新的 Build，不覆盖已发布版本。
 
-macOS 发布流程已加入 Developer ID、公证凭据校验和产物验收，Apple 凭据已配置，等待本次真实 CI 验证。本机普通开发构建的基础配置仍允许 ad-hoc，不能把开发构建、更新签名或 Windows 验证视为已完成 macOS 正式签名和权限保留验收。
+2026-11-19 的 [Release TX #44510228292](https://github.com/Mostorm-Labs/NearCast-Desktop-TX/actions/runs/44510228292) 已完成 `0.2.0.50` Windows x64、macOS Intel / Apple Silicon 正式发布。两种 Mac 包均通过 Developer ID、Hardened Runtime、Apple 公证、stapled 票据及 Gatekeeper 检查；公开下载后再次验证通过。GitHub 20 个资产和两个 Mosapi release record 的 18 个文件已核验，详见 [本次发布记录](../verification/2026-11-19-tx-stable-release.md)。本机普通开发构建的基础配置仍允许 ad-hoc，不能用开发构建替代正式签名或权限保留验收。
 
 ## 8. 上线前确认
 

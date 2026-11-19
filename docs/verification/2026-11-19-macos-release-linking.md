@@ -18,3 +18,5 @@ CI 使用 Rust `1.100.0`、最低 macOS `13.0` 和 ThinLTO。链接器报告 `__
 修复后的本地完整 JavaScript 测试 309 项通过；Rust 1.100.0 完整测试 62 项通过、4 项忽略。正式 Release 构建、签名和公证继续由新的 CI Build 验证，不复用或覆盖 46 号发布资产。
 
 参考：[Rust 对 Objective-C 可用性 ABI 与 Clang 运行库的说明](https://github.com/rust-lang/rust/blob/main/library/std/src/sys/platform_version/darwin/public_extern.rs)、[LLVM 运行时实现](https://github.com/llvm/llvm-project/blob/llvmorg-20.1.0/compiler-rt/lib/builtins/os_version_check.c)。
+
+后续 `0.2.0.48` 和 `0.2.0.50` 的 Intel / Apple Silicon Release 链接及公证均通过，正式产物检查见 [发布验收记录](2026-11-19-tx-stable-release.md)。
