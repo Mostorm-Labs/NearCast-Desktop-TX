@@ -251,7 +251,7 @@ GitHub Secrets：
 
 证书可在“钥匙串访问 → 我的证书”中选中含关联私钥的 Developer ID Application 证书项，导出为带密码的 P12。使用 `openssl base64 -A -in /path/to/DeveloperID.p12 -out /outside/repository/certificate-base64.txt` 转换，再将文件内容填入 APPLE_CERTIFICATE Secret。密码、P12、.p8 和 base64 内容不提交到仓库、不发送到聊天或日志中。
 
-2026-11-18 本机检查到的正式证书名称为 `Developer ID Application: SUZHOU AUDITORYWORKS CO.,LTD (8C2WJTL66R)`，Team ID 为 `8C2WJTL66R`，有效至北京时间 2027-02-02。GitHub 仓库级已有更新签名、Mosapi 和发布 token，Apple 凭据需另行配置；组织共享 Secrets 的可用性需由组织管理员确认。
+2026-11-18 本机检查到的正式证书名称为 `Developer ID Application: SUZHOU AUDITORYWORKS CO.,LTD (8C2WJTL66R)`，Team ID 为 `8C2WJTL66R`，有效至北京时间 2027-02-02。2026-11-19 已确认仓库级存在四项 Apple ID 方案 Secrets，以及签名身份、Team ID 和 `APPLE_NOTARIZATION_METHOD=apple-id` Variables。凭据名称存在不等于签名或公证已通过，仍须以真实发布流水线及产物检查结果为准。
 
 `scripts/macos-signing.mjs check` 会在分配发布 Build 前校验配置，拒绝 ad-hoc、Apple Development、不匹配的 Team 和缺失的公证凭据。构建调用 `scripts/build.mjs`，以 `NEARCAST_REQUIRE_MACOS_SIGNING=1` 再次校验并强制 Hardened Runtime；Tauri CLI 负责导入 P12、Developer ID 签名、提交公证和 stapling。API 私钥仅在 RUNNER_TEMP 的私有临时文件中提供给 CLI，不把原始 .p8 内容转发到子进程，正常完成或失败后均清理。
 
@@ -273,7 +273,7 @@ GitHub Secrets：
 
 当前实现已通过本地浏览器与 Rust 校验、签名及安装包生成。早期两次 Windows alpha CI 在 GitHub 创建 Release 时返回 HTTP 403；配置专用发布凭据后，2026-11-16 的 [Release TX #43864899826](https://github.com/Mostorm-Labs/NearCast-Desktop-TX/actions/runs/43864899826) 已完成 Windows/macOS 构建、GitHub 与 Mosapi 发布。该次 macOS 构建的 Apple 凭据为空，不能视为 Developer ID 和公证验收。**跨 Build 安装和自动重启仍未验收。** 不将本地结果或 CI 构建成功视为安装验收成功。仅发布阶段失败且尚未创建 Mosapi 记录时可重试失败 job，沿用原有已签名产物；若任何资产已公开或 Mosapi 记录已创建，需检查状态并分配新的 Build，不覆盖已发布版本。
 
-macOS 发布流程已加入 Developer ID、公证凭据校验和产物验收；凭据尚待配置并进行首次真实 CI 公证。本机普通开发构建的基础配置仍允许 ad-hoc，不能把开发构建、更新签名或 Windows 验证视为已完成 macOS 正式签名和权限保留验收。
+macOS 发布流程已加入 Developer ID、公证凭据校验和产物验收，Apple 凭据已配置，等待本次真实 CI 验证。本机普通开发构建的基础配置仍允许 ad-hoc，不能把开发构建、更新签名或 Windows 验证视为已完成 macOS 正式签名和权限保留验收。
 
 ## 8. 上线前确认
 

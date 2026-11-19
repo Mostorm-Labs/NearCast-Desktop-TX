@@ -6,7 +6,9 @@
 
 当前反控使用 AXTP typed-input R2 开发快照；实现、依赖指纹、恢复步骤和验证限制见 [TI-3 handoff](docs/superpowers/handoffs/2026-11-06-tx-typed-input-ti3.md)。早期 TouchBatch/BIND 联调记录仅供历史追溯。
 
-支持 Windows 10/11 和 macOS 13 及以上版本。Windows 使用 WebView2；Windows 安装包会在安装时下载并静默安装 WebView2 Bootstrapper。macOS 首次分享屏幕前，需要在“系统设置 → 隐私与安全性 → 屏幕录制”允许 NearHub Cast。
+支持 Windows 10/11 和 macOS 13 及以上版本，macOS 分别提供 Intel 和 Apple Silicon 包。Windows 使用 WebView2；Windows 安装包会在安装时下载并静默安装 WebView2 Bootstrapper。macOS 画面由系统选屏器按次授权；部分系统还要求长期录屏授权，应用会在需要时提示。系统声音和反控分别检查音频采集及辅助功能权限。
+
+macOS 14.2 及以上的原生系统声音使用 Core Audio Tap，避免与 WebKit 的重复选屏冲突。macOS 13–14.1 保留 ScreenCaptureKit 音频兼容后端，尚未完成该范围的连续有声投屏实机验收。当前不支持 macOS 10.x；旧系统缺少现有原生采集 API，降低打包最低版本不能代替兼容适配。
 
 NearHub Cast 是基于 Tauri 的 WebCast 发送端，复用 Launcher 的发送流程：配对码加入房间、WebSocket 信令、WebRTC `RTCPeerConnection` 和 DataChannel 控制通道。
 
