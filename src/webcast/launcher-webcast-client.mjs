@@ -440,10 +440,15 @@ export class LauncherWebCastClient {
         if(this.pc===pc&&!this.stream&&!this.closed)this.sendSignal('offer',offer);
       });}
     } finally {
-      // The system sharing bar ends capture independently of signaling. Always
-      // restore the sender UI even when detaching a failed peer's track fails.
-      this.onStream(null);
-      if (this.pc && this.status === 'sharing') this.setStatus('connected');
+      // Native audio may own a separate process. Retire it before the UI can
+      // start another system picker, including when RTP detachment failed.
+      try { await this.mediaDevices?.stop?.(current); }
+      finally {
+        // The system sharing bar ends capture independently of signaling. Always
+        // restore the sender UI even when detaching a failed peer's track fails.
+        this.onStream(null);
+        if (this.pc && this.status === 'sharing') this.setStatus('connected');
+      }
     }
   }
 

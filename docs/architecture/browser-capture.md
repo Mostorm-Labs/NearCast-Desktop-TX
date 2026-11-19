@@ -22,6 +22,12 @@
 | `calibrateDisplayBinding` / Rust `display_binding` | 短暂显示四角随机标记，仅本地识别所选屏幕；Rust 持有布局与来源绑定及释放责任 |
 | `WebCastTouchbackSender` / InputEngine | AXTP 会话、输入流、坐标映射、按住状态和释放 |
 | Rust `native_audio` | 独立音频会话及有界 PCM 队列，全部 COM 音频接口由专属线程拥有 |
+
+macOS 14.2 及以上的系统音频使用 Core Audio Process Tap，通过私有 tap/aggregate device 读取系统输出；不建立 ScreenCaptureKit/replayd 客户端，避免与 WebKit 的系统选屏回调冲突。设备 PCM 由 AVAudioConverter 转为固定 48 kHz 双声道 Float32，兼容交错／平面布局和不同设备采样率。tap 不静音本机播放、不修改默认音频设备，并排除本应用输出，不采集麦克风。更旧系统保留 ScreenCaptureKit 兼容后端；该分支不包含在本次 macOS 27.2.1 实机验收结论中，仍需验证其系统选屏兼容性。
+
+两种音频后端都由短生命周期工作进程拥有，使用已签名主程序的内部 worker 入口启动，不创建第二个窗口或选屏器。主进程只通过有界匿名管道接收 PCM；工作进程入口验证父进程使用同一个应用可执行文件，外部命令行调用不能直接取得应用的录音授权。仅隔离 ScreenCaptureKit 进程并回收它不能修复现代系统的选屏问题，因此现代系统不会在 Core Audio 失败后自动回退到 ScreenCaptureKit。
+
+停止分享等待音频进程退出并回收；框架停止超时则终止该工作进程并等待退出，随后才恢复开始分享状态。父进程关闭管道也会触发工作进程清理。macOS 在清理期间不打开下一次系统选屏器；旧来源的迟到停止不能关闭新来源。应用最低 macOS 版本仍为 13，视频仍是系统 getDisplayMedia 返回的原始轨道。
 | Rust `input_geometry/input_native` / `windows_mouse_model/windows_mouse` | 当前物理屏幕几何、Windows Touch/Mouse 与 macOS Mouse 注入、租约校验及状态释放 |
 
 默认媒体路径：

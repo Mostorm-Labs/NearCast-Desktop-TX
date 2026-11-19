@@ -57,6 +57,7 @@ export async function createNativeAudioTrack({captureId,invoke,audioContext,Audi
     nativeStarted=true;const started=await invoke(startCommand,{captureId});
     check(started?.sampleRate===RATE&&started?.channels===CHANNELS,'Native audio format mismatch');
     stats.source=started.source??stats.source;stats.scope=started.scope??stats.scope;
+    if(Number.isSafeInteger(started.workerProcessId))stats.workerProcessId=started.workerProcessId;
     stats.state='capturing';
     let sequence=0,discontinuities=0;
     const read=async()=>{

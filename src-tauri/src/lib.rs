@@ -20,6 +20,8 @@ use local_origin::{nearcast_migrate_legacy_settings,nearcast_take_legacy_setting
 mod display_binding;
 #[cfg(any(windows,target_os="macos",test))]
 mod native_audio;
+#[cfg(target_os="macos")]
+pub fn run_audio_worker_if_requested() { native_audio::run_worker_if_requested(); }
 mod input_native;
 #[cfg(windows)]
 mod input_execution;

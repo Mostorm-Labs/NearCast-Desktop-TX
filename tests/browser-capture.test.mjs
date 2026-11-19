@@ -107,6 +107,32 @@ test('an old video track stop cannot retire a replacement session',async()=>{
   assert.equal(media.current.stream,second);
   await media.stop();
 });
+test('waiting for an old stream to retire cannot stop a newly selected capture',async()=>{
+  const media=new BrowserCaptureMediaDevices({mediaDevices:{getDisplayMedia:async()=>stream()}});
+  const first=await media.getDisplayMedia();
+  const second=await media.getDisplayMedia();
+  await media.stop(first);
+  assert.equal(second.getVideoTracks()[0].readyState,'live');
+  assert.equal(media.current?.stream,second);
+  await media.stop(second);
+  assert.equal(second.getVideoTracks()[0].readyState,'ended');
+});
+test('macOS never opens another picker while its audio worker is still retiring',async()=>{
+  let finish;const retired=new Promise(resolve=>{finish=resolve;});let selections=0;
+  const media=new BrowserCaptureMediaDevices({platform:'macos',invoke:async()=>{},prepareSystemAudio:()=>null,
+    mediaDevices:{getDisplayMedia:async()=>{selections++;return stream();}},
+    createSystemAudio:async()=>({track:track('audio'),stop:()=>retired})});
+  await media.getDisplayMedia({audio:true});
+  const stopping=media.stop();
+  const next=media.getDisplayMedia();void next.catch(()=>{});
+  try{
+    assert.equal(selections,1,'the native worker must exit before another OS picker is opened');
+    await assert.rejects(next,/native_audio_cleanup_required/);
+  }finally{finish();await stopping;await next.catch(()=>{});await media.stop();}
+  const restarted=await media.getDisplayMedia();
+  assert.equal(restarted.getVideoTracks()[0].readyState,'live');
+  await media.stop();
+});
 test('Windows monitor calibration binds the original track and releases the same source on stop',async()=>{
   let sourceId;const released=[];
   const media=new BrowserCaptureMediaDevices({platform:'windows',mediaDevices:{getDisplayMedia:async()=>stream()},

@@ -10,6 +10,10 @@ fn main() {
         println!("cargo:rerun-if-changed=src/macos_app_icon.m");
         cc::Build::new().file("src/macos_app_icon.m").flag("-fobjc-arc").compile("nearcast_app_icon");
         println!("cargo:rerun-if-changed=src/macos_system_audio.m");
+        println!("cargo:rerun-if-changed=src/macos_core_audio.m");
+        cc::Build::new().file("src/macos_core_audio.m").flag("-fobjc-arc").flag("-fblocks").flag("-mmacosx-version-min=13.0").compile("nearcast_core_audio");
+        println!("cargo:rustc-link-lib=framework=CoreAudio");
+        println!("cargo:rustc-link-lib=framework=AVFAudio");
         cc::Build::new().file("src/macos_system_audio.m").flag("-fobjc-arc").flag("-fblocks").flag("-mmacosx-version-min=13.0").compile("nearcast_system_audio");
         println!("cargo:rustc-link-lib=framework=ScreenCaptureKit");
         println!("cargo:rustc-link-lib=framework=CoreMedia");

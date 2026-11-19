@@ -4,9 +4,15 @@
 #import <CoreMedia/CoreMedia.h>
 
 typedef void (*NCAudioSamples)(void *, const float *, const float *, size_t, int32_t);
+extern uint8_t nearcast_core_audio_available(void);
+extern void *nearcast_core_audio_create(void *, NCAudioSamples);
+extern int32_t nearcast_core_audio_start(void *);
+extern int32_t nearcast_core_audio_stop(void *);
+extern void nearcast_core_audio_destroy(void *);
 
-// All start/stop calls run on Rust's blocking pool. Only audio outputs are
-// registered: browser video remains the sole video source sent to WebRTC.
+// Modern systems dispatch directly to Core Audio without touching replayd.
+// ScreenCaptureKit remains the older-system compatibility implementation.
+// Browser video remains the sole video source sent to WebRTC.
 @interface NCSystemAudio : NSObject <SCStreamOutput, SCStreamDelegate>
 @property(nonatomic, strong) SCStream *stream;
 @property(nonatomic, strong) dispatch_queue_t samplesQueue;
@@ -65,6 +71,7 @@ typedef void (*NCAudioSamples)(void *, const float *, const float *, size_t, int
 @end
 
 void *nearcast_macos_audio_create(void *context, NCAudioSamples callback) {
+    if (nearcast_core_audio_available()) return nearcast_core_audio_create(context, callback);
     @autoreleasepool {
         NCSystemAudio *owner = [NCSystemAudio new];
         owner.context = context;owner.callback = callback;
@@ -73,6 +80,7 @@ void *nearcast_macos_audio_create(void *context, NCAudioSamples callback) {
 }
 
 int32_t nearcast_macos_audio_start(void *handle) {
+    if (nearcast_core_audio_available()) return nearcast_core_audio_start(handle);
     @autoreleasepool {
         if ([NSThread isMainThread]) return -1008;
         if (!CGPreflightScreenCaptureAccess()) return -3801;
@@ -88,7 +96,12 @@ int32_t nearcast_macos_audio_start(void *handle) {
         SCDisplay *mainDisplay;
         for (SCDisplay *display in content.displays) if (display.displayID == CGMainDisplayID()) { mainDisplay = display;break; }
         if (!mainDisplay) return -1002;
-        SCContentFilter *filter = [[SCContentFilter alloc] initWithDisplay:mainDisplay excludingApplications:@[] exceptingWindows:@[]];
+        NSMutableArray<SCRunningApplication *> *excluded = [NSMutableArray new];
+        NSString *bundleID = NSBundle.mainBundle.bundleIdentifier;
+        for (SCRunningApplication *application in content.applications) {
+            if (bundleID && [application.bundleIdentifier isEqualToString:bundleID]) [excluded addObject:application];
+        }
+        SCContentFilter *filter = [[SCContentFilter alloc] initWithDisplay:mainDisplay excludingApplications:excluded exceptingWindows:@[]];
         SCStreamConfiguration *configuration = [SCStreamConfiguration new];
         configuration.width = 2;configuration.height = 2;
         configuration.minimumFrameInterval = CMTimeMake(1, 1);
@@ -110,6 +123,7 @@ int32_t nearcast_macos_audio_start(void *handle) {
 }
 
 int32_t nearcast_macos_audio_stop(void *handle) {
+    if (nearcast_core_audio_available()) return nearcast_core_audio_stop(handle);
     @autoreleasepool {
         NCSystemAudio *owner = (__bridge NCSystemAudio *)handle;
         [owner.callbackGate lock];owner.closed = YES;[owner.callbackGate unlock];
@@ -129,5 +143,19 @@ int32_t nearcast_macos_audio_stop(void *handle) {
 }
 
 void nearcast_macos_audio_destroy(void *handle) {
+    if (nearcast_core_audio_available()) { nearcast_core_audio_destroy(handle);return; }
     @autoreleasepool { __unused NCSystemAudio *owner = (__bridge_transfer NCSystemAudio *)handle; }
+}
+
+// ScreenCaptureKit can complete on the main queue. The worker runs capture on
+// a thread and services that queue here, without creating another app window.
+static void NCWorkerKeepAlive(void *info) { (void)info; }
+void nearcast_macos_audio_worker_run_loop(void) {
+    @autoreleasepool {
+        CFRunLoopSourceContext context = {0};context.perform = NCWorkerKeepAlive;
+        CFRunLoopSourceRef source = CFRunLoopSourceCreate(kCFAllocatorDefault, 0, &context);
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopDefaultMode);
+        CFRelease(source);
+        CFRunLoopRun();
+    }
 }

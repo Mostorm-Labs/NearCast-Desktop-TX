@@ -1,121 +1,448 @@
-use super::{PcmQueue, CHANNELS, RATE};
-use std::{ffi::c_void, sync::{Arc, Condvar, Mutex}, time::Duration};
+// A session-scoped worker owns native audio. Modern macOS uses Core Audio
+// taps, avoiding replayd entirely; ScreenCaptureKit is a legacy fallback.
+// Closing another replayd client is insufficient to restore WebKit's picker.
+use std::{
+    collections::VecDeque,
+    io::{self, Read, Write},
+    process::{Child, Command, Stdio},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc, Condvar, Mutex,
+    },
+    thread,
+    time::{Duration, Instant},
+};
 
-struct State { id: String, queue: Mutex<PcmQueue>, changed: Condvar }
-// The retained Objective-C handle is only operated under ACTIVE. The Arc keeps
-// its callback context stable until stop closes and drains the callback gate.
-struct Controller { state: Arc<State>, handle: usize }
-static ACTIVE: Mutex<Option<Controller>> = Mutex::new(None);
-extern "C" {
-    fn nearcast_macos_audio_create(context: *const c_void, callback: unsafe extern "C" fn(*const c_void, *const f32, *const f32, usize, i32)) -> *mut c_void;
-    fn nearcast_macos_audio_start(handle: *mut c_void) -> i32;
-    fn nearcast_macos_audio_stop(handle: *mut c_void) -> i32;
-    fn nearcast_macos_audio_destroy(handle: *mut c_void);
-}
-fn error(code: i32) -> String {
-    match code {
-        -3801 => "macos_audio_permission_required".into(),
-        -1001 | -1003 => "macos_audio_start_timeout".into(),
-        -1002 => "macos_audio_no_display".into(),
-        -1004 => "macos_audio_stop_timeout".into(),
-        -1005 => "macos_audio_format_unsupported".into(),
-        _ => format!("macos_audio_capture_failed:{code}"),
+const WORKER_ARG: &str = "--nearcast-system-audio-worker";
+const MAX_FRAME: usize = 20_480;
+const MAX_PENDING: usize = 4;
+const READY: u8 = 0;
+const PCM: u8 = 1;
+const ERROR: u8 = 2;
+static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+// Do not expose the app's recording grant through a general command-line
+// recorder. Only the same bundled executable may launch an audio worker.
+fn is_host_process(pid: i32) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    #[link(name = "proc")]
+    extern "C" {
+        fn proc_pidpath(pid: i32, buffer: *mut u8, size: u32) -> i32;
     }
+    let mut path = [0u8; 4096];
+    if unsafe { proc_pidpath(pid, path.as_mut_ptr(), path.len() as u32) } <= 0 {
+        return false;
+    }
+    let count = path.iter().position(|b| *b == 0).unwrap_or(path.len());
+    std::env::current_exe()
+        .map(|exe| exe.as_os_str().as_bytes() == &path[..count])
+        .unwrap_or(false)
 }
-unsafe extern "C" fn receive(context: *const c_void, left: *const f32, right: *const f32, frames: usize, status: i32) {
-    let state = &*(context as *const State);
-    if let Ok(mut queue) = state.queue.lock() {
-        if queue.stopped { return; }
-        if status != 0 { queue.error = Some(error(status)); }
-        else if frames > RATE as usize || left.is_null() { queue.error = Some(error(-1005)); }
-        else if right.is_null() {
-            queue.push(std::slice::from_raw_parts(left, frames * CHANNELS), false);
-        } else {
-            let left = std::slice::from_raw_parts(left, frames);
-            let right = std::slice::from_raw_parts(right, frames);
-            let samples: Vec<f32> = left.iter().zip(right).flat_map(|(&l, &r)| [l, r]).collect();
-            queue.push(&samples, false);
+fn write_frame(output: &mut impl Write, kind: u8, bytes: &[u8]) -> io::Result<()> {
+    if bytes.len() > MAX_FRAME {
+        return Err(io::ErrorKind::InvalidData.into());
+    }
+    output.write_all(&[kind])?;
+    output.write_all(&(bytes.len() as u32).to_be_bytes())?;
+    output.write_all(bytes)?;
+    output.flush()
+}
+fn read_frame(input: &mut impl Read) -> io::Result<(u8, Vec<u8>)> {
+    let mut header = [0; 5];
+    input.read_exact(&mut header)?;
+    let size = u32::from_be_bytes(header[1..].try_into().unwrap()) as usize;
+    if size > MAX_FRAME
+        || !matches!(header[0], READY | PCM | ERROR)
+        || header[0] == READY && size != 0
+        || header[0] == ERROR && size > 512
+    {
+        return Err(io::ErrorKind::InvalidData.into());
+    }
+    let mut bytes = vec![0; size];
+    input.read_exact(&mut bytes)?;
+    Ok((header[0], bytes))
+}
+#[derive(Default)]
+struct Pending {
+    packets: VecDeque<Vec<u8>>,
+    error: Option<String>,
+    stopped: bool,
+}
+#[derive(Default)]
+struct State {
+    pending: Mutex<Pending>,
+    changed: Condvar,
+}
+impl State {
+    fn read(&self) -> Result<Vec<u8>, String> {
+        let pending = self
+            .pending
+            .lock()
+            .map_err(|_| "native_audio_queue_poisoned")?;
+        let (mut pending, _) = self
+            .changed
+            .wait_timeout_while(pending, Duration::from_secs(2), |p| {
+                p.packets.is_empty() && p.error.is_none() && !p.stopped
+            })
+            .map_err(|_| "native_audio_queue_poisoned")?;
+        if pending.stopped {
+            return Err("native_audio_retired".into());
         }
-        drop(queue);state.changed.notify_all();
+        if let Some(error) = &pending.error {
+            return Err(error.clone());
+        }
+        pending
+            .packets
+            .pop_front()
+            .ok_or_else(|| "macos_audio_worker_read_timeout".into())
+    }
+    fn fail(&self, error: String) {
+        if let Ok(mut pending) = self.pending.lock() {
+            if !pending.stopped {
+                pending.error = Some(error);
+            }
+            self.changed.notify_all();
+        }
     }
 }
-fn format() -> serde_json::Value {
-    serde_json::json!({"source":"screencapturekit","scope":"system-excluding-self","sampleRate":RATE,"channels":CHANNELS})
+fn receive(mut input: impl Read, state: Arc<State>, startup: mpsc::SyncSender<Result<(), String>>) {
+    let ready = match read_frame(&mut input) {
+        Ok((READY, _)) => Ok(()),
+        Ok((ERROR, error)) => Err(String::from_utf8_lossy(&error).into_owned()),
+        _ => Err("macos_audio_worker_start_failed".into()),
+    };
+    let success = ready.is_ok();
+    if startup.send(ready).is_err() || !success {
+        return;
+    }
+    loop {
+        match read_frame(&mut input) {
+            Ok((PCM, packet)) => {
+                let Ok(mut pending) = state.pending.lock() else {
+                    return;
+                };
+                if pending.stopped {
+                    return;
+                }
+                // Keep sequence numbers intact so Web Audio detects dropped
+                // packets and resets instead of replaying stale audio.
+                if pending.packets.len() == MAX_PENDING {
+                    pending.packets.pop_front();
+                }
+                pending.packets.push_back(packet);
+                state.changed.notify_all();
+            }
+            Ok((ERROR, error)) => {
+                state.fail(String::from_utf8_lossy(&error).into_owned());
+                return;
+            }
+            _ => {
+                state.fail("macos_audio_worker_ended".into());
+                return;
+            }
+        }
+    }
+}
+struct Worker {
+    child: Child,
+    state: Arc<State>,
+    reaped: bool,
+}
+impl Worker {
+    fn launch(command: &mut Command, timeout: Duration) -> Result<Self, String> {
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|_| "macos_audio_worker_spawn_failed")?;
+        let output = child
+            .stdout
+            .take()
+            .ok_or("macos_audio_worker_pipe_failed")?;
+        let state = Arc::new(State::default());
+        let reader = state.clone();
+        let (send, ready) = mpsc::sync_channel(1);
+        let mut worker = Self {
+            child,
+            state,
+            reaped: false,
+        };
+        if thread::Builder::new()
+            .name("macos-audio-reader".into())
+            .spawn(move || receive(output, reader, send))
+            .is_err()
+        {
+            return Err("macos_audio_worker_reader_failed".into());
+        }
+        match ready.recv_timeout(timeout) {
+            Ok(Ok(())) => Ok(worker),
+            result => {
+                let error = match result {
+                    Ok(Err(error)) => error,
+                    _ => "macos_audio_worker_start_timeout".into(),
+                };
+                worker.retire(Duration::from_millis(100))?;
+                Err(error)
+            }
+        }
+    }
+    fn retire(&mut self, timeout: Duration) -> Result<(), String> {
+        if self.reaped {
+            return Ok(());
+        }
+        if let Ok(mut pending) = self.state.pending.lock() {
+            pending.stopped = true;
+            pending.packets.clear();
+            self.state.changed.notify_all();
+        }
+        // EOF requests cleanup and also handles an unexpectedly dead host.
+        drop(self.child.stdin.take());
+        let until = Instant::now() + timeout;
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_)) => {
+                    self.reaped = true;
+                    return Ok(());
+                }
+                Ok(None) if Instant::now() < until => thread::sleep(Duration::from_millis(10)),
+                _ => break,
+            }
+        }
+        // Even a hung framework stop must not retain the replayd connection.
+        let _ = self.child.kill();
+        self.child
+            .wait()
+            .map_err(|_| "macos_audio_worker_cleanup_failed")?;
+        self.reaped = true;
+        Ok(())
+    }
+}
+impl Drop for Worker {
+    fn drop(&mut self) {
+        let _ = self.retire(Duration::from_millis(100));
+    }
+}
+struct Controller {
+    id: String,
+    worker: Worker,
+}
+static ACTIVE: Mutex<Option<Controller>> = Mutex::new(None);
+fn format(pid: u32) -> serde_json::Value {
+    extern "C" {
+        fn nearcast_core_audio_available() -> u8;
+    }
+    let source = if unsafe { nearcast_core_audio_available() } != 0 {
+        "coreaudio-tap"
+    } else {
+        "screencapturekit"
+    };
+    serde_json::json!({"source":source,"scope":"system-excluding-self",
+        "sampleRate":super::RATE,"channels":super::CHANNELS,"workerProcessId":pid})
 }
 pub fn start(id: &str) -> Result<serde_json::Value, String> {
     let mut active = ACTIVE.lock().map_err(|_| "native_audio_state_poisoned")?;
     if let Some(owner) = active.as_ref() {
-        if owner.state.id == id {
-            let queue = owner.state.queue.lock().map_err(|_| "native_audio_queue_poisoned")?;
-            if let Some(error) = &queue.error { return Err(error.clone()); }
-            if !queue.stopped { return Ok(format()); }
+        if owner.id == id {
+            let pending = owner
+                .worker
+                .state
+                .pending
+                .lock()
+                .map_err(|_| "native_audio_queue_poisoned")?;
+            if let Some(error) = &pending.error {
+                return Err(error.clone());
+            }
+            if !pending.stopped {
+                return Ok(format(owner.worker.child.id()));
+            }
         }
         return Err("native_audio_cleanup_required".into());
     }
-    let state = Arc::new(State { id: id.into(), queue: Mutex::new(PcmQueue::default()), changed: Condvar::new() });
-    let handle = unsafe { nearcast_macos_audio_create(Arc::as_ptr(&state).cast(), receive) };
-    if handle.is_null() { return Err("macos_audio_create_failed".into()); }
-    *active = Some(Controller { state: state.clone(), handle: handle as usize });
-    let status = unsafe { nearcast_macos_audio_start(handle) };
-    if status != 0 {
-        if let Ok(mut queue) = state.queue.lock() { queue.error = Some(error(status));queue.stopped = true; }
-        state.changed.notify_all();
-        // A timed-out framework start can still own resources. Preserve this
-        // controller if stop fails, so the caller must retry cleanup first.
-        if unsafe { nearcast_macos_audio_stop(handle) } == 0 {
-            unsafe { nearcast_macos_audio_destroy(handle); }*active = None;
-        }
-        return Err(error(status));
-    }
-    Ok(format())
+    let executable =
+        std::env::current_exe().map_err(|_| "macos_audio_worker_executable_missing")?;
+    let worker = Worker::launch(
+        Command::new(executable).arg(WORKER_ARG).arg(id),
+        Duration::from_secs(15),
+    )?;
+    let response = format(worker.child.id());
+    *active = Some(Controller {
+        id: id.into(),
+        worker,
+    });
+    Ok(response)
 }
 pub fn read(id: &str) -> Result<Vec<u8>, String> {
-    let state = ACTIVE.lock().map_err(|_| "native_audio_state_poisoned")?.as_ref()
-        .filter(|owner| owner.state.id == id).map(|owner| owner.state.clone()).ok_or("native_audio_not_active")?;
-    let queue = state.queue.lock().map_err(|_| "native_audio_queue_poisoned")?;
-    let (mut queue, _) = state.changed.wait_timeout_while(queue, Duration::from_millis(40), |q| {
-        q.samples.len() < 960 * CHANNELS && q.error.is_none() && !q.stopped
-    }).map_err(|_| "native_audio_queue_poisoned")?;
-    queue.packet(id)
+    let state = ACTIVE
+        .lock()
+        .map_err(|_| "native_audio_state_poisoned")?
+        .as_ref()
+        .filter(|owner| owner.id == id)
+        .map(|owner| owner.worker.state.clone())
+        .ok_or("native_audio_not_active")?;
+    state.read()
 }
 pub fn stop(id: &str) -> Result<(), String> {
     let mut active = ACTIVE.lock().map_err(|_| "native_audio_state_poisoned")?;
-    if let Some(owner) = active.as_ref().filter(|owner| owner.state.id == id) {
-        if let Ok(mut queue) = owner.state.queue.lock() { queue.stopped = true; }
-        owner.state.changed.notify_all();
-        let handle = owner.handle as *mut c_void;
-        let status = unsafe { nearcast_macos_audio_stop(handle) };
-        if status != 0 { return Err(error(status)); }
-        unsafe { nearcast_macos_audio_destroy(handle); }*active = None;
+    if let Some(owner) = active.as_mut().filter(|owner| owner.id == id) {
+        owner.worker.retire(Duration::from_secs(4))?;
+        *active = None;
     }
     Ok(())
 }
 pub fn shutdown() {
-    let id = ACTIVE.lock().ok().and_then(|active| active.as_ref().map(|owner| owner.state.id.clone()));
-    if let Some(id) = id { let _ = stop(&id); }
+    if let Ok(mut active) = ACTIVE.lock() {
+        if let Some(mut owner) = active.take() {
+            let _ = owner.worker.retire(Duration::from_secs(4));
+        }
+    }
+}
+
+// Called before Tauri/WKWebView initialization. The same signed executable
+// runs an audio-only worker, with no window, picker or network connection.
+pub fn run_worker_if_requested() {
+    let args: Vec<_> = std::env::args().collect();
+    if args.get(1).map(String::as_str) != Some(WORKER_ARG) {
+        return;
+    }
+    extern "C" {
+        fn getppid() -> i32;
+    }
+    if !is_host_process(unsafe { getppid() })
+        || args.len() != 3
+        || args[2].len() != 36
+        || !args[2].bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+    {
+        std::process::exit(2);
+    }
+    let id = args[2].clone();
+    thread::spawn(|| {
+        let mut stop = [0];
+        let _ = io::stdin().read(&mut stop);
+        STOP_REQUESTED.store(true, Ordering::Release);
+        super::macos_capture::shutdown();
+        std::process::exit(0);
+    });
+    thread::spawn(move || {
+        let mut output = io::stdout().lock();
+        match super::macos_capture::start(&id) {
+            Ok(_) => {
+                if write_frame(&mut output, READY, &[]).is_err() {
+                    std::process::exit(1);
+                }
+            }
+            Err(error) => {
+                let stopping = STOP_REQUESTED.load(Ordering::Acquire);
+                if !stopping {
+                    let _ = write_frame(&mut output, ERROR, error.as_bytes());
+                }
+                super::macos_capture::shutdown();
+                std::process::exit(if stopping { 0 } else { 1 });
+            }
+        }
+        loop {
+            match super::macos_capture::read(&id) {
+                Ok(packet) => {
+                    if write_frame(&mut output, PCM, &packet).is_ok() {
+                        continue;
+                    }
+                    // Closing the host's pipe is a normal end of the lease.
+                    super::macos_capture::shutdown();
+                    std::process::exit(0);
+                }
+                Err(error) => {
+                    let stopping = STOP_REQUESTED.load(Ordering::Acquire);
+                    if !stopping {
+                        let _ = write_frame(&mut output, ERROR, error.as_bytes());
+                    }
+                    super::macos_capture::shutdown();
+                    std::process::exit(if stopping { 0 } else { 1 });
+                }
+            }
+        }
+    });
+    extern "C" {
+        fn nearcast_macos_audio_worker_run_loop();
+    }
+    unsafe {
+        nearcast_macos_audio_worker_run_loop();
+    }
+    std::process::exit(1);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn native_planar_and_interleaved_samples_preserve_stereo_and_retirement() {
-        let state = State { id: "fixture".into(), queue: Mutex::new(PcmQueue::default()), changed: Condvar::new() };
-        let (left, right) = ([0.25, 0.5], [-0.25, -0.5]);
-        unsafe { receive((&state as *const State).cast(), left.as_ptr(), right.as_ptr(), 2, 0); }
-        let mut queue = state.queue.lock().unwrap();
-        assert_eq!(queue.samples.drain(..).collect::<Vec<_>>(), vec![0.25, -0.25, 0.5, -0.5]);drop(queue);
-        let interleaved = [0.75, -0.75, 0.1, -0.1];
-        unsafe { receive((&state as *const State).cast(), interleaved.as_ptr(), std::ptr::null(), 2, 0); }
-        let mut queue = state.queue.lock().unwrap();
-        assert_eq!(queue.samples.drain(..).collect::<Vec<_>>(), interleaved);queue.stopped = true;drop(queue);
-        unsafe { receive((&state as *const State).cast(), left.as_ptr(), right.as_ptr(), 2, 0); }
-        assert!(state.queue.lock().unwrap().samples.is_empty());
+    fn framed_transport_rejects_oversize_unknown_and_truncated_packets() {
+        for bytes in [
+            &[1, 255, 255, 255, 255][..],
+            &[3, 0, 0, 0, 0],
+            &[0, 0, 0, 0, 1, 0],
+            &[1, 0, 0, 0, 2, 0],
+        ] {
+            assert!(read_frame(&mut io::Cursor::new(bytes)).is_err());
+        }
+        let mut wire = Vec::new();
+        write_frame(&mut wire, PCM, b"known-pcm").unwrap();
+        assert_eq!(wire, b"\x01\x00\x00\x00\x09known-pcm");
+        assert_eq!(
+            read_frame(&mut io::Cursor::new(wire)).unwrap(),
+            (PCM, b"known-pcm".to_vec())
+        );
+    }
+    fn fixture(script: &str) -> Command {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", script]);
+        command
     }
     #[test]
-    fn native_audio_errors_cannot_be_misreported_as_silence() {
-        let state = State { id: "fixture".into(), queue: Mutex::new(PcmQueue::default()), changed: Condvar::new() };
-        unsafe { receive((&state as *const State).cast(), std::ptr::null(), std::ptr::null(), 0, -3801); }
-        assert_eq!(state.queue.lock().unwrap().packet("fixture").unwrap_err(), "macos_audio_permission_required");
+    fn real_worker_pipe_delivers_pcm_and_stop_reaps_the_process() {
+        let mut worker = Worker::launch(
+            &mut fixture(
+                "printf '\\000\\000\\000\\000\\000\\001\\000\\000\\000\\003pcm'; cat >/dev/null",
+            ),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        assert_ne!(worker.child.id(), std::process::id());
+        assert_eq!(worker.state.read().unwrap(), b"pcm");
+        worker.retire(Duration::from_secs(1)).unwrap();
+        assert!(worker.child.try_wait().unwrap().is_some());
+        assert_eq!(worker.state.read().unwrap_err(), "native_audio_retired");
+    }
+    #[test]
+    fn startup_error_and_hung_stop_cannot_leave_an_audio_worker_alive() {
+        let error = Worker::launch(
+            &mut fixture("printf '\\002\\000\\000\\000\\037macos_audio_permission_required'"),
+            Duration::from_secs(5),
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error, "macos_audio_permission_required");
+        let mut worker = Worker::launch(
+            &mut fixture("printf '\\000\\000\\000\\000\\000'; exec /bin/sleep 30"),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        worker.retire(Duration::from_millis(20)).unwrap();
+        assert!(worker.child.try_wait().unwrap().is_some());
+    }
+    #[test]
+    fn a_full_consumer_queue_stays_bounded_and_reports_worker_failure() {
+        let state = Arc::new(State::default());
+        let (tx, ready) = mpsc::sync_channel(1);
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, READY, &[]).unwrap();
+        for i in 0..20 {
+            write_frame(&mut bytes, PCM, &[i]).unwrap();
+        }
+        write_frame(&mut bytes, ERROR, b"fixture-failure").unwrap();
+        receive(io::Cursor::new(bytes), state.clone(), tx);
+        assert!(ready.recv().unwrap().is_ok());
+        let pending = state.pending.lock().unwrap();
+        assert_eq!(pending.packets.len(), 4);
+        assert_eq!(pending.packets.front().unwrap(), &[16]);
+        assert_eq!(pending.error.as_deref(), Some("fixture-failure"));
     }
 }

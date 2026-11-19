@@ -1,7 +1,11 @@
-// Session-scoped system audio: WASAPI on Windows, ScreenCaptureKit on macOS.
+// Session-scoped system audio: WASAPI on Windows; Core Audio taps on modern
+// macOS, with a ScreenCaptureKit compatibility backend on older systems.
 // IPC carries bounded float PCM, never pointers or audio device handles.
 use std::collections::VecDeque;
 
+#[cfg(target_os = "macos")]
+#[path = "native_audio_macos_capture.rs"]
+mod macos_capture;
 #[cfg(target_os = "macos")]
 #[path = "native_audio_macos.rs"]
 mod macos;

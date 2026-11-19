@@ -11,6 +11,7 @@ export class BrowserCaptureMediaDevices {
     this.current=null;this.generation=0;this.stopBarrier=Promise.resolve();
   }
   getDisplayMedia({video=true,audio=false}={}) {
+    if(this.platform==='macos'&&this.cleanupPending)return Promise.reject(new Error('native_audio_cleanup_required'));
     if(!this.mediaDevices?.getDisplayMedia) return Promise.reject(new Error('Screen capture is unavailable'));
     const generation=++this.generation;
     let audioContext;
@@ -97,13 +98,15 @@ export class BrowserCaptureMediaDevices {
     })();
     return capture.releasing;
   }
-  stop() {
+  stop(expectedStream) {
+    if(expectedStream&&this.current?.stream!==expectedStream)return this.stopBarrier;
     this.generation++;
     const capture=this.current;this.current=null;
     if(!capture)return this.stopBarrier;
     const stopping=this.release(capture);
-    this.stopBarrier=stopping;
-    return stopping;
+    this.cleanupPending=true;
+    this.stopBarrier=stopping.finally(()=>{this.cleanupPending=false;});
+    return this.stopBarrier;
   }
   diagnostics() {
     const c=this.current;if(!c)return null;

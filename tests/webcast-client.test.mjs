@@ -167,6 +167,23 @@ test('capture stop updates UI even if RTP sender detach fails',async()=>{
   assert.equal(stopped.length,1);assert.deepEqual(streams,[null]);assert.equal(client.status,'connected');
 });
 
+test('stop sharing waits for native capture retirement before advertising readiness for another picker',async()=>{
+  let retire;const retired=new Promise(resolve=>{retire=resolve;});
+  const updates=[];
+  const client=new LauncherWebCastClient({WebSocketImpl:class{},RTCPeerConnectionImpl:class{},
+    mediaDevices:{stop:()=>retired},onStream:value=>updates.push(value)});
+  client.stream=streamFixture().stream;client.pc={};client.status='sharing';
+  let finished=false;
+  const stopping=client.stopStream().then(()=>{finished=true;});
+  await wait();
+  try{
+    assert.equal(finished,false,'capture cleanup must finish before stopStream resolves');
+    assert.equal(client.status,'sharing','the next share cannot become ready while its audio worker is still alive');
+    assert.deepEqual(updates,[]);
+  }finally{retire();await stopping;}
+  assert.equal(client.status,'connected');assert.deepEqual(updates,[null]);
+});
+
 test('requires a four-character pairing code before opening Launcher signaling', async () => {
   FakeSocket.instances.length = 0;
   const client = new LauncherWebCastClient({WebSocketImpl: FakeSocket, RTCPeerConnectionImpl: FakePeerConnection});
