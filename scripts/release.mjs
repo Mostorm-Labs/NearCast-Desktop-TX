@@ -20,7 +20,9 @@ export function releaseMatrix(selection='all') {
 
 export function releasePackageName(version,platform,cpu,format){
   const ext=format==='nsis'?'-setup.exe':format==='msi'?'.msi':'.app.tar.gz';
-  return INSTALLER_NAME+'-'+version+'-'+platform+'-'+cpu+ext;
+  // GitHub normalizes spaces in uploaded asset names. Keep the name portable
+  // so the signed manifest, GitHub mirror and Mosapi all use the same basename.
+  return INSTALLER_NAME.replaceAll(' ','-')+'-'+version+'-'+platform+'-'+cpu+ext;
 }
 
 export function releaseVersion(logical, counter) {

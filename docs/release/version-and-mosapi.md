@@ -167,25 +167,25 @@ NearHub-Cast-X.Y.Z.Build-release-assets.zip
 
 ### 4.3 文件名示例
 
-完整版本写入每个资产名，推荐形式如下：
+完整版本写入每个资产名。公开资产使用不含空格的连字符名称，避免 GitHub 上传时转换文件名而使签名清单中的镜像 URL 失效；应用名和安装器标题仍使用 `NearHub Cast` 和 `NearHub Cast Desktop Installer`。推荐形式如下：
 
 ```text
-NearHub Cast Desktop Installer-0.2.0.37-windows-x86_64-setup.exe
-NearHub Cast Desktop Installer-0.2.0.37-windows-x86_64-setup.exe.sha256
-NearHub Cast Desktop Installer-0.2.0.37-windows-x86_64-setup.exe.sig
-NearHub Cast Desktop Installer-0.2.0.37-windows-x86_64.msi
-NearHub Cast Desktop Installer-0.2.0.37-windows-x86_64.msi.sha256
-NearHub Cast Desktop Installer-0.2.0.37-windows-x86_64.msi.sig
+NearHub-Cast-Desktop-Installer-0.2.0.37-windows-x86_64-setup.exe
+NearHub-Cast-Desktop-Installer-0.2.0.37-windows-x86_64-setup.exe.sha256
+NearHub-Cast-Desktop-Installer-0.2.0.37-windows-x86_64-setup.exe.sig
+NearHub-Cast-Desktop-Installer-0.2.0.37-windows-x86_64.msi
+NearHub-Cast-Desktop-Installer-0.2.0.37-windows-x86_64.msi.sha256
+NearHub-Cast-Desktop-Installer-0.2.0.37-windows-x86_64.msi.sig
 NearCast-Desktop-TX-0.2.0.37-windows-manifest.json
-NearHub Cast Desktop Installer-0.2.0.37-macos-x86_64.app.tar.gz
-NearHub Cast Desktop Installer-0.2.0.37-macos-x86_64.app.tar.gz.sig
-NearHub Cast Desktop Installer-0.2.0.37-macos-x86_64.app.tar.gz.sha256
-NearHub Cast Desktop Installer-0.2.0.37-macos-aarch64.app.tar.gz
-NearHub Cast Desktop Installer-0.2.0.37-macos-aarch64.app.tar.gz.sig
-NearHub Cast Desktop Installer-0.2.0.37-macos-aarch64.app.tar.gz.sha256
+NearHub-Cast-Desktop-Installer-0.2.0.37-macos-x86_64.app.tar.gz
+NearHub-Cast-Desktop-Installer-0.2.0.37-macos-x86_64.app.tar.gz.sig
+NearHub-Cast-Desktop-Installer-0.2.0.37-macos-x86_64.app.tar.gz.sha256
+NearHub-Cast-Desktop-Installer-0.2.0.37-macos-aarch64.app.tar.gz
+NearHub-Cast-Desktop-Installer-0.2.0.37-macos-aarch64.app.tar.gz.sig
+NearHub-Cast-Desktop-Installer-0.2.0.37-macos-aarch64.app.tar.gz.sha256
 NearCast-Desktop-TX-0.2.0.37-macos-manifest.json
-NearHub Cast Desktop Installer-0.2.0.37-macos-aarch64.dmg
-NearHub Cast Desktop Installer-0.2.0.37-macos-aarch64.dmg.sha256
+NearHub-Cast-Desktop-Installer-0.2.0.37-macos-aarch64.dmg
+NearHub-Cast-Desktop-Installer-0.2.0.37-macos-aarch64.dmg.sha256
 NearHub-Cast-0.2.0.37-release-assets.zip
 NearHub-Cast-0.2.0.37-release-assets.zip.sha256
 ```

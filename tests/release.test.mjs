@@ -21,8 +21,8 @@ test('release maps four-part display and numeric build metadata consistently',()
 test('desktop installer naming preserves sidecar signatures and version/platform identity',async()=>{
   const {mkdtemp,mkdir,writeFile,rm,readdir}=await import('node:fs/promises');
   const {tmpdir}=await import('node:os');const {join}=await import('node:path');
-  assert.equal(releasePackageName('0.2.0.37','windows','x86_64','nsis'),'NearHub Cast Desktop Installer-0.2.0.37-windows-x86_64-setup.exe');
-  assert.equal(releasePackageName('0.2.0.37','macos','aarch64','app'),'NearHub Cast Desktop Installer-0.2.0.37-macos-aarch64.app.tar.gz');
+  assert.equal(releasePackageName('0.2.0.37','windows','x86_64','nsis'),'NearHub-Cast-Desktop-Installer-0.2.0.37-windows-x86_64-setup.exe');
+  assert.equal(releasePackageName('0.2.0.37','macos','aarch64','app'),'NearHub-Cast-Desktop-Installer-0.2.0.37-macos-aarch64.app.tar.gz');
   assert.equal(installerFileName('NearHub Cast.app.tar.gz'),'NearHub Cast.app.tar.gz');
   const root=await mkdtemp(join(tmpdir(),'nearhub-installer-'));
   try{
@@ -34,6 +34,13 @@ test('desktop installer naming preserves sidecar signatures and version/platform
     assert.equal(await readFile(join(root,'nsis',next+'.sig'),'utf8'),'signed bytes');
     await writeFile(join(root,'nsis',name),'new package');await assert.rejects(nameInstallers(root),/already exists/);
   }finally{await rm(root,{recursive:true,force:true});}
+});
+test('public package names preserve signed mirror URLs through GitHub filename normalization',()=>{
+  for(const [platform,arch,format] of [['windows','x86_64','nsis'],['windows','x86_64','msi'],['macos','aarch64','app'],['macos','x86_64','app']]){
+    const name=releasePackageName('0.2.0.50',platform,arch,format);
+    assert.match(name,/^[A-Za-z0-9._-]+$/,'public asset names must not require GitHub normalization');
+    assert.equal(encodeURIComponent(name),name);
+  }
 });
 test('release refuses stale bundle output and incomplete or duplicate architecture sets',()=>{
   const old='bundle/nsis/NearHub Cast_0.1.0+1_x64-setup.exe';
