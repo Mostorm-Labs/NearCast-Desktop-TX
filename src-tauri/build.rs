@@ -18,6 +18,18 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=ScreenCaptureKit");
         println!("cargo:rustc-link-lib=framework=CoreMedia");
         println!("cargo:rustc-link-lib=framework=CoreGraphics");
+        // Objective-C @available uses Clang's compiler runtime. Rust's
+        // -nodefaultlibs link (notably with release LTO) must request it
+        // explicitly rather than rely on incidental libstd exports.
+        let runtime = cc::Build::new().get_compiler().to_command()
+            .arg("-print-file-name=libclang_rt.osx.a").output()
+            .expect("Could not locate the Clang macOS runtime");
+        assert!(runtime.status.success(), "Clang macOS runtime lookup failed");
+        let runtime = std::path::PathBuf::from(
+            String::from_utf8(runtime.stdout).expect("Invalid Clang runtime path").trim());
+        assert!(runtime.is_file(), "Clang macOS runtime is missing: {}", runtime.display());
+        println!("cargo:rustc-link-search=native={}", runtime.parent().unwrap().display());
+        println!("cargo:rustc-link-lib=static=clang_rt.osx");
     }
     println!("cargo:rerun-if-env-changed=NEARCAST_BUILD_VERSION");
     println!("cargo:rerun-if-changed=../build-version.json");
