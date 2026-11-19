@@ -20,7 +20,8 @@ export class BrowserCaptureMediaDevices {
     const releaseUnusedAudio=async()=>{if(audioContext){const context=audioContext;audioContext=null;await context.close().catch(()=>{});}};
     // This call must precede every await: WebKit/WebView requires activation.
     let selected;
-    try { selected=this.mediaDevices.getDisplayMedia({video:video===false?false:{frameRate:{ideal:VIDEO_FRAME_RATE,max:VIDEO_FRAME_RATE}},audio:this.platform==='windows'?false:audio,systemAudio:'include',surfaceSwitching:'exclude'}); }
+    // Prefer the screen pane on Windows; this hint does not restrict the picker.
+    try { selected=this.mediaDevices.getDisplayMedia({video:video===false?false:{...(this.platform==='windows'?{displaySurface:'monitor'}:{}),frameRate:{ideal:VIDEO_FRAME_RATE,max:VIDEO_FRAME_RATE}},audio:this.platform==='windows'?false:audio,systemAudio:'include',surfaceSwitching:'exclude'}); }
     catch(error){void releaseUnusedAudio();return Promise.reject(error);}
     const previous=this.current;
     const retired=this.stopBarrier;

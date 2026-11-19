@@ -172,13 +172,20 @@ let captureProvider = null;
 let featurePermissions;
 let client;
 let diagnosticLogger;
+const windowCaptureActive=()=>{
+  const track=client?.stream?.getVideoTracks()[0]??captureProvider?.current?.track;
+  return track?.readyState==='live'&&['window','browser'].includes(track.getSettings?.().displaySurface);
+};
 const renderCastingPreferences=(state=touchback?.diagnostics())=>{
-  inputEnabled.disabled=featurePermissions?.state('input').checking===true;
+  const windowCapture=windowCaptureActive();
+  inputEnabled.disabled=windowCapture||featurePermissions?.state('input').checking===true;
   systemAudioEnabled.disabled=featurePermissions?.state('audio').checking===true;
   const receiverUnavailable=state?.receiverSupported===false||state?.receiverEnabled===false;
-  castingInputEnabled.checked=inputEnabled.checked&&!receiverUnavailable;
+  castingInputEnabled.checked=inputEnabled.checked&&!receiverUnavailable&&!windowCapture;
   castingInputEnabled.disabled=inputEnabled.disabled||!state?.appReady||!state?.receiverStateReady||state?.receiverSupported!==true||state?.receiverEnabled!==true;
-  i18n.text(document.querySelector('#casting-input-help'),inputEnabled.disabled?'onboarding.checking':state?.receiverSupported===false?'cast.remoteUnsupported'
+  i18n.text(document.querySelector('#settings-input-help'),windowCapture?'cast.remoteWindow':'settings.remoteHelp');
+  for(const control of [inputEnabled,castingInputEnabled])i18n.attribute(control,'title',windowCapture?'cast.remoteWindow':'cast.remoteHelp');
+  i18n.text(document.querySelector('#casting-input-help'),windowCapture?'cast.remoteWindow':inputEnabled.disabled?'onboarding.checking':state?.receiverSupported===false?'cast.remoteUnsupported'
     :state?.receiverEnabled===false?'cast.remoteOff'
     :castingInputEnabled.disabled?'cast.remoteWaiting':'cast.remoteHelp');
   const request=document.querySelector('#input-request-control');
@@ -319,10 +326,16 @@ inputPolicyApply.addEventListener('click',async()=>{
 });
 const setFeatureEnabled=async(feature,wanted)=>{
   const control=feature==='input'?inputEnabled:systemAudioEnabled;
+  if(feature==='input'&&wanted&&windowCaptureActive()){
+    control.checked=touchback.diagnostics().localEnabled;renderCastingPreferences();return false;
+  }
   if(!wanted)featurePermissions.cancel(feature);
   else if(!platformInfo||platformInfo.os==='macos'){
     control.checked=false;renderCastingPreferences();await platformReady;
     if(!await featurePermissions.check(feature)){persistPreferences();return false;}
+    if(feature==='input'&&windowCaptureActive()){
+      control.checked=touchback.diagnostics().localEnabled;renderCastingPreferences();return false;
+    }
   }
   control.checked=wanted;persistPreferences();
   if(feature==='input')await touchback.setEnabled(wanted);
