@@ -152,12 +152,12 @@
             <label for="language-select"><span id="language-title" data-i18n="settings.language">Language</span><select id="language-select"><option value="system" data-i18n="settings.system">Follow system</option><option value="zh">中文</option><option value="en">English</option><option value="ja">日本語</option><option value="de">Deutsch</option></select></label>
             <p class="quality-help" data-i18n="settings.languageHelp">Choose your display language. Changes apply immediately.</p>
           </section>
-      <section class="video-quality settings-card" aria-labelledby="video-quality-title">
-        <div class="quality-heading"><h2 id="video-quality-title" data-i18n="quality.title">Quality Settings</h2><span id="video-quality-summary" class="sr-only">Fixed · 1920 × 1080 · 12 Mbps</span></div><p class="quality-subtitle" data-i18n="quality.next">Takes effect when sharing starts</p>
+      <section class="video-quality settings-card" aria-labelledby="video-quality-title" data-settings-advanced hidden>
+        <div class="quality-heading"><h2 id="video-quality-title" data-i18n="quality.title">Quality Settings</h2><span id="video-quality-summary" class="sr-only">Dynamic · 1920 × 1080 · 30 FPS</span></div><p class="quality-subtitle" data-i18n="quality.next">Takes effect when sharing starts</p>
         <div class="quality-grid">
           <label><span data-i18n="quality.resolution">Resolution</span><select id="video-resolution"><option data-i18n="quality.auto" value="auto">Auto (source)</option><option value="1280x720">1280 × 720</option><option value="1920x1080" selected>1920 × 1080</option><option value="2560x1440">2560 × 1440</option><option value="3840x2160">3840 × 2160</option></select></label>
-          <label><span data-i18n="quality.mode">Bitrate mode</span><select id="video-bitrate-mode"><option data-i18n="quality.dynamic" value="dynamic">Dynamic (adaptive)</option><option data-i18n="quality.fixed" value="fixed" selected>Fixed target</option></select></label>
-          <label><span data-i18n="quality.bitrate">Target Bitrate</span><select id="video-bitrate"><option value="2000">2 Mbps</option><option value="4000">4 Mbps</option><option value="8000">8 Mbps</option><option value="12000" selected>12 Mbps</option><option value="20000">20 Mbps</option></select></label>
+          <label><span data-i18n="quality.mode">Bitrate mode</span><select id="video-bitrate-mode"><option data-i18n="quality.dynamic" value="dynamic" selected>Dynamic (adaptive)</option><option data-i18n="quality.fixed" value="fixed">Fixed target</option></select></label>
+          <label><span data-i18n="quality.bitrate">Target Bitrate</span><select id="video-bitrate"><option value="2000">2 Mbps</option><option value="4000">4 Mbps</option><option value="8000" selected>8 Mbps</option><option value="12000">12 Mbps</option><option value="20000">20 Mbps</option></select></label>
         </div>
       </section>
           <section class="settings-card setting-row" aria-labelledby="remote-control-title">
