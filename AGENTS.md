@@ -48,8 +48,8 @@ Mosapi 上传 Action 除了 `product-slug` 还要求 `folder-id` 和 `product-id
 
 每个平台的 update record 使用完整四段版本，并上传可安装包、完整性文件和 Tauri updater 所需签名文件。资产文件名必须包含平台和架构，使同一 product slug 下的多架构包可以安全筛选：
 
-- Windows `otaFiles`：NSIS 更新安装包、MSI 更新安装包、两者对应的 updater 签名文件和 Windows 版本清单；SHA-256 文件可作为附加完整性资产。NSIS 为自动更新首选；MSI 用于企业部署。
-- macOS `otaFiles`：各支持架构的 macOS 更新包、对应的 updater 签名文件和 macOS 版本清单；SHA-256 文件可作为附加完整性资产。Tauri 原地更新使用 `.app.tar.gz`；`.dmg` 可额外提供给手工安装。
+- Windows `otaFiles` 包含带 Authenticode 签名和时间戳的 NSIS、MSI 更新安装包、两者的 updater 签名及 Windows 版本清单。NSIS 为自动更新首选，MSI 用于企业部署。
+- macOS `otaFiles` 包含 Intel 和 Apple Silicon 的 `.app.tar.gz` 更新包、updater 签名和 macOS 版本清单，也提供两个架构对应的已签名、公证 DMG 及 SHA-256。DMG 用于手工安装，Tauri 原地更新使用清单里的 `.app.tar.gz`。
 
 每个完整版本统一发布到同一个 GitHub Release。其 assets 提供一个聚合 ZIP，将两个平台的更新包、签名文件和版本清单归档为一个下载链接；同时保留独立资产，供按平台下载和联调。Mosapi 的两个 product record 分别关联各自的平台资产，不用聚合 ZIP 替代 `otaFiles`。
 

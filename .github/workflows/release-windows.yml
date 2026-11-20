@@ -1,0 +1,114 @@
+name: Sign Windows release
+
+on:
+  workflow_call:
+    inputs:
+      logical:
+        type: string
+        required: true
+      build:
+        type: string
+        required: true
+      display:
+        type: string
+        required: true
+      channel:
+        type: string
+        required: true
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: true
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check caller before assigning the signing runner
+        env:
+          CALLER: ${{ github.workflow_ref }}
+        run: |
+          if [[ "$CALLER" != "Mostorm-Labs/NearCast-Desktop-TX/.github/workflows/release.yml@$GITHUB_REF" ]]; then
+            echo "Use the NearCast Desktop TX release workflow."
+            exit 1
+          fi
+          case "$GITHUB_EVENT_NAME:$GITHUB_REF" in
+            workflow_dispatch:refs/heads/main|push:refs/tags/v*) ;;
+            *) echo "Windows signing requires main or a release tag on main."; exit 1 ;;
+          esac
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check release commit on main
+        run: |
+          git merge-base --is-ancestor HEAD refs/remotes/origin/main || {
+            echo "The release commit must be on main."
+            exit 1
+          }
+
+  build:
+    needs: authorize
+    runs-on:
+      group: nearcast-windows-signing
+      labels: [self-hosted, Windows, X64]
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: powershell
+    env:
+      WINDOWS_TARGET: x86_64-pc-windows-msvc
+      NEARCAST_BUILD_VERSION: ${{ inputs.display }}
+      NEARCAST_UPDATE_CHANNEL: ${{ inputs.channel }}
+      NEARCAST_WINDOWS_SIGNING_TOOL_DIR: ${{ vars.WINDOWS_SIGNING_TOOL_DIR }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Check host signing tool
+        run: .\scripts\windows-signing.ps1 -Check
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+      - run: npm ci
+      - run: npm test
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: tx-build-counter
+          path: .
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml --target $env:WINDOWS_TARGET
+        env:
+          NEARCAST_UPDATE_CHANNEL: release
+      - name: Configure Windows release
+        env:
+          LOGICAL_VERSION: ${{ inputs.logical }}
+          BUILD_COUNTER: ${{ inputs.build }}
+        run: node scripts/release.mjs config $env:LOGICAL_VERSION $env:BUILD_COUNTER windows
+      - name: Build and Authenticode-sign Windows installers
+        run: node scripts/build.mjs --config src-tauri/tauri.release.conf.json --target $env:WINDOWS_TARGET --bundles nsis,msi -- --locked
+      - name: Verify installers and sign update assets
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $bundle = "src-tauri/target/$env:WINDOWS_TARGET/release/bundle"
+          $nsis = @(Get-ChildItem -LiteralPath "$bundle/nsis" -File -Filter '*-setup.exe')
+          $msi = @(Get-ChildItem -LiteralPath "$bundle/msi" -File -Filter '*.msi')
+          if ($nsis.Count -ne 1 -or $msi.Count -ne 1) { throw 'Expected one NSIS and one MSI installer.' }
+          .\scripts\windows-signing.ps1 -VerifyOnly -Path @($nsis[0].FullName, $msi[0].FullName)
+          node scripts/name-installers.mjs $bundle
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/release.mjs prepare $env:WINDOWS_TARGET windows x86_64 $env:NEARCAST_BUILD_VERSION $bundle release
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tx-update-x86_64-pc-windows-msvc
+          path: release
+          if-no-files-found: error

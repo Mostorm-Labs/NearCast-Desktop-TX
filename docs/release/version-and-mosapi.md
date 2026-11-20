@@ -138,10 +138,10 @@ GET https://mosapi.auditoryworks.co/v1/updates/product/nearcast-tx-macos
 
 | 产品 | 必需的 `otaFiles` 内容 |
 | --- | --- |
-| Windows `646` | NSIS `.exe`、MSI `.msi`、两种包各自对应的 `.sig`、Windows 版本清单及其 `.sig`；另提供 `.sha256` |
-| macOS `647` | 各支持架构的 `.app.tar.gz` 更新包、对应的 `.sig`、macOS 版本清单及其 `.sig`；另提供 `.sha256` |
+| Windows `646` | 已做 Authenticode 签名的 NSIS `.exe`、MSI `.msi`、两种包各自对应的 `.sig`、Windows 版本清单及其 `.sig`，以及对应的 `.sha256` |
+| macOS `647` | Intel 和 Apple Silicon 的 `.app.tar.gz` 更新包、对应的 `.sig`、macOS 版本清单及其 `.sig`，以及两个架构的已签名公证 DMG 和对应的 `.sha256` |
 
-macOS 的 `.dmg` 可作为额外的手工安装资产；Tauri updater 安装目标使用签名的 `.app.tar.gz`，不能将 `.dmg` 当成可直接原地更新的包。macOS 的 Intel 和 Apple Silicon 文件一并关联到产品 `647`。
+GitHub Release 和 Mosapi 都提供 Intel 和 Apple Silicon 的 `.dmg`，可打开磁盘映像并把应用拖到 Applications。签名的 macOS 版本清单列出 Tauri updater 使用的 `.app.tar.gz`，因此同一产品记录里的 DMG 只用于手工安装。
 
 每份平台版本清单包含 `schemaVersion=1`、`version`、`logicalVersion`、`build`、`platform`、`productSlug`、`channel`、`publishedAt`、`notes` 和 `assets`。每项资产记录 `platform/arch/format/name/url/size/sha256/signature`。Windows 清单同时描述 NSIS 与 MSI，macOS 清单描述两个架构。清单不包含任何上传凭据，并使用与包相同的更新密钥签名。
 
@@ -158,6 +158,7 @@ NearHub-Cast-X.Y.Z.Build-release-assets.zip
   windows/
     NSIS 更新包 + MSI 更新包 + 对应签名/校验文件 + Windows 版本清单
   macos/
+    Intel 和 Apple Silicon DMG + 各自的 SHA-256
     各架构 macOS 更新包 + 对应签名/校验文件 + macOS 版本清单
 ```
 
@@ -184,6 +185,8 @@ NearHub-Cast-Desktop-Installer-0.2.0.37-macos-aarch64.app.tar.gz
 NearHub-Cast-Desktop-Installer-0.2.0.37-macos-aarch64.app.tar.gz.sig
 NearHub-Cast-Desktop-Installer-0.2.0.37-macos-aarch64.app.tar.gz.sha256
 NearCast-Desktop-TX-0.2.0.37-macos-manifest.json
+NearHub-Cast-Desktop-Installer-0.2.0.37-macos-x86_64.dmg
+NearHub-Cast-Desktop-Installer-0.2.0.37-macos-x86_64.dmg.sha256
 NearHub-Cast-Desktop-Installer-0.2.0.37-macos-aarch64.dmg
 NearHub-Cast-Desktop-Installer-0.2.0.37-macos-aarch64.dmg.sha256
 NearHub-Cast-0.2.0.37-release-assets.zip
@@ -200,9 +203,9 @@ GitHub Actions 应按以下顺序执行：
 
 1. 从 tag 或受保护的发布输入得到 `X.Y.Z`；生成新的 `Build`，得到完整版本。
 2. 将完整版本传入 Tauri bundle 元数据和文件命名，并运行全部测试。
-3. 构建 Windows、macOS 产物，生成 SHA-256 和签名文件；汇总 macOS 两个架构。
+3. 在 Windows 签名 Runner 上构建主程序、NSIS 和 MSI 并做 Authenticode 签名，验签后生成 updater 签名和 SHA-256。macOS 分别构建 Intel 和 Apple Silicon，验证应用包，公证并验证 DMG 后再汇总。
 4. 生成各平台版本清单，将所有包、签名和清单汇总到同一 GitHub Release，并额外生成上述聚合 ZIP 单链接资产。
-5. 分别调用 Mosapi Action 上传到 Windows `646` 和 macOS `647`；任一必需包、签名或版本清单缺失、上传失败、`uploaded-count` 不符合预期时，workflow 失败。
+5. 分别调用 Mosapi Action 上传到 Windows `646` 和 macOS `647`。任一必需包、签名或版本清单缺失、上传失败、`uploaded-count` 与 Windows 9 个和 macOS 13 个的预期不符时，workflow 失败。
 6. 只有 Mosapi update record 创建成功后，才允许把该版本标为可更新，并输出 `update-id`、`update-slug`、各资产 URL 和 hash。
 
 GitHub Release 是审计和人工下载镜像，Mosapi 是应用内更新的唯一查询入口。CI 日志不得打印 `MOSAPI_TOKEN`、签名私钥或未脱敏的授权请求头。
@@ -236,7 +239,19 @@ GitHub Secrets：
 
 更新公钥已入仓库，私钥保存在当前机器仓库外 `C:\Users\Chado\.codex\update-key-tx\tx.key`，并已配置为 GitHub Actions Secret `TAURI_SIGNING_PRIVATE_KEY`，签名验证与内置公钥一致。不要输出或提交私钥，需额外安全备份。更换密钥必须在首次发布前同步公钥；上线后轮换须保留旧版本升级通路。
 
-打 `vX.Y.Z` tag 触发全平台正式 release；手动可选择逻辑版本、渠道及 `platforms=windows|all`，默认 Windows/alpha，仍共享同一流水线全局递增 Build。Windows 单独发布无需 Apple 凭据，生成 NSIS、MSI、签名、清单，共 9 个 Mosapi 资产；全平台还包含 macOS 两架构及其 9 个资产。聚合 ZIP 仅包含本次选中的平台。创建同一个 GitHub draft Release，上传所有 assets，再创建所选产品的 Mosapi 更新记录，成功后公开 GitHub Release。平台记录独立创建，Mosapi 没有跨产品原子事务；部分失败需检查已创建的 update-id 并以新 Build 重试。
+在包含发布 workflow 的 `main` 提交上打 `vX.Y.Z` tag 会触发全平台正式发布。手动运行 `Release TX` 时选择 `main`、逻辑版本、渠道和 `platforms=windows|all`，默认 Windows/alpha。两种入口共享全局递增 Build。取消手动输入 `publish` 后，流程仍分配 Build 并在 Actions 保存已验签的产物，适合先验证签名和公证。
+
+Windows 单独发布无需 Apple 凭据，向 Mosapi 上传 9 个资产。全平台另向 macOS 产品上传 13 个资产。聚合 ZIP 包含本次选中的平台。流程先创建 GitHub draft Release 并上传 assets，再创建所选产品的 Mosapi 更新记录，成功后公开 GitHub Release。两个平台的记录独立创建。如果部分上传失败，先核对已创建的 update-id，再用新的 Build 发布。
+
+### Windows 签名 Runner
+
+启用公开仓库访问签名主机前，先确认组织提供 `Selected workflows`。缺少该设置的组织需使用只对发布维护者开放的私有签名仓库隔离持证 Runner。[GitHub Enterprise Cloud 的 Runner group 文档](https://docs.github.com/en/enterprise-cloud@latest/actions/how-tos/manage-runners/self-hosted-runners/manage-access#changing-which-workflows-can-access-an-organization-runner-group)
+
+1. 在组织的 Actions 设置中创建专用 Runner group `nearcast-windows-signing`，移入 `windows-signing-0`。Repository access 选择 `Mostorm-Labs/NearCast-Desktop-TX`，允许该公开仓库访问。Workflow access 选择 Selected workflows，仅允许 `Mostorm-Labs/NearCast-Desktop-TX/.github/workflows/release-windows.yml@refs/heads/main`。Runner 使用 `self-hosted`、`Windows`、`X64` 标签。
+2. 保护 `main` 的写入及 `vX.Y.Z` 发布 tag 的创建。应允许发布凭据创建四段版本的 GitHub Release tag，并允许分配器写入 `build-counter`。普通 push 和 PR 的 `build.yml` 使用 GitHub 托管 Runner。
+3. 确认 Runner 运行账号能访问 eToken、SafeNet CSP、`signingtool/AutoSign.bat`、`signingtool/signtool.exe`、`signingtool/cer.cer` 和时间戳服务。默认从 Runner 安装目录查找 `signingtool`，也可用仓库 Variable `WINDOWS_SIGNING_TOOL_DIR` 指定签名目录的绝对路径。CI 给每个签名文件创建仅 Runner 账号可访问的临时目录，验签后清理。原签名目录里的 PIN 和工具文件也需要本机访问权限保护。
+4. 主机需装 Git、Visual Studio C++ x64 工具链和 Windows SDK，并能访问 GitHub Actions、npm、Rust、Tauri 打包工具和证书时间戳服务。流水线安装 Node.js 22 和 Rust stable。若以 Windows 服务运行，先用服务账号验证 eToken 和代理可用性。
+5. 合并后先运行 `Release TX`，选择 `main`、`channel=alpha`、`platforms=all` 并取消 `publish`。在 Actions 产物内验证 Windows NSIS/MSI 的证书与时间戳，分别挂载两个 DMG 并验证安装。需要验证两个上传端点时，再用新的 Build 发布 alpha。
 
 ### macOS 签名与公证配置
 
@@ -255,16 +270,16 @@ GitHub Secrets：
 
 `scripts/macos-signing.mjs check` 会在分配发布 Build 前校验配置，拒绝 ad-hoc、Apple Development、不匹配的 Team 和缺失的公证凭据。构建调用 `scripts/build.mjs`，以 `NEARCAST_REQUIRE_MACOS_SIGNING=1` 再次校验并强制 Hardened Runtime；Tauri CLI 负责导入 P12、Developer ID 签名、提交公证和 stapling。API 私钥仅在 RUNNER_TEMP 的私有临时文件中提供给 CLI，不把原始 .p8 内容转发到子进程，正常完成或失败后均清理。
 
-构建完成后 `scripts/macos-signing.mjs verify <app>` 必须确认代码签名完整、签名身份/Team 正确、Hardened Runtime 启用、stapled 公证票据有效且 Gatekeeper 评估通过，才允许准备上传资产。`build.yml` 的普通构建及本机开发构建仍可用于调试，不视为可公开分发的签名产物。
+构建完成后 `scripts/macos-signing.mjs verify <app>` 验证代码签名、签名身份和 Team、Hardened Runtime、stapled 票据及 Gatekeeper。准备发布资产时还会检查 Tauri 签名的 DMG，提交 Apple 公证，附加并验证票据，完成 Gatekeeper 检查后计算 SHA-256。`build.yml` 和本机开发构建供调试使用。
 
-首次验证应在凭据配置后选择 Release TX 的目标分支、逻辑版本、`platforms=all` 和 `channel=alpha`，确认 ARM64/Intel 的签名、公证、GitHub/Mosapi 上传及干净机器下载验收。此操作会生成新的 CI Build 并公开 alpha 资产；本地配置检查和现有开发签名包不构成已完成公证的证据。
+首次对外验证应在凭据配置后选择 `main`、逻辑版本、`platforms=all`、`channel=alpha` 并勾选 `publish`。检查两种架构的签名、公证、GitHub/Mosapi 上传和干净机器下载。此次运行会使用新的 CI Build 并公开 alpha 资产。
 
 参考：[Tauri macOS 签名与公证](https://v2.tauri.app/distribute/sign/macos/)、[Apple macOS 分发](https://developer.apple.com/macos/distribution)。
 
 ### Windows 两个 Build 的在线验收
 
 1. 在仓库 Settings → Secrets and variables → Actions 配置 `MOSAPI_TOKEN`；签名 Secret 已配置。token 需要 folder `546` 上传及 product `646` 更新创建权限。
-2. 将工作流及实现推送后，在 Actions → Release TX 选择目标分支、逻辑版本、`channel=alpha`、`platforms=windows`，运行一次。检查三个阶段成功，Mosapi update-id 非空、uploaded-count=9，保存 GitHub Release 链接。
+2. 将工作流合并到 `main` 并配置签名 Runner 后，在 Actions → Release TX 选择 `main`、逻辑版本、`channel=alpha`、`platforms=windows` 并勾选 `publish`，运行一次。检查已签名的安装包、非空 Mosapi update-id、`uploaded-count=9` 和 GitHub Release 链接。
 3. 安装该 Build 的 NSIS 测试包作为基线；设置页应显示完整版本和 alpha 测试渠道，保存画质配置。
 4. 新建一次 workflow run 生成更高 Build，不要 rerun 同一次发布。公共 `/updates/product/nearcast-tx-windows` 应查询到 alpha 记录，并有对应版本的安装包、清单和签名。
 5. 启动基线包，确认自动提示、后台下载、暂不更新后可继续投屏，退出重启后仍提示已就绪。设置页与顶部更新入口显示一致。

@@ -4,25 +4,25 @@ import {resolve, basename, join} from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {INSTALLER_NAME} from './name-installers.mjs';
+import {notarizeMacosDiskImage} from './macos-signing.mjs';
+
+const PACKAGE_SUFFIX={nsis:'-setup.exe',msi:'.msi',app:'.app.tar.gz',dmg:'.dmg'};
 
 export function releasePlatforms(selection='all') {
   if(!['all','windows'].includes(selection))throw new Error('Expected all or windows release platforms');
   return selection==='windows'?['windows']:['windows','macos'];
 }
-export function releaseMatrix(selection='all') {
-  const platforms=releasePlatforms(selection);
+export function macosReleaseMatrix() {
   return {include:[
-    {os:'windows-latest',target:'x86_64-pc-windows-msvc',platform:'windows',arch:'x86_64',bundles:'nsis,msi'},
-    {os:'macos-15-intel',target:'x86_64-apple-darwin',platform:'macos',arch:'x86_64',bundles:'app,dmg'},
-    {os:'macos-15',target:'aarch64-apple-darwin',platform:'macos',arch:'aarch64',bundles:'app,dmg'},
-  ].filter(row=>platforms.includes(row.platform))};
+    {os:'macos-15-intel',target:'x86_64-apple-darwin',arch:'x86_64'},
+    {os:'macos-15',target:'aarch64-apple-darwin',arch:'aarch64'},
+  ]};
 }
 
 export function releasePackageName(version,platform,cpu,format){
-  const ext=format==='nsis'?'-setup.exe':format==='msi'?'.msi':'.app.tar.gz';
   // GitHub normalizes spaces in uploaded asset names. Keep the name portable
   // so the signed manifest, GitHub mirror and Mosapi all use the same basename.
-  return INSTALLER_NAME.replaceAll(' ','-')+'-'+version+'-'+platform+'-'+cpu+ext;
+  return INSTALLER_NAME.replaceAll(' ','-')+'-'+version+'-'+platform+'-'+cpu+PACKAGE_SUFFIX[format];
 }
 
 export function releaseVersion(logical, counter) {
@@ -42,8 +42,7 @@ export function buildManifest({version,platform,assets,notes='',channel='release
     productSlug:platform==='windows'?'nearcast-tx-windows':'nearcast-tx-macos',channel,notes,publishedAt,assets};
 }
 export function selectPackage(files,{semver,format}) {
-  const suffix=format==='nsis'?'-setup.exe':format==='msi'?'.msi':'.app.tar.gz';
-  const matches=files.filter(path=>(format==='app'||basename(path).includes('_'+semver+'_'))&&path.endsWith(suffix));
+  const matches=files.filter(path=>(format==='app'||basename(path).includes('_'+semver+'_'))&&path.endsWith(PACKAGE_SUFFIX[format]));
   if(matches.length!==1)throw new Error('Expected exactly one '+format+' package for '+semver);
   return matches[0];
 }
@@ -99,6 +98,14 @@ async function prepare(target,platform,cpu,display,inputRoot,outputRoot) {
     const url='https://github.com/'+process.env.GITHUB_REPOSITORY+'/releases/download/v'+display+'/'+encodeURIComponent(name);
     assets.push({platform,arch:cpu,format,name,url,size:bytes.length,sha256,signature});
   }
+  if(platform==='macos'){
+    const original=selectPackage(files,{semver:version.semver,format:'dmg'});
+    const name=releasePackageName(display,platform,cpu,'dmg');
+    const destination=join(output,name);
+    await copyFile(original,destination);
+    notarizeMacosDiskImage(destination);
+    await writeFile(destination+'.sha256',hash(await readFile(destination))+'  '+name+'\n');
+  }
   await writeFile(join(output,'assets.json'),JSON.stringify(assets,null,2)+'\n');
 }
 async function aggregate(display,inputRoot,outputRoot,channel,selection='all') {
@@ -123,6 +130,18 @@ async function aggregate(display,inputRoot,outputRoot,channel,selection='all') {
         await copyFile(file,join(dest,asset.name+suffix));
       }
     }
+    if(platform==='macos'){
+      for(const {arch} of assets){
+        const name=releasePackageName(display,platform,arch,'dmg');
+        const image=files.find(path=>basename(path)===name);
+        const checksum=files.find(path=>basename(path)===name+'.sha256');
+        if(!image||!checksum)throw Error('Missing disk image or checksum: '+name);
+        const expected=hash(await readFile(image))+'  '+name+'\n';
+        if(await readFile(checksum,'utf8')!==expected)throw Error('Disk image digest changed: '+name);
+        await copyFile(image,join(dest,name));
+        await copyFile(checksum,join(dest,name+'.sha256'));
+      }
+    }
     const manifest=buildManifest({version:display,platform,assets,notes,channel});
     const name='NearCast-Desktop-TX-'+display+'-'+platform+'-manifest.json';
     const path=join(dest,name);await writeFile(path,JSON.stringify(manifest,null,2)+'\n');sign(path,version.semver);
@@ -136,8 +155,14 @@ async function main() {
   if(command==='config') {
     const [logical,build,platform]=args;const v=releaseVersion(logical,build);
     const pubkey=(await readFile('src-tauri/update.pub','utf8')).trim();
-    const config={version:v.semver,bundle:{createUpdaterArtifacts:true},plugins:{updater:{pubkey,requireSignedVersion:true}}};
-    if(platform==='windows')config.bundle.windows={wix:{version:v.msi}};
+    const config={version:v.semver,bundle:{createUpdaterArtifacts:platform!=='windows'},plugins:{updater:{pubkey,requireSignedVersion:true}}};
+    if(platform==='windows')config.bundle.windows={
+      wix:{version:v.msi},
+      signCommand:{
+        cmd:'powershell.exe',
+        args:['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',resolve('scripts/windows-signing.ps1'),'%1'],
+      },
+    };
     else config.bundle.macOS={bundleVersion:String(v.build),signingIdentity:process.env.APPLE_SIGNING_IDENTITY||'-'};
     await writeFile('src-tauri/tauri.release.conf.json',JSON.stringify(config,null,2)+'\n');
     console.log(JSON.stringify(v));

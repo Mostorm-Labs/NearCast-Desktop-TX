@@ -17,6 +17,10 @@ on:
         type: choice
         options: [windows, all]
         default: windows
+      publish:
+        description: Publish to GitHub Release and Mosapi
+        type: boolean
+        default: true
 concurrency:
   group: tx-release
   cancel-in-progress: false
@@ -36,9 +40,20 @@ jobs:
       matrix: ${{ steps.version.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check release source
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" != refs/heads/main ]]; then
+            echo "Select main when starting Release TX."
+            exit 1
+          fi
+          git merge-base --is-ancestor HEAD refs/remotes/origin/main || {
+            echo "The release commit must be on main."
+            exit 1
+          }
       - uses: actions/setup-node@v4
         with: {node-version: 22}
-      - run: npm ci
       - id: version
         env:
           INPUT_VERSION: ${{ inputs.logical_version }}
@@ -46,6 +61,7 @@ jobs:
           RUN_ATTEMPT: ${{ github.run_attempt }}
           CHANNEL: ${{ inputs.channel || 'release' }}
           PLATFORMS: ${{ inputs.platforms || 'all' }}
+          PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
           UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           MOSAPI_TOKEN: ${{ secrets.MOSAPI_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -60,27 +76,43 @@ jobs:
           APPLE_NOTARIZATION_METHOD: ${{ vars.APPLE_NOTARIZATION_METHOD }}
         run: |
           test -n "$UPDATER_KEY" || { echo "Configure TAURI_SIGNING_PRIVATE_KEY"; exit 1; }
-          test -n "$MOSAPI_TOKEN" || { echo "Configure MOSAPI_TOKEN"; exit 1; }
+          if [ "$PUBLISH" = true ]; then
+            test -n "$MOSAPI_TOKEN" || { echo "Configure MOSAPI_TOKEN"; exit 1; }
+          fi
           test "$RUN_ATTEMPT" = 1 || { echo "Create a new workflow run to allocate a new Build"; exit 1; }
           if [ "$PLATFORMS" = all ]; then
             node scripts/macos-signing.mjs check
           fi
           node --input-type=module <<'JS'
-          import {releaseVersion,releaseMatrix} from './scripts/release.mjs';
+          import {releaseVersion,releasePlatforms,macosReleaseMatrix} from './scripts/release.mjs';
           import {reserveRemoteVersion} from './scripts/build-version.mjs';
           import {appendFileSync} from 'node:fs';
+          releasePlatforms(process.env.PLATFORMS);
           const reserved=await reserveRemoteVersion({logicalVersion:process.env.INPUT_VERSION || process.env.REF_NAME.replace(/^v/,'')});
           const v=releaseVersion(reserved.logicalVersion,reserved.build);
           appendFileSync(process.env.GITHUB_OUTPUT,'logical='+v.logical+'\nbuild='+v.build+'\ndisplay='+v.display+'\nchannel='+process.env.CHANNEL+'\n');
-          appendFileSync(process.env.GITHUB_OUTPUT,'platforms='+process.env.PLATFORMS+'\nmatrix='+JSON.stringify(releaseMatrix(process.env.PLATFORMS))+'\n');
+          appendFileSync(process.env.GITHUB_OUTPUT,'platforms='+process.env.PLATFORMS+'\nmatrix='+JSON.stringify(macosReleaseMatrix())+'\n');
           JS
       - uses: actions/upload-artifact@v4
         with:
           name: tx-build-counter
           path: build-version.json
           if-no-files-found: error
-  build:
+  build-windows:
     needs: version
+    # The signing runner group authorizes the reusable workflow at this protected ref.
+    uses: Mostorm-Labs/NearCast-Desktop-TX/.github/workflows/release-windows.yml@refs/heads/main
+    with:
+      logical: ${{ needs.version.outputs.logical }}
+      build: ${{ needs.version.outputs.build }}
+      display: ${{ needs.version.outputs.display }}
+      channel: ${{ needs.version.outputs.channel }}
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+  build-macos:
+    needs: version
+    if: needs.version.outputs.platforms == 'all'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.version.outputs.matrix) }}
@@ -89,8 +121,6 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: '13.0'
       NEARCAST_BUILD_VERSION: ${{ needs.version.outputs.display }}
       NEARCAST_UPDATE_CHANNEL: ${{ needs.version.outputs.channel }}
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -114,40 +144,38 @@ jobs:
           NEARCAST_UPDATE_CHANNEL: release
       - name: Configure signed release
         env:
-          APPLE_SIGNING_IDENTITY: ${{ matrix.platform == 'macos' && (vars.APPLE_SIGNING_IDENTITY || secrets.APPLE_SIGNING_IDENTITY) || '' }}
-        run: node scripts/release.mjs config "${{ needs.version.outputs.logical }}" "${{ needs.version.outputs.build }}" "${{ matrix.platform }}"
-      - name: Build update bundles
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY || secrets.APPLE_SIGNING_IDENTITY }}
+        run: node scripts/release.mjs config "${{ needs.version.outputs.logical }}" "${{ needs.version.outputs.build }}" macos
+      - name: Build signed app and DMG, verify App and notarize DMG
         env:
-          NEARCAST_REQUIRE_MACOS_SIGNING: ${{ matrix.platform == 'macos' && '1' || '' }}
-          APPLE_CERTIFICATE: ${{ matrix.platform == 'macos' && secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ matrix.platform == 'macos' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_SIGNING_IDENTITY: ${{ matrix.platform == 'macos' && (vars.APPLE_SIGNING_IDENTITY || secrets.APPLE_SIGNING_IDENTITY) || '' }}
-          APPLE_TEAM_ID: ${{ matrix.platform == 'macos' && (vars.APPLE_TEAM_ID || secrets.APPLE_TEAM_ID) || '' }}
-          APPLE_ID: ${{ matrix.platform == 'macos' && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ matrix.platform == 'macos' && secrets.APPLE_PASSWORD || '' }}
-          APPLE_API_KEY: ${{ matrix.platform == 'macos' && secrets.APPLE_API_KEY || '' }}
-          APPLE_API_ISSUER: ${{ matrix.platform == 'macos' && secrets.APPLE_API_ISSUER || '' }}
-          APPLE_API_KEY_P8: ${{ matrix.platform == 'macos' && secrets.APPLE_API_KEY_P8 || '' }}
-          APPLE_NOTARIZATION_METHOD: ${{ vars.APPLE_NOTARIZATION_METHOD }}
-        run: node scripts/build.mjs --config src-tauri/tauri.release.conf.json --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
-      - name: Verify macOS distribution signature and notarization
-        if: matrix.platform == 'macos'
-        env:
+          NEARCAST_REQUIRE_MACOS_SIGNING: '1'
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY || secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID || secrets.APPLE_TEAM_ID }}
-        run: node scripts/macos-signing.mjs verify "src-tauri/target/${{ matrix.target }}/release/bundle/macos/NearHub Cast.app"
-      - name: Name desktop installers
-        if: runner.os == 'Windows'
-        run: node scripts/name-installers.mjs "src-tauri/target/${{ matrix.target }}/release/bundle"
-      - name: Name and sign update assets
-        run: node scripts/release.mjs prepare "${{ matrix.target }}" "${{ matrix.platform }}" "${{ matrix.arch }}" "${{ needs.version.outputs.display }}" "src-tauri/target/${{ matrix.target }}/release/bundle" release
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_NOTARIZATION_METHOD: ${{ vars.APPLE_NOTARIZATION_METHOD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          node scripts/build.mjs --config src-tauri/tauri.release.conf.json --target ${{ matrix.target }} --bundles app,dmg -- --locked
+          node scripts/macos-signing.mjs verify "src-tauri/target/${{ matrix.target }}/release/bundle/macos/NearHub Cast.app"
+          node scripts/release.mjs prepare "${{ matrix.target }}" macos "${{ matrix.arch }}" "$NEARCAST_BUILD_VERSION" "src-tauri/target/${{ matrix.target }}/release/bundle" release
       - uses: actions/upload-artifact@v4
         with:
           name: tx-update-${{ matrix.target }}
           path: release
           if-no-files-found: error
   publish:
-    needs: [version, build]
+    needs: [version, build-windows, build-macos]
+    if: >-
+      !cancelled() && (github.event_name == 'push' || inputs.publish) &&
+      needs.version.result == 'success' && needs.build-windows.result == 'success' &&
+      (needs.version.outputs.platforms == 'windows' || needs.build-macos.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -240,7 +268,7 @@ jobs:
           test "$WINDOWS_COUNT" = 9
           if [ "$PLATFORMS" = all ]; then
             test -n "$MACOS_UPDATE"
-            test "$MACOS_COUNT" = 9
+            test "$MACOS_COUNT" = 13
           fi
           if [ "$CHANNEL" = release ]; then
             gh release edit "v$DISPLAY_VERSION" --draft=false --latest
