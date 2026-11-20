@@ -10,5 +10,8 @@
       "minHeight": 480,
       "decorations": false
     }]
+  },
+  "bundle": {
+    "publisher": "Nearity"
   }
 }

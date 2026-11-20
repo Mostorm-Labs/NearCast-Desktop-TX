@@ -18,6 +18,7 @@ test('Tauri bundle declares Windows installers and macOS 13 minimum', () => {
   assert.equal(config.bundle.macOS.minimumSystemVersion, '13.0');
   assert.equal(config.bundle.macOS.infoPlist, 'Info.plist');
   const windows=JSON.parse(fs.readFileSync(path.join(root,'src-tauri','tauri.windows.conf.json'),'utf8'));
+  assert.equal(windows.bundle?.publisher,'Nearity');
   assert.equal(windows.app.windows[0].decorations,false);
   assert.equal(windows.app.windows[0].label,'main');
   assert.equal(windows.app.windows[0].url,'settings-migration.html');
