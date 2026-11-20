@@ -100,8 +100,8 @@ jobs:
           if-no-files-found: error
   build-windows:
     needs: version
-    # The signing runner group authorizes the reusable workflow at this protected ref.
-    uses: Mostorm-Labs/NearCast-Desktop-TX/.github/workflows/release-windows.yml@refs/heads/main
+    # Workflow calls use the branch name. The runner group allowlist uses refs/heads/main.
+    uses: Mostorm-Labs/NearCast-Desktop-TX/.github/workflows/release-windows.yml@main
     with:
       logical: ${{ needs.version.outputs.logical }}
       build: ${{ needs.version.outputs.build }}
