@@ -48,22 +48,55 @@ export function prepareMacosSigningEnvironment(env){
     return{env:child,cleanup};
   }catch(error){cleanup();throw error;}
 }
-export function verifyMacosDistribution(app,{env=process.env,run=spawnSync}={}){
-  const expected=signingIdentity(env);
-  const command=(binary,args,label)=>{
-    const result=run(binary,args,{encoding:'utf8',stdio:'pipe'});
-    // Never include command environment or raw tool errors in a credential log.
-    if(result.error||result.status!==0)throw Error(label+' failed');
-    return String(result.stdout||'')+String(result.stderr||'');
-  };
-  command('/usr/bin/codesign',['--verify','--deep','--strict','--verbose=2',app],'macOS code signature verification');
-  const details=command('/usr/bin/codesign',['--display','--verbose=4',app],'macOS signature inspection');
+function checkedTool(run,binary,args,label,env){
+  const result=run(binary,args,{encoding:'utf8',stdio:'pipe',env});
+  // Tool errors may contain command arguments that include credentials.
+  if(result.error||result.status!==0)throw Error(label+' failed');
+  return result;
+}
+
+function verifyDeveloperId(file,expected,run,{app=false}={}){
+  const verification=['--verify','--strict','--verbose=2',file];
+  if(app)verification.unshift('--deep');
+  checkedTool(run,'/usr/bin/codesign',verification,'macOS code signature verification');
+  const {stdout,stderr}=checkedTool(run,'/usr/bin/codesign',['--display','--verbose=4',file],'macOS signature inspection');
+  const details=String(stdout||'')+String(stderr||'');
   if(!details.split(/\r?\n/).includes('Authority='+expected.identity))throw Error('macOS signature does not use the configured Developer ID Application identity');
   if(!details.split(/\r?\n/).includes('TeamIdentifier='+expected.teamId))throw Error('macOS signature team does not match APPLE_TEAM_ID');
-  if(!/flags=.*\bruntime\b/.test(details))throw Error('macOS signature is missing hardened runtime');
-  command('/usr/bin/xcrun',['stapler','validate',app],'macOS stapled notarization ticket validation');
-  command('/usr/sbin/spctl',['--assess','--type','execute','--verbose=2',app],'macOS Gatekeeper assessment');
+  if(app&&!/flags=.*\bruntime\b/.test(details))throw Error('macOS signature is missing hardened runtime');
+}
+
+export function verifyMacosDistribution(app,{env=process.env,run=spawnSync}={}){
+  const expected=signingIdentity(env);
+  verifyDeveloperId(app,expected,run,{app:true});
+  checkedTool(run,'/usr/bin/xcrun',['stapler','validate',app],'macOS stapled notarization ticket validation');
+  checkedTool(run,'/usr/sbin/spctl',['--assess','--type','execute','--verbose=2',app],'macOS Gatekeeper assessment');
   return expected;
+}
+
+export function notarizeMacosDiskImage(dmg,{env=process.env,run=spawnSync}={}){
+  const config=validateMacosSigningEnvironment(env);
+  verifyDeveloperId(dmg,config,run);
+  const prepared=prepareMacosSigningEnvironment(env);
+  try{
+    const child=prepared.env;
+    const auth=config.notarization==='api-key'
+      ? ['--key',child.APPLE_API_KEY_PATH,'--key-id',child.APPLE_API_KEY,'--issuer',child.APPLE_API_ISSUER]
+      : ['--apple-id',child.APPLE_ID,'--team-id',child.APPLE_TEAM_ID,'--password',child.APPLE_PASSWORD];
+    const {stdout}=checkedTool(run,'/usr/bin/xcrun',
+      ['notarytool','submit',dmg,'--wait','--timeout','30m','--output-format','json',...auth],
+      'macOS disk image notarization submission',child);
+    let submission;
+    try{submission=JSON.parse(stdout);}catch{throw Error('Invalid macOS disk image notarization response');}
+    if(submission?.status!=='Accepted'){
+      const id=/^[0-9a-f-]{36}$/i.test(submission?.id)?` (submission ${submission.id})`:'';
+      throw Error('macOS disk image notarization was not accepted'+id);
+    }
+    checkedTool(run,'/usr/bin/xcrun',['stapler','staple',dmg],'macOS disk image stapling');
+    checkedTool(run,'/usr/bin/xcrun',['stapler','validate',dmg],'macOS disk image notarization ticket validation');
+    checkedTool(run,'/usr/sbin/spctl',['--assess','--type','open','--context','context:primary-signature','--verbose=2',dmg],
+      'macOS disk image Gatekeeper assessment');
+  }finally{prepared.cleanup();}
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   try{

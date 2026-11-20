@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,readFile,stat,access,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {validateMacosSigningEnvironment,prepareMacosSigningEnvironment,verifyMacosDistribution} from '../scripts/macos-signing.mjs';
+import {validateMacosSigningEnvironment,prepareMacosSigningEnvironment,verifyMacosDistribution,notarizeMacosDiskImage} from '../scripts/macos-signing.mjs';
 
 const identity='Developer ID Application: Example Company (AB12CD34EF)';
 const credentials=()=>({APPLE_CERTIFICATE:'test-p12-base64',APPLE_CERTIFICATE_PASSWORD:'test-p12-password',APPLE_SIGNING_IDENTITY:identity,APPLE_TEAM_ID:'AB12CD34EF',APPLE_ID:'ci@example.invalid',APPLE_PASSWORD:'test-app-specific-password'});
@@ -43,4 +43,36 @@ test('release verification rejects development signatures, wrong teams and non-h
   assert.throws(()=>verify(details,(cmd,args)=>cmd==='/usr/bin/codesign'&&args.includes('--verify')),/signature/i);
   assert.throws(()=>verify(details,cmd=>cmd==='/usr/bin/xcrun'),/notarization/i);
   assert.throws(()=>verify(details,cmd=>cmd==='/usr/sbin/spctl'),/Gatekeeper/i);
+});
+
+test('disk image notarization stamps an accepted Developer ID image and rejects a failed submission',()=>{
+  const image='NearHub Cast_0.2.0+37_aarch64.dmg';
+  const details=`Authority=${identity}\nTeamIdentifier=AB12CD34EF\n`;
+  for(const status of ['Invalid','Accepted']){
+    const steps=[];
+    const run=(command,args)=>{
+      if(command==='/usr/bin/codesign')return {status:0,stdout:'',stderr:details};
+      if(args[0]==='notarytool'){
+        assert.deepEqual(args.slice(0,3),['notarytool','submit',image]);
+        assert.ok(args.includes('--wait'));
+        assert.ok(args.includes('--apple-id'));
+        steps.push('submit');
+        return {status:0,stdout:JSON.stringify({status})};
+      }
+      if(args[0]==='stapler')steps.push(args[1]);
+      if(command==='/usr/sbin/spctl'){
+        assert.ok(args.includes('context:primary-signature'));
+        steps.push('assess');
+      }
+      return {status:0,stdout:'',stderr:''};
+    };
+    const notarize=()=>notarizeMacosDiskImage(image,{env:credentials(),run});
+    if(status==='Invalid'){
+      assert.throws(notarize,/notarization/i);
+      assert.deepEqual(steps,['submit']);
+    }else{
+      notarize();
+      assert.deepEqual(steps,['submit','staple','validate','assess']);
+    }
+  }
 });
