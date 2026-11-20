@@ -26,14 +26,15 @@ export class UpdateManager {
     catch(error) { this.apply({error:String(error?.message ?? error)}); }
     return this.check({startup:true});
   }
-  async check({startup = false} = {}) {
+  async check({startup = false, interactive = false} = {}) {
     if (this.busy || this.stopped) return this.state;
     this.busy = true;
     const previous = this.state;
     this.apply({checking:true, error:null});
     try {
       this.apply(await this.invoke('nearcast_update_check'));
-      this.offer(startup);
+      if (interactive && this.state.update) this.open();
+      else this.offer(startup);
       if(this.state.status === 'available') {
         this.apply({status:'downloading'});
         this.apply(await this.invoke('nearcast_update_download'));

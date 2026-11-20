@@ -20,7 +20,13 @@
   </header>
   <p id="window-error" class="window-error" role="status" hidden></p>
   <main class="webcast-sender">
-    <header class="topbar"><div class="logo"><img class="logo-mark" src="./assets/figma/brand-mark.svg" width="36" height="36" alt="" /><span>NearHub</span></div><div class="update-heading"><button data-i18n-aria-label="common.openSettings" data-i18n-title="common.settings" id="settings-shortcut" data-settings-open class="settings-shortcut" type="button" aria-label="打开设置" title="Casting Settings"><img src="./assets/figma/settings.svg" width="16" height="16" alt="" /></button><span id="app-version"></span></div></header>
+    <header class="topbar">
+      <div class="logo"><img class="logo-mark" src="./assets/figma/brand-mark.svg" width="36" height="36" alt="" /><span>NearHub</span></div>
+      <div class="update-heading">
+        <button data-i18n-aria-label="common.openSettings" data-i18n-title="common.settings" id="settings-shortcut" data-settings-open class="settings-shortcut" type="button" aria-label="打开设置" title="Casting Settings"><img src="./assets/figma/settings.svg" width="16" height="16" alt="" /></button>
+        <button id="app-version-button" class="app-version-button" type="button" aria-haspopup="dialog" aria-controls="update-dialog" disabled hidden><span id="app-version"></span><img id="app-update-icon" src="./assets/figma/update-available.svg" width="14" height="15" alt="" hidden /></button>
+      </div>
+    </header>
 
 
 
@@ -208,11 +214,10 @@
           <p id="settings-save-status" class="quality-help" role="status" data-i18n="settings.saveHelp">画质与声音在下次分享时生效；反控开关立即生效。</p>
         </section>
         <section id="settings-updates" class="settings-content" role="tabpanel" aria-labelledby="settings-tab-updates" tabindex="0" hidden>
-          <div class="update-state-heading"><img id="settings-update-icon" src="./assets/figma/update-available.svg" alt="" hidden /><p id="settings-update-status" role="status">启动后自动检查更新。</p></div>
-          <div class="settings-card version-card"><div><p data-i18n="update.currentVersion">Current Version</p><strong id="settings-version">—</strong></div><div id="settings-update-target" hidden><p data-i18n="update.targetVersion">Update Version</p><strong id="settings-update-version"></strong></div></div>
-          <section id="settings-update-release" hidden><h2 data-i18n="update.whatsNew">What’s New</h2><pre id="settings-update-notes"></pre></section>
+          <div class="update-state-heading"><p id="settings-update-status" role="status">启动后自动检查更新。</p></div>
+          <div class="settings-card version-card"><div><p data-i18n="update.currentVersion">Current Version</p><strong id="settings-version">—</strong></div></div>
           <p id="settings-update-error" class="error" role="status" hidden></p>
-          <div class="settings-update-actions"><button data-i18n="update.check" id="settings-update-check" class="button secondary" type="button">Check for Updates</button><button id="update-button" type="button" class="button primary">检查更新</button></div>
+          <div class="settings-update-actions"><button data-i18n="update.check" id="settings-update-check" class="button primary" type="button">Check for Updates</button></div>
         </section>
         <section id="settings-feedback" class="settings-content" role="tabpanel" aria-labelledby="settings-tab-feedback" tabindex="0" hidden>
           <form id="feedback-form">
@@ -227,12 +232,14 @@
   <dialog id="update-dialog" class="update-dialog" aria-labelledby="update-title" aria-describedby="update-detail">
     <header class="update-dialog-header"><h2 id="update-title" data-i18n="update.title">Software Update</h2><button data-i18n-aria-label="common.close" id="update-close" type="button" aria-label="关闭更新弹窗"><img src="./assets/figma/close.svg" alt="" /></button></header>
     <div class="update-dialog-body">
+      <div id="update-versions" class="version-card update-version-summary" hidden><div><p data-i18n="update.currentVersion">Current Version</p><strong id="update-current-version"></strong></div><div><p data-i18n="update.targetVersion">Update Version</p><strong id="update-target-version"></strong></div></div>
       <p id="update-detail" aria-live="polite"></p>
       <progress id="update-progress" aria-label="Update download progress" data-i18n-aria-label="update.progress" hidden></progress>
+      <h3 id="update-notes-title" data-i18n="update.whatsNew" hidden>What’s New</h3>
       <pre id="update-notes"></pre>
       <p id="update-error" class="error" role="status" hidden></p>
-      <div class="update-actions"><button data-i18n="update.check" id="update-check" class="refresh" type="button">检查更新</button><button id="update-later" class="button secondary" type="button">关闭</button><button id="update-install" class="button primary" type="button" disabled>立即更新并重启</button></div>
     </div>
+    <footer class="update-actions"><button id="update-later" class="button secondary" type="button">关闭</button><button id="update-install" class="button primary" type="button" disabled>立即更新并重启</button></footer>
   </dialog>
   <script type="module" src="./bootstrap.mjs"></script>
 </body>

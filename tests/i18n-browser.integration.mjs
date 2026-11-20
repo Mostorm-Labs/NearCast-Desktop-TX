@@ -10,7 +10,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const root=resolve('dist'),types={'.mjs':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'};
 const server=createServer(async(req,res)=>{try{const file=resolve(root,'.'+new URL(req.url,'http://localhost').pathname);if(!file.startsWith(root+sep)){res.writeHead(403).end();return;}res.setHeader('content-type',types[extname(file)]||'text/html');res.end(await readFile(file));}catch{res.writeHead(404).end();}});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-const browser=await chromium.launch({channel:'msedge',headless:true});
+const browser=await chromium.launch({channel:process.env.BROWSER_CHANNEL||'msedge',headless:true});
 try{
   if(process.env.NEARCAST_UI_ARTIFACTS)await mkdir(process.env.NEARCAST_UI_ARTIFACTS,{recursive:true});
   for(const [locale,want]of [['zh-CN','zh-CN'],['ja-JP','ja'],['de-DE','de'],['en-US','en']]){
@@ -52,7 +52,7 @@ try{
       if(process.env.NEARCAST_UI_ARTIFACTS)await page.screenshot({path:join(process.env.NEARCAST_UI_ARTIFACTS,'feedback-'+language+'.png')});
       await page.locator('[data-settings-tab=updates]').click();
       await page.waitForFunction(()=>document.querySelector('#app-version').textContent);
-      assert.ok(!(await page.locator('#update-button').innerText()).includes('update.'));
+      assert.ok(!(await page.locator('#settings-update-check').innerText()).includes('update.'));
       await page.locator('[data-settings-tab=permissions]').click();
       if(process.env.NEARCAST_UI_ARTIFACTS){await mkdir(process.env.NEARCAST_UI_ARTIFACTS,{recursive:true});await page.screenshot({path:join(process.env.NEARCAST_UI_ARTIFACTS,'permissions-'+language+'.png')});}
       await page.locator('[data-settings-tab=general]').click();

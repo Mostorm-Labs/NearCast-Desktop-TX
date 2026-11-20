@@ -51,7 +51,7 @@ h1, .settings-content label, .quality-heading, .trust-check { color: var(--text-
 .window-error { background: var(--accent-soft); color: var(--text-primary); }
 .refresh, .device-action, .panel-eyebrow, .section-kicker,
 .settings-tabs button[aria-selected="true"], .settings-content #settings-update-status,
-#settings-update-release h2, .casting-heading h1 span { color: var(--accent-text); }
+.casting-heading h1 span { color: var(--accent-text); }
 .settings-content .permission-detail, .onboarding-permission-text p,
 .feedback-fields > label, .platform-status, .group-title, .device-meta,
 .quality-heading span:last-child, .quality-grid label, .quality-help,
@@ -73,7 +73,7 @@ h1, .settings-content label, .quality-heading, .trust-check { color: var(--text-
 }
 .settings-content .settings-card, .casting-preferences, .update-dialog-header { background: var(--panel-background); }
 .primary, .danger, .settings-page .button.primary, .update-dialog .button.primary,
-#update-button[data-available="true"], #connect-panel-code #connect-button,
+#connect-panel-code #connect-button,
 .casting-panel .primary, .casting-panel .danger, .onboarding-access,
 .onboarding-requirement:not(.optional) { color: var(--on-accent); background: var(--accent); box-shadow: none; }
 .secondary, .settings-page .button.secondary, .update-dialog .button.secondary, .casting-panel .secondary,

@@ -48,6 +48,20 @@ test('periodic updates do not interrupt the user with a modal', async()=>{
   await manager.check();
   assert.equal(manager.state.status,'ready');assert.equal(manager.state.prompt,false);
 });
+test('an explicit check opens release details before download finishes, even after dismissal',async()=>{
+  let finishDownload;
+  const manager=new UpdateManager({invoke:command=>{
+    if(command==='nearcast_update_check')return available;
+    if(command==='nearcast_update_download')return new Promise(resolve=>{finishDownload=resolve;});
+    assert.fail('unexpected updater command: '+command);
+  }});
+  manager.dismissed.add('0.1.0.3');
+  const pending=manager.check({interactive:true});await Promise.resolve();
+  assert.equal(manager.state.status,'downloading');
+  assert.equal(manager.state.prompt,true,'manual checks must reveal what is being downloaded');
+  finishDownload({...available,status:'ready'});await pending;
+  manager.stop();
+});
 test('a failed download cannot mark a new version ready using an older cache', async()=>{
   const manager=new UpdateManager({invoke:async command=>{
     if(command==='nearcast_update_check')return {...available,update:{...available.update,version:'0.1.0.4'}};

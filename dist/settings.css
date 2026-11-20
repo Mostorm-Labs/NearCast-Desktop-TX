@@ -74,16 +74,18 @@
 .version-card strong { font-size: 16px; line-height: 24px; overflow-wrap: anywhere; }
 .update-state-heading { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
 .update-state-heading #settings-update-status { color: var(--accent); font-size: 16px; font-weight: 600; line-height: 24px; }
-.update-state-heading img { flex: 0 0 auto; }
-#settings-update-release h2 { margin: 0 0 8px; color: var(--accent); }
-#settings-update-notes { margin: 0; min-height: 100px; color: var(--text-primary); font: inherit; font-size: 14px; line-height: 19px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .settings-update-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
 .settings-page .button, .update-dialog .button { min-height: 36px; margin: 0; padding: 7px 14px; border: 1px solid transparent; border-radius: 8px; color: var(--text-primary); font: inherit; font-size: 14px; font-weight: 500; line-height: 20px; cursor: pointer; }
 .settings-page .button.primary, .update-dialog .button.primary { background: var(--accent); box-shadow: none; }
 .settings-page .button.secondary, .update-dialog .button.secondary { border-color: var(--text-tertiary); background: #429bfc03; box-shadow: inset 1px -1px 5px #ffffff1a,inset -1px -1px 5px #ffffff1a; }
 .settings-page .button:hover, .update-dialog .button:hover { filter: brightness(1.1); }
 .settings-page .button:disabled, .update-dialog .button:disabled { opacity: .45; cursor: default; }
-#update-button[data-available="true"] { padding: 7px 14px; border-radius: 8px; color: var(--text-primary); background: var(--accent); }
+.app-version-button { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 4px 0; border: 0; border-radius: 4px; color: inherit; background: transparent; font: inherit; white-space: nowrap; cursor: default; }
+.app-version-button:disabled { opacity: 1; -webkit-text-fill-color: currentColor; }
+.app-version-button[data-available="true"] { color: var(--accent); font-weight: 600; }
+.app-version-button[data-available="true"]:enabled { cursor: pointer; }
+.app-version-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.app-version-button img { flex: 0 0 auto; }
 .settings-content #feedback-form { display: flex; flex-direction: column; gap: 12px; width: 100%; min-height: 100%; max-width: none; }
 #settings-feedback { height: 100%; }
 .feedback-fields { display: grid; gap: 8px; }
@@ -98,19 +100,25 @@
 .feedback-actions { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-top: auto; }
 .feedback-actions #feedback-status { flex: 1; min-width: 0; font-size: 12px; line-height: 18px; }
 .settings-content #feedback-submit { flex: 0 0 auto; margin-left: auto; }
-.update-dialog { width: min(524px,calc(100vw - 32px)); max-height: min(85vh,680px); padding: 0; overflow: auto; border: 2px solid var(--panel-border); border-radius: 18px; color: var(--text-primary); background: #1e212e; box-shadow: 0 0 5px #0003; }
+.update-dialog { width: min(524px,calc(100vw - 32px)); max-height: min(85vh,680px); padding: 0; overflow: hidden; border: 2px solid var(--panel-border); border-radius: 18px; color: var(--text-primary); background: #1e212e; box-shadow: 0 0 5px #0003; }
+.update-dialog[open] { display: flex; flex-direction: column; }
 .update-dialog::backdrop { background: #0009; backdrop-filter: blur(2px); }
-.update-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding: 12px 24px; background: var(--panel-background); }
+.update-dialog-header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding: 12px 24px; background: var(--panel-background); }
 .update-dialog-header #update-title { margin: 0; color: var(--text-primary); font-size: 16px; font-weight: 500; line-height: 24px; }
 #update-close { display: grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; padding: 4px; border: 0; border-radius: 4px; background: transparent; cursor: pointer; }
 #update-close:hover { background: #ffffff0d; }
-.update-dialog-body { display: flex; flex-direction: column; gap: 16px; padding: 24px; }
+.update-dialog-body { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: auto; gap: 16px; padding: 24px; }
+.update-dialog-body > * { flex-shrink: 0; }
+.update-version-summary { padding: 16px; border-radius: 12px; background: var(--panel-background); }
+.update-version-summary p { margin: 0 0 4px; font-size: 12px; line-height: 18px; }
+#update-target-version { color: var(--accent); }
+.update-dialog #update-notes-title { margin: 0 0 -8px; font-size: 14px; line-height: 20px; }
 .update-dialog #update-detail { margin: 0; color: var(--text-tertiary); font-size: 12px; line-height: 16px; }
-.update-dialog #update-notes { margin: 0; max-height: 220px; color: var(--text-secondary); font: inherit; font-size: 13px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.update-dialog #update-notes { margin: 0; max-height: none; overflow: visible; color: var(--text-secondary); font: inherit; font-size: 13px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .update-dialog #update-progress { display: block; width: 100%; height: 4px; border: 0; border-radius: 4px; background: var(--panel-border); accent-color: var(--accent); }
 .update-dialog #update-progress::-webkit-progress-bar { border-radius: 4px; background: var(--panel-border); }
 .update-dialog #update-progress::-webkit-progress-value { border-radius: 4px; background: var(--accent); }
-.update-dialog .update-actions { display: flex; justify-content: flex-end; gap: 12px; margin: 16px 0 0; }
+.update-dialog .update-actions { display: flex; flex: 0 0 auto; justify-content: flex-end; gap: 12px; margin: 0; padding: 16px 24px; border-top: 1px solid var(--panel-border); background: inherit; }
 .settings-content p.error, .update-dialog p.error { color: #ff9da8; }
 @media (max-width: 680px) {
   .settings-page { padding-right: 16px; padding-left: 16px; }
